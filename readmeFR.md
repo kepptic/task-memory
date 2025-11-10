@@ -274,12 +274,12 @@ cp CLAUDE.md.exemple votre-projet/CLAUDE.md
 
 **Pour Claude Code (CLI)** : Un skill dédié est disponible !
 ```bash
-# Copier le skill dans votre configuration globale Claude Code
-cp .claude/skills/markdown-task-manager.md ~/.claude/skills/
+# Copier le dossier du skill (le metadata est dans SKILL.md)
+cp -R .claude/skills/markdown-task-manager ~/.claude/skills/
 # Redémarrer Claude Code pour activer le skill
 ```
 
-Le skill `markdown-task-manager` permet à Claude Code de gérer automatiquement vos tâches avec le format strict requis. Une fois installé globalement, il est disponible sur tous vos projets.
+Claude Code lit les métadonnées dans `SKILL.md`, d'où la nécessité de copier tout le dossier. Le skill `markdown-task-manager` permet à Claude Code de gérer automatiquement vos tâches avec le format strict requis. Une fois installé globalement, il est disponible sur tous vos projets.
 
 **Utilisation du skill Claude Code :**
 Une fois le skill installé et Claude Code redémarré, le skill détectera automatiquement les projets contenant `kanban.md` et `archive.md`. Vous pouvez simplement demander :
