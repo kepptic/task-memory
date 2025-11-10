@@ -4,6 +4,9 @@
 
 Un système complet de gestion de tâches qui transforme vos fichiers Markdown en un tableau Kanban interactif, sans base de données ni serveur. Parfait pour les développeurs, les équipes distribuées et l'intégration avec des assistants IA.
 
+![Aperçu de l'Application](docs/images/app-overview.jpg)
+*Vue d'ensemble de l'interface Markdown Task Manager avec tableau Kanban, filtres et gestion des tâches*
+
 ---
 
 ## 🎯 Qu'est-ce que c'est ?
@@ -409,6 +412,9 @@ Avec ce système, vous avez :
 
 ### 1. Vue Kanban Interactive
 
+![Tableau Kanban](docs/images/kanban-board.jpg)
+*Tableau Kanban interactif avec drag & drop, colonnes personnalisables et compteurs de tâches*
+
 - **Colonnes personnalisables** : Créez et organisez vos propres colonnes
   - Par défaut : 📝 À faire, 🚀 En cours, 👀 Review, ✅ Terminé
   - Modifiables via le bouton "⚙️ Colonnes"
@@ -417,6 +423,9 @@ Avec ce système, vous avez :
 - **Compteurs** : Nombre de tâches affiché dans chaque colonne
 
 ### 2. Gestion Complète des Tâches
+
+![Modale de Création de Tâche](docs/images/task-modal.jpg)
+*Modale complète de création et d'édition de tâches avec tous les champs de métadonnées et sous-tâches*
 
 **Création :**
 - Formulaire complet avec tous les champs
@@ -445,6 +454,9 @@ Avec ce système, vous avez :
 - Sauvegarde automatique
 
 ### 3. Filtres Avancés
+
+![Filtres Avancés](docs/images/filters.jpg)
+*Système de filtrage avancé avec filtres par priorité, tags, catégories et utilisateurs*
 
 **4 types de filtres cumulables :**
 
@@ -478,6 +490,9 @@ Avec ce système, vous avez :
 - Suggestions contextuelles pendant la saisie
 
 ### 4. Système d'Archives
+
+![Vue Archives](docs/images/archives.jpg)
+*Vue des archives montrant les tâches complétées avec capacités de recherche et restauration*
 
 **Archivage :**
 - Déplacez les tâches terminées vers `archive.md`
@@ -535,6 +550,9 @@ Avec ce système, vous avez :
 **Note :** Le contenu des fichiers markdown (kanban.md, archive.md) reste dans la langue de votre choix.
 
 ### 7. Multi-Projets
+
+![Sélecteur Multi-Projets](docs/images/multi-project.jpg)
+*Sélecteur rapide de projets affichant les projets récents avec noms personnalisés*
 
 **Gestion de projets :**
 - Mémorisation des 10 derniers projets utilisés
@@ -929,7 +947,7 @@ git merge feature/TASK-042-notifications
 
 ### Performance
 
-- **Fichier HTML** : ~89 Ko (tout inclus, aucune dépendance)
+- **Fichier HTML** : ~144 Ko (tout inclus, aucune dépendance)
 - **Chargement** : Instantané (< 100ms)
 - **Parsing** : < 50ms pour 1000 tâches
 - **Mémoire** : ~10 Mo (pour 500 tâches)

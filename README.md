@@ -6,6 +6,9 @@
 
 A complete task management system that transforms your Markdown files into an interactive Kanban board, without database or server. Perfect for developers, distributed teams and integration with AI assistants.
 
+![Application Overview](docs/images/app-overview.jpg)
+*Overview of the Markdown Task Manager interface with Kanban board, filters, and task management*
+
 ---
 
 ## 🎯 What is it?
@@ -411,6 +414,9 @@ With this system, you have:
 
 ### 1. Interactive Kanban View
 
+![Kanban Board](docs/images/kanban-board.jpg)
+*Interactive Kanban board with drag & drop, customizable columns, and task counters*
+
 - **Customizable columns**: Create and organize your own columns
   - Default: 📝 To Do, 🚀 In Progress, 👀 Review, ✅ Done
   - Modifiable via "⚙️ Columns" button
@@ -419,6 +425,9 @@ With this system, you have:
 - **Counters**: Number of tasks displayed in each column
 
 ### 2. Complete Task Management
+
+![Task Creation Modal](docs/images/task-modal.jpg)
+*Complete task creation and editing modal with all metadata fields and subtasks*
 
 **Creation:**
 - Complete form with all fields
@@ -447,6 +456,9 @@ With this system, you have:
 - Auto-save
 
 ### 3. Advanced Filters
+
+![Advanced Filters](docs/images/filters.jpg)
+*Advanced filtering system with priority, tags, categories, and users filters*
 
 **4 types of cumulative filters:**
 
@@ -480,6 +492,9 @@ With this system, you have:
 - Contextual suggestions during input
 
 ### 4. Archive System
+
+![Archive View](docs/images/archives.jpg)
+*Archive view showing completed tasks with search and restoration capabilities*
 
 **Archiving:**
 - Move completed tasks to `archive.md`
@@ -537,6 +552,9 @@ With this system, you have:
 **Note:** The markdown files (kanban.md, archive.md) content remains in your chosen language.
 
 ### 7. Multi-Project
+
+![Multi-Project Selector](docs/images/multi-project.jpg)
+*Quick project switcher showing recent projects with custom names*
 
 **Project management:**
 - Memorization of last 10 projects used
@@ -931,7 +949,7 @@ git merge feature/TASK-042-notifications
 
 ### Performance
 
-- **HTML file**: ~89 KB (everything included, no dependencies)
+- **HTML file**: ~144 KB (everything included, no dependencies)
 - **Loading**: Instant (< 100ms)
 - **Parsing**: < 50ms for 1000 tasks
 - **Memory**: ~10 MB (for 500 tasks)
