@@ -1,0 +1,3155 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markdown Task Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: #ffffff;
+            --border-color: #e0e0e0;
+            --text-primary: #212121;
+            --text-secondary: #757575;
+            --accent: #2196F3;
+            --accent-hover: #1976D2;
+            --shadow: 0 2px 4px rgba(0,0,0,0.1);
+            --shadow-hover: 0 4px 8px rgba(0,0,0,0.15);
+
+            /* Priority colors */
+            --priority-critical: #EF4444;
+            --priority-high: #F97316;
+            --priority-medium: #EAB308;
+            --priority-low: #22C55E;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 2rem;
+            box-shadow: var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .btn {
+            padding: 0.6rem 1.2rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            box-shadow: var(--shadow-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: #e8e8e8;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .welcome {
+            text-align: center;
+            padding: 4rem 2rem;
+        }
+
+        .welcome h2 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+
+        .welcome p {
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+
+        #kanbanView {
+            margin: 0;
+            padding: 0;
+        }
+
+        .kanban-board {
+            display: flex;
+            gap: 1.5rem;
+            margin: 0;
+            padding: 2rem;
+            overflow-x: auto;
+            justify-content: flex-start;
+        }
+
+        .kanban-column {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: var(--shadow);
+            min-width: 320px;
+            width: 320px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .column-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .column-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .column-count {
+            background: var(--bg-primary);
+            padding: 0.25rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .task-list {
+            min-height: 100px;
+            flex: 1; /* Grow to fill column height */
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .task-card {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 1rem;
+            cursor: move;
+            transition: all 0.2s;
+        }
+
+        .task-card:hover {
+            box-shadow: var(--shadow-hover);
+            transform: translateY(-2px);
+        }
+
+        .task-card.dragging {
+            opacity: 0.5;
+        }
+
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 0.5rem;
+        }
+
+        .task-id {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .task-title {
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .task-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .badge {
+            padding: 0.25rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge-priority {
+            color: white;
+        }
+
+        .badge-priority.Critical { background: var(--priority-critical); }
+        .badge-priority.High { background: var(--priority-high); }
+        .badge-priority.Medium { background: var(--priority-medium); }
+        .badge-priority.Low { background: var(--priority-low); }
+
+        .badge-category {
+            background: #E3F2FD;
+            color: #1565C0;
+        }
+
+        .badge-assignee {
+            background: #F3E5F5;
+            color: #6A1B9A;
+        }
+
+        .tag {
+            background: #FFF3E0;
+            color: #E65100;
+            padding: 0.2rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.7rem;
+        }
+
+        .task-description {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .task-subtasks {
+            margin-top: 0.75rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .subtask-progress {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 4px;
+            background: var(--bg-primary);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.3s;
+        }
+
+        /* Code block styles */
+        pre {
+            margin: 1rem 0;
+            border-radius: 6px;
+            overflow-x: auto;
+            background: #2d2d2d;
+            padding: 1rem;
+        }
+
+        pre code {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.5;
+            color: #f8f8f2;
+            display: block;
+        }
+
+        /* Inline code styling */
+        code {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 0.125rem 0.35rem;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+        }
+
+        /* Override for code inside pre */
+        pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            padding: 2rem;
+            width: 80%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-header h2 {
+            font-size: 1.5rem;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-family: inherit;
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .task-detail {
+            line-height: 1.8;
+        }
+
+        .task-detail strong {
+            color: var(--text-primary);
+        }
+
+        .actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .notification {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: white;
+            padding: 1rem 1.5rem;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            display: none;
+            align-items: center;
+            gap: 0.75rem;
+            z-index: 1001;
+        }
+
+        .notification.show {
+            display: flex;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .notification.success {
+            border-left: 4px solid #22C55E;
+        }
+
+        .notification.error {
+            border-left: 4px solid #EF4444;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid var(--bg-primary);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+        }
+
+        .debug-info {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <h1 id="headerTitle">📋 Task Manager</h1>
+            <div style="display: flex; gap: 0.75rem; align-items: center;">
+                <select id="languageSelector" onchange="setLanguage(this.value)" style="padding: 0.6rem 1rem; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.9rem; background: white; cursor: pointer;">
+                    <option value="en">English</option>
+                    <option value="fr">Français</option>
+                </select>
+                <select id="projectSelector" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.9rem; background: white; cursor: pointer; min-width: 180px;">
+                </select>
+                <button id="renameProjectBtn" class="btn btn-secondary" style="display: none; padding: 0.6rem;" title="Renommer le projet" onclick="renameCurrentProject()">✏️</button>
+                <button id="selectFolderBtn" class="btn btn-primary">📁 Dossier</button>
+                <button id="newTaskBtn" class="btn btn-secondary" style="display: none;">➕ Tâche</button>
+                <button id="archiveBtn" class="btn btn-secondary" style="display: none;">📦 Archives</button>
+                <button id="manageColsBtn" class="btn btn-secondary" style="display: none;">⚙️ Colonnes</button>
+            </div>
+        </div>
+    </header>
+    <div id="filterBar" style="display: none; background: white; border-bottom: 1px solid var(--border); padding: 1rem 0;">
+        <div style="max-width: 1200px; margin: 0 auto; padding: 0 2rem;">
+            <!-- Global Search -->
+            <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                <div style="position: relative; max-width: 600px; width: 100%;">
+                    <input
+                        type="text"
+                        id="globalSearchInput"
+                        placeholder="Rechercher dans les tâches..."
+                        style="width: 100%; padding: 0.75rem 3rem 0.75rem 1rem; border: 2px solid #cbd5e0; border-radius: 8px; font-size: 1rem; transition: border-color 0.2s;"
+                        oninput="applyGlobalSearch()"
+                    >
+                    <button
+                        id="clearGlobalSearch"
+                        onclick="clearGlobalSearch()"
+                        style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: #718096; cursor: pointer; font-size: 1.2rem; padding: 0.5rem; display: none;"
+                        title="Clear search"
+                    >✕</button>
+                </div>
+            </div>
+            <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; justify-content: center;">
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <label style="font-weight: 500; font-size: 0.9rem;">Tags:</label>
+                    <select id="filterTagSelect" style="padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px; min-width: 150px;">
+                        <option value="">Sélectionner...</option>
+                    </select>
+                    <button onclick="addFilter('tag')" class="btn btn-primary" style="padding: 0.5rem 0.75rem; font-size: 0.85rem;">+</button>
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <label style="font-weight: 500; font-size: 0.9rem;">Catégorie:</label>
+                    <select id="filterCategorySelect" style="padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px; min-width: 150px;">
+                        <option value="">Sélectionner...</option>
+                    </select>
+                    <button onclick="addFilter('category')" class="btn btn-primary" style="padding: 0.5rem 0.75rem; font-size: 0.85rem;">+</button>
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <label style="font-weight: 500; font-size: 0.9rem;">Utilisateur:</label>
+                    <select id="filterUserSelect" style="padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px; min-width: 150px;">
+                        <option value="">Sélectionner...</option>
+                    </select>
+                    <button onclick="addFilter('user')" class="btn btn-primary" style="padding: 0.5rem 0.75rem; font-size: 0.85rem;">+</button>
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <label style="font-weight: 500; font-size: 0.9rem;">Priorité:</label>
+                    <select id="filterPrioritySelect" style="padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px; min-width: 150px;">
+                        <option value="">Sélectionner...</option>
+                    </select>
+                    <button onclick="addFilter('priority')" class="btn btn-primary" style="padding: 0.5rem 0.75rem; font-size: 0.85rem;">+</button>
+                </div>
+                <button onclick="clearFilters()" class="btn btn-secondary" style="padding: 0.5rem 1rem;">✕ Tout effacer</button>
+            </div>
+            <div id="activeFilters" style="display: flex; gap: 0.5rem; flex-wrap: wrap; min-height: 32px; justify-content: center;"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div id="welcomeScreen" class="welcome">
+            <h2>Bienvenue ! 👋</h2>
+            <p>Sélectionnez le dossier contenant vos fichiers Markdown (kanban.md et archive.md)</p>
+            <button onclick="document.getElementById('selectFolderBtn').click()" class="btn btn-primary" style="font-size: 1.1rem; padding: 0.8rem 2rem;">
+                📁 Commencer
+            </button>
+            <div style="margin-top: 2rem; padding: 1.5rem; background: white; border-radius: 8px; max-width: 600px; margin-left: auto; margin-right: auto; text-align: left;">
+                <h3 style="margin-bottom: 1rem;">💡 Comment ça marche ?</h3>
+                <ol style="margin-left: 1.5rem; color: var(--text-secondary);">
+                    <li>Cliquez sur "Commencer" ci-dessus</li>
+                    <li>Sélectionnez le dossier contenant vos fichiers Markdown</li>
+                    <li>L'application charge automatiquement kanban.md</li>
+                    <li>Gérez vos tâches visuellement avec le Kanban</li>
+                    <li>Les modifications sont sauvegardées dans les fichiers Markdown</li>
+                </ol>
+                <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--text-secondary);">
+                    ⚠️ <strong>Navigateurs supportés</strong> : Chrome 86+, Edge 86+, Opera 72+
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div id="kanbanView" style="display: none;">
+        <div id="debugInfo" class="debug-info" style="display: none;"></div>
+        <div class="kanban-board" id="kanbanBoard"></div>
+    </div>
+
+    <!-- Modal Task Detail -->
+    <div id="taskModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Détails de la tâche</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div id="modalBody" class="task-detail"></div>
+            <div class="actions">
+                <button class="btn btn-secondary" onclick="closeModal()">Fermer</button>
+                <button class="btn btn-secondary" onclick="deleteCurrentTask()" style="background: #ef4444; color: white;">🗑️ Supprimer</button>
+                <button class="btn btn-secondary" onclick="archiveCurrentTask()" style="background: #f59e0b; color: white;">📦 Archiver</button>
+                <button class="btn btn-primary" id="editTaskBtn" onclick="editCurrentTask()">✏️ Modifier</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal New Task -->
+    <div id="newTaskModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Nouvelle tâche</h2>
+                <button class="close-btn" onclick="closeTaskModal()">&times;</button>
+            </div>
+            <form id="newTaskForm" style="padding: 1.5rem; background: #f8f9fa;">
+                <input type="hidden" id="taskEditId">
+                <div style="margin-bottom: 1rem;">
+                    <label for="taskTitle" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Titre *</label>
+                    <input type="text" id="taskTitle" required style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; background: white; box-sizing: border-box;">
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label for="taskStatus" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Colonne *</label>
+                    <select id="taskStatus" required style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; background: white; box-sizing: border-box;">
+                    </select>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                    <div>
+                        <label for="taskPriority" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Priorité</label>
+                        <select id="taskPriority" style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; background: white; box-sizing: border-box;">
+                            <option value="">Aucune</option>
+                            <option value="Critique">🔴 Critique</option>
+                            <option value="Haute">🟠 Haute</option>
+                            <option value="Moyenne">🟡 Moyenne</option>
+                            <option value="Basse">🟢 Basse</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="taskCategory" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Catégorie</label>
+                        <input type="text" id="taskCategory" list="categoriesList" placeholder="Frontend, Backend..." style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; background: white; box-sizing: border-box;">
+                    </div>
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label for="taskAssignee" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Assigné à</label>
+                    <input type="text" id="taskAssignee" list="usersList" placeholder="@alice" style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; background: white; box-sizing: border-box;">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                    <div>
+                        <label for="taskCreated" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Créé</label>
+                        <input type="date" id="taskCreated" style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; background: white; box-sizing: border-box;">
+                    </div>
+                    <div>
+                        <label for="taskStarted" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Commencé</label>
+                        <input type="date" id="taskStarted" style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; background: white; box-sizing: border-box;">
+                    </div>
+                    <div>
+                        <label for="taskDue" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Échéance</label>
+                        <input type="date" id="taskDue" style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; background: white; box-sizing: border-box;">
+                    </div>
+                    <div>
+                        <label for="taskCompleted" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Terminé</label>
+                        <input type="date" id="taskCompleted" style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; background: white; box-sizing: border-box;">
+                    </div>
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label for="taskTags" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Tags</label>
+                    <input type="text" id="taskTags" list="tagsList" placeholder="#bug #feature" style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; background: white; box-sizing: border-box;">
+                    <small style="color: var(--text-secondary); font-size: 0.85rem;">Séparez avec des espaces</small>
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label for="taskDescription" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Description</label>
+                    <textarea id="taskDescription" rows="4" style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; resize: vertical; background: white; box-sizing: border-box;"></textarea>
+                </div>
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Sous-tâches</label>
+                    <ul id="formSubtasksList" style="list-style: none; padding: 0; margin: 0 0 0.5rem 0; max-height: 150px; overflow-y: auto;"></ul>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="text" id="formSubtaskInput" placeholder="Ajouter une sous-tâche..." style="flex: 1; padding: 0.5rem; border: 2px solid #cbd5e0; border-radius: 4px; font-size: 0.9rem; background: white;">
+                        <button type="button" onclick="addFormSubtask()" class="btn btn-secondary" style="padding: 0.5rem 1rem;">+ Ajouter</button>
+                    </div>
+                </div>
+                <div style="margin-bottom: 1.5rem;">
+                    <label for="taskNotes" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Notes</label>
+                    <textarea id="taskNotes" rows="6" placeholder="Notes techniques, résultats, décisions, etc.&#10;&#10;Vous pouvez utiliser du Markdown :&#10;**Gras**, *Italique*, `code`, listes, liens..." style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem; resize: vertical; background: white; box-sizing: border-box; font-family: monospace;"></textarea>
+                    <small style="color: var(--text-secondary); font-size: 0.85rem;">Markdown supporté : **gras**, *italique*, `code`, listes, liens, **Sous-sections**:</small>
+                </div>
+                <div class="actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeTaskModal()">Annuler</button>
+                    <button type="submit" class="btn btn-primary" id="taskFormSubmitBtn">Créer</button>
+                </div>
+            </form>
+            <!-- Datalists for autocomplete -->
+            <datalist id="categoriesList"></datalist>
+            <datalist id="usersList"></datalist>
+            <datalist id="tagsList"></datalist>
+        </div>
+    </div>
+
+    <!-- Modal Manage Columns -->
+    <div id="columnsModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2 id="columnsModalTitle">Gérer les colonnes</h2>
+                <button class="close-btn" onclick="closeColumnsModal()">&times;</button>
+            </div>
+            <div style="padding: 1.5rem;">
+                <div id="columnsList"></div>
+                <button id="addColumnBtn" onclick="addColumn()" class="btn btn-primary" style="margin-top: 1rem; width: 100%;">+ Ajouter une colonne</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Archives -->
+    <div id="archiveModal" class="modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h2 id="archiveModalTitle">📦 Archives</h2>
+                <button class="close-btn" onclick="closeArchiveModal()">&times;</button>
+            </div>
+            <div style="padding: 1.5rem;">
+                <div style="margin-bottom: 1rem;">
+                    <input type="text" id="archiveSearch" placeholder="Rechercher dans les archives..." style="width: 100%; padding: 0.75rem; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 0.95rem;">
+                </div>
+                <div id="archiveList" style="max-height: 500px; overflow-y: auto;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div id="notification" class="notification">
+        <span id="notificationText"></span>
+    </div>
+
+    <script>
+        // File System Access API
+        let directoryHandle = null;
+        let kanbanFileHandle = null;
+        let currentKanbanContent = '';
+        let tasks = [];
+        let config = {};
+        let activeFilters = []; // Array of {type: 'tag'|'category'|'user', value: string}
+        let globalSearchTerm = ''; // Global search term for searching in title, description, and notes
+        let isEditMode = false;
+        let currentDetailTask = null;
+        let formSubtasks = [];
+        let archivedTasks = [];
+        let archiveFileHandle = null;
+
+        // ===== TRANSLATION SYSTEM =====
+        let currentLanguage = 'en'; // Default language
+
+        const translations = {
+            en: {
+                // Page title
+                'page.title': 'Markdown Task Manager',
+
+                // Header
+                'header.title': '📋 Task Manager',
+                'header.renameProject': 'Rename project',
+                'header.folder': '📁 Folder',
+                'header.newTask': '➕ Task',
+                'header.archives': '📦 Archives',
+                'header.columns': '⚙️ Columns',
+
+                // Filters
+                'filters.tags': 'Tags:',
+                'filters.category': 'Category:',
+                'filters.user': 'User:',
+                'filters.priority': 'Priority:',
+                'filters.select': 'Select...',
+                'filters.add': '+',
+                'filters.clearAll': '✕ Clear all',
+                'filters.search': 'Search in tasks...',
+                'filters.searchClear': '✕',
+
+                // Welcome screen
+                'welcome.title': 'Welcome! 👋',
+                'welcome.description': 'Select the folder containing your Markdown files (kanban.md and archive.md)',
+                'welcome.start': '📁 Get Started',
+                'welcome.howItWorks': '💡 How does it work?',
+                'welcome.step1': 'Click "Get Started" above',
+                'welcome.step2': 'Select the folder containing your Markdown files',
+                'welcome.step3': 'The app automatically loads kanban.md',
+                'welcome.step4': 'Manage your tasks visually with Kanban',
+                'welcome.step5': 'Changes are saved to Markdown files',
+                'welcome.browserWarning': '⚠️ Supported browsers: Chrome 86+, Edge 86+, Opera 72+',
+
+                // Task detail modal
+                'taskDetail.title': 'Task Details',
+                'taskDetail.close': 'Close',
+                'taskDetail.delete': '🗑️ Delete',
+                'taskDetail.archive': '📦 Archive',
+                'taskDetail.edit': '✏️ Edit',
+
+                // Task form modal
+                'taskForm.newTask': 'New Task',
+                'taskForm.editTask': 'Edit Task',
+                'taskForm.titleLabel': 'Title *',
+                'taskForm.columnLabel': 'Column *',
+                'taskForm.priorityLabel': 'Priority',
+                'taskForm.priorityNone': 'None',
+                'taskForm.priorityCritical': '🔴 Critical',
+                'taskForm.priorityHigh': '🟠 High',
+                'taskForm.priorityMedium': '🟡 Medium',
+                'taskForm.priorityLow': '🟢 Low',
+                'taskForm.categoryLabel': 'Category',
+                'taskForm.categoryPlaceholder': 'Frontend, Backend...',
+                'taskForm.assignedLabel': 'Assigned to',
+                'taskForm.assignedPlaceholder': '@alice',
+                'taskForm.createdLabel': 'Created',
+                'taskForm.startedLabel': 'Started',
+                'taskForm.dueLabel': 'Due',
+                'taskForm.completedLabel': 'Completed',
+                'taskForm.tagsLabel': 'Tags',
+                'taskForm.tagsPlaceholder': '#bug #feature',
+                'taskForm.tagsHelp': 'Separate with spaces',
+                'taskForm.descriptionLabel': 'Description',
+                'taskForm.subtasksLabel': 'Subtasks',
+                'taskForm.subtaskPlaceholder': 'Add a subtask...',
+                'taskForm.subtaskAdd': '+ Add',
+                'taskForm.notesLabel': 'Notes',
+                'taskForm.notesPlaceholder': 'Technical notes, results, decisions, etc...',
+                'taskForm.notesHelp': 'Markdown supported: **bold**, *italic*, `code`, lists, links, **Subsections**:',
+                'taskForm.cancel': 'Cancel',
+                'taskForm.create': 'Create',
+                'taskForm.save': 'Save',
+
+                // Columns modal
+                'columns.title': 'Manage Columns',
+                'columns.add': '+ Add Column',
+
+                // Archives modal
+                'archives.title': '📦 Archives',
+                'archives.search': 'Search in archives...',
+                'archives.empty': 'No archived tasks',
+
+                // Project selector
+                'projects.select': 'Select a project...',
+
+                // Task metadata in detail modal
+                'meta.priority': 'Priority',
+                'meta.status': 'Status',
+                'meta.category': 'Category',
+                'meta.assigned': 'Assigned to',
+                'meta.created': 'Creation date',
+                'meta.started': 'Start date',
+                'meta.due': 'Due date',
+                'meta.completed': 'Completion date',
+                'meta.tags': 'Tags',
+                'meta.description': 'Description',
+                'meta.subtasks': 'Subtasks ({completed}/{total})',
+                'meta.notes': 'Notes',
+
+                // Empty states
+                'empty.noTasks': 'No tasks',
+
+                // Buttons and actions
+                'action.restore': '↩️ Restore',
+                'action.delete': '🗑️',
+                'action.edit': '✏️',
+                'action.moveUp': 'Move up',
+                'action.moveDown': 'Move down',
+
+                // Tooltips
+                'tooltip.filterByCategory': 'Filter by this category',
+                'tooltip.filterByUser': 'Filter by this user',
+                'tooltip.filterByTag': 'Filter by this tag',
+                'tooltip.filterByPriority': 'Filter by this priority',
+                'tooltip.doubleClickEdit': 'Double-click to edit',
+                'tooltip.delete': 'Delete',
+
+                // Notifications
+                'notif.folderLoaded': 'Folder loaded successfully!',
+                'notif.folderError': 'Error loading folder',
+                'notif.initializingFolder': 'Initializing folder...',
+                'notif.filesInitialized': 'Files initialized successfully! (kanban.md and archive.md)',
+                'notif.filesError': 'Error creating files',
+                'notif.projectLoaded': 'Project "{name}" loaded',
+                'notif.permissionDenied': 'Permission denied for this project',
+                'notif.projectError': 'Error switching project',
+                'notif.projectRenamed': 'Project renamed successfully',
+                'notif.renameError': 'Error renaming',
+                'notif.projectRestored': 'Project restored automatically',
+                'notif.taskMoved': 'Task moved!',
+                'notif.taskEdited': 'Task {id} updated!',
+                'notif.taskCreated': 'Task {id} created!',
+                'notif.taskArchived': 'Task archived!',
+                'notif.taskDeleted': 'Task permanently deleted',
+                'notif.taskRestored': 'Task restored to its original column!',
+
+                // Prompts and confirmations
+                'prompt.projectName': 'Project name (leave empty to use "{name}"):',
+                'prompt.renameProject': 'New project name:',
+                'prompt.columnName': 'Column name:',
+                'prompt.columnId': 'Column ID (e.g., todo, done):',
+                'prompt.editSubtask': 'Edit subtask:',
+                'confirm.deleteColumn': 'Delete this column?',
+                'confirm.deleteSubtask': 'Delete this subtask?',
+                'confirm.archiveTask': 'Archive task "{title}"?',
+                'confirm.deleteTask': '⚠️ WARNING: Permanently delete task "{title}"?\n\nThis action cannot be undone.',
+                'confirm.deleteTaskFromArchive': '⚠️ WARNING: Permanently delete task "{title}"?\n\nThis action cannot be undone.\n\nIf you want to keep it in history, use "Archive" instead.',
+
+                // Alerts
+                'alert.browserNotSupported': 'Your browser does not support the File System Access API.\n\nPlease use Chrome 86+, Edge 86+ or Opera 72+.',
+
+                // Subtasks in detail modal
+                'subtask.newPlaceholder': 'New subtask...',
+
+                // Markdown generation
+                'markdown.archiveTitle': '# Task Archive',
+                'markdown.archiveDesc': '> Archived tasks',
+                'markdown.archiveSection': '## ✅ Archives',
+                'markdown.configSection': '## ⚙️ Configuration',
+                'markdown.configColumns': '**Columns**:',
+                'markdown.configCategories': '**Categories**:',
+                'markdown.configUsers': '**Users**:',
+                'markdown.configPriorities': '**Priorities**:',
+                'markdown.configTags': '**Tags**:',
+
+                // Language selector
+                'language.label': 'Language:',
+                'language.en': 'English',
+                'language.fr': 'Français'
+            },
+            fr: {
+                // Page title
+                'page.title': 'Gestionnaire de Tâches Markdown',
+
+                // Header
+                'header.title': '📋 Task Manager',
+                'header.renameProject': 'Renommer le projet',
+                'header.folder': '📁 Dossier',
+                'header.newTask': '➕ Tâche',
+                'header.archives': '📦 Archives',
+                'header.columns': '⚙️ Colonnes',
+
+                // Filters
+                'filters.tags': 'Tags:',
+                'filters.category': 'Catégorie:',
+                'filters.user': 'Utilisateur:',
+                'filters.priority': 'Priorité:',
+                'filters.select': 'Sélectionner...',
+                'filters.add': '+',
+                'filters.clearAll': '✕ Tout effacer',
+                'filters.search': 'Rechercher dans les tâches...',
+                'filters.searchClear': '✕',
+
+                // Welcome screen
+                'welcome.title': 'Bienvenue ! 👋',
+                'welcome.description': 'Sélectionnez le dossier contenant vos fichiers Markdown (kanban.md et archive.md)',
+                'welcome.start': '📁 Commencer',
+                'welcome.howItWorks': '💡 Comment ça marche ?',
+                'welcome.step1': 'Cliquez sur "Commencer" ci-dessus',
+                'welcome.step2': 'Sélectionnez le dossier contenant vos fichiers Markdown',
+                'welcome.step3': 'L\'application charge automatiquement kanban.md',
+                'welcome.step4': 'Gérez vos tâches visuellement avec le Kanban',
+                'welcome.step5': 'Les modifications sont sauvegardées dans les fichiers Markdown',
+                'welcome.browserWarning': '⚠️ Navigateurs supportés : Chrome 86+, Edge 86+, Opera 72+',
+
+                // Task detail modal
+                'taskDetail.title': 'Détails de la tâche',
+                'taskDetail.close': 'Fermer',
+                'taskDetail.delete': '🗑️ Supprimer',
+                'taskDetail.archive': '📦 Archiver',
+                'taskDetail.edit': '✏️ Modifier',
+
+                // Task form modal
+                'taskForm.newTask': 'Nouvelle tâche',
+                'taskForm.editTask': 'Modifier la tâche',
+                'taskForm.titleLabel': 'Titre *',
+                'taskForm.columnLabel': 'Colonne *',
+                'taskForm.priorityLabel': 'Priorité',
+                'taskForm.priorityNone': 'Aucune',
+                'taskForm.priorityCritical': '🔴 Critique',
+                'taskForm.priorityHigh': '🟠 Haute',
+                'taskForm.priorityMedium': '🟡 Moyenne',
+                'taskForm.priorityLow': '🟢 Basse',
+                'taskForm.categoryLabel': 'Catégorie',
+                'taskForm.categoryPlaceholder': 'Frontend, Backend...',
+                'taskForm.assignedLabel': 'Assigné à',
+                'taskForm.assignedPlaceholder': '@alice',
+                'taskForm.createdLabel': 'Créé',
+                'taskForm.startedLabel': 'Commencé',
+                'taskForm.dueLabel': 'Échéance',
+                'taskForm.completedLabel': 'Terminé',
+                'taskForm.tagsLabel': 'Tags',
+                'taskForm.tagsPlaceholder': '#bug #feature',
+                'taskForm.tagsHelp': 'Séparez avec des espaces',
+                'taskForm.descriptionLabel': 'Description',
+                'taskForm.subtasksLabel': 'Sous-tâches',
+                'taskForm.subtaskPlaceholder': 'Ajouter une sous-tâche...',
+                'taskForm.subtaskAdd': '+ Ajouter',
+                'taskForm.notesLabel': 'Notes',
+                'taskForm.notesPlaceholder': 'Notes techniques, résultats, décisions, etc...',
+                'taskForm.notesHelp': 'Markdown supporté : **gras**, *italique*, `code`, listes, liens, **Sous-sections**:',
+                'taskForm.cancel': 'Annuler',
+                'taskForm.create': 'Créer',
+                'taskForm.save': 'Enregistrer',
+
+                // Columns modal
+                'columns.title': 'Gérer les colonnes',
+                'columns.add': '+ Ajouter une colonne',
+
+                // Archives modal
+                'archives.title': '📦 Archives',
+                'archives.search': 'Rechercher dans les archives...',
+                'archives.empty': 'Aucune tâche archivée',
+
+                // Project selector
+                'projects.select': 'Sélectionner un projet...',
+
+                // Task metadata in detail modal
+                'meta.priority': 'Priorité',
+                'meta.status': 'Statut',
+                'meta.category': 'Catégorie',
+                'meta.assigned': 'Assigné à',
+                'meta.created': 'Date de création',
+                'meta.started': 'Date de début',
+                'meta.due': 'Date d\'échéance',
+                'meta.completed': 'Date de fin',
+                'meta.tags': 'Tags',
+                'meta.description': 'Description',
+                'meta.subtasks': 'Sous-tâches ({completed}/{total})',
+                'meta.notes': 'Notes',
+
+                // Empty states
+                'empty.noTasks': 'Aucune tâche',
+
+                // Buttons and actions
+                'action.restore': '↩️ Restaurer',
+                'action.delete': '🗑️',
+                'action.edit': '✏️',
+                'action.moveUp': 'Déplacer vers le haut',
+                'action.moveDown': 'Déplacer vers le bas',
+
+                // Tooltips
+                'tooltip.filterByCategory': 'Filtrer par cette catégorie',
+                'tooltip.filterByUser': 'Filtrer par cet utilisateur',
+                'tooltip.filterByTag': 'Filtrer par ce tag',
+                'tooltip.filterByPriority': 'Filtrer par cette priorité',
+                'tooltip.doubleClickEdit': 'Double-cliquez pour éditer',
+                'tooltip.delete': 'Supprimer',
+
+                // Notifications
+                'notif.folderLoaded': 'Dossier chargé avec succès !',
+                'notif.folderError': 'Erreur lors de la sélection du dossier',
+                'notif.initializingFolder': 'Initialisation du dossier...',
+                'notif.filesInitialized': 'Fichiers initialisés avec succès ! (kanban.md et archive.md)',
+                'notif.filesError': 'Erreur lors de la création des fichiers',
+                'notif.projectLoaded': 'Projet "{name}" chargé',
+                'notif.permissionDenied': 'Permission refusée pour ce projet',
+                'notif.projectError': 'Erreur lors du changement de projet',
+                'notif.projectRenamed': 'Projet renommé avec succès',
+                'notif.renameError': 'Erreur lors du renommage',
+                'notif.projectRestored': 'Projet restauré automatiquement',
+                'notif.taskMoved': 'Tâche déplacée !',
+                'notif.taskEdited': 'Tâche {id} modifiée !',
+                'notif.taskCreated': 'Tâche {id} créée !',
+                'notif.taskArchived': 'Tâche archivée !',
+                'notif.taskDeleted': 'Tâche supprimée définitivement',
+                'notif.taskRestored': 'Tâche restaurée dans sa colonne d\'origine !',
+
+                // Prompts and confirmations
+                'prompt.projectName': 'Nom du projet (laisser vide pour utiliser "{name}") :',
+                'prompt.renameProject': 'Nouveau nom du projet :',
+                'prompt.columnName': 'Nom de la colonne:',
+                'prompt.columnId': 'ID de la colonne (ex: todo, done):',
+                'prompt.editSubtask': 'Modifier la sous-tâche:',
+                'confirm.deleteColumn': 'Supprimer cette colonne ?',
+                'confirm.deleteSubtask': 'Supprimer cette sous-tâche ?',
+                'confirm.archiveTask': 'Archiver la tâche "{title}" ?',
+                'confirm.deleteTask': '⚠️ ATTENTION : Supprimer définitivement la tâche "{title}" ?\n\nCette action est irréversible.',
+                'confirm.deleteTaskFromArchive': '⚠️ ATTENTION : Supprimer définitivement la tâche "{title}" ?\n\nCette action est irréversible.\n\nSi vous voulez la conserver dans l\'historique, utilisez plutôt "Archiver".',
+
+                // Alerts
+                'alert.browserNotSupported': 'Votre navigateur ne supporte pas la File System Access API.\n\nVeuillez utiliser Chrome 86+, Edge 86+ ou Opera 72+.',
+
+                // Subtasks in detail modal
+                'subtask.newPlaceholder': 'Nouvelle sous-tâche...',
+
+                // Markdown generation
+                'markdown.archiveTitle': '# Archive des Tâches',
+                'markdown.archiveDesc': '> Tâches archivées',
+                'markdown.archiveSection': '## ✅ Archives',
+                'markdown.configSection': '## ⚙️ Configuration',
+                'markdown.configColumns': '**Colonnes**:',
+                'markdown.configCategories': '**Catégories**:',
+                'markdown.configUsers': '**Utilisateurs**:',
+                'markdown.configPriorities': '**Priorités**:',
+                'markdown.configTags': '**Tags**:',
+
+                // Language selector
+                'language.label': 'Langue :',
+                'language.en': 'English',
+                'language.fr': 'Français'
+            }
+        };
+
+        // Translation function
+        function t(key, params = {}) {
+            let text = translations[currentLanguage]?.[key] || translations['en'][key] || key;
+
+            // Replace parameters in text
+            Object.keys(params).forEach(param => {
+                text = text.replace(`{${param}}`, params[param]);
+            });
+
+            return text;
+        }
+
+        // Update all static text elements in the UI
+        function updateStaticTexts() {
+            // Update page title
+            document.title = t('page.title');
+
+            // Update header
+            document.getElementById('headerTitle').textContent = t('header.title');
+            document.getElementById('renameProjectBtn').title = t('header.renameProject');
+            document.getElementById('selectFolderBtn').innerHTML = t('header.folder');
+            document.getElementById('newTaskBtn').innerHTML = t('header.newTask');
+            document.getElementById('archiveBtn').innerHTML = t('header.archives');
+            document.getElementById('manageColsBtn').innerHTML = t('header.columns');
+
+            // Update language selector to match current language
+            document.getElementById('languageSelector').value = currentLanguage;
+
+            // Update welcome screen
+            renderWelcomeScreen();
+
+            // Update modals
+            renderTaskDetailModal();
+            updateTaskFormLabels();
+            renderColumnsModal();
+            renderArchivesModal();
+
+            // Update filters
+            updateFilterLabels();
+        }
+
+        // Render welcome screen with translations
+        function renderWelcomeScreen() {
+            const welcomeScreen = document.getElementById('welcomeScreen');
+            if (welcomeScreen) {
+                welcomeScreen.innerHTML = `
+            <h2>${t('welcome.title')}</h2>
+            <p>${t('welcome.description')}</p>
+            <button onclick="document.getElementById('selectFolderBtn').click()" class="btn btn-primary" style="font-size: 1.1rem; padding: 0.8rem 2rem;">
+                ${t('welcome.start')}
+            </button>
+            <div style="margin-top: 2rem; padding: 1.5rem; background: white; border-radius: 8px; max-width: 600px; margin-left: auto; margin-right: auto; text-align: left;">
+                <h3 style="margin-bottom: 1rem;">${t('welcome.howItWorks')}</h3>
+                <ol style="margin-left: 1.5rem; color: var(--text-secondary);">
+                    <li>${t('welcome.step1')}</li>
+                    <li>${t('welcome.step2')}</li>
+                    <li>${t('welcome.step3')}</li>
+                    <li>${t('welcome.step4')}</li>
+                    <li>${t('welcome.step5')}</li>
+                </ol>
+                <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--text-secondary);">
+                    ${t('welcome.browserWarning')}
+                </p>
+            </div>
+                `;
+            }
+        }
+
+        // Render task detail modal structure with translations
+        function renderTaskDetailModal() {
+            const modalTitle = document.getElementById('modalTitle');
+            if (modalTitle) {
+                modalTitle.textContent = t('taskDetail.title');
+            }
+
+            // Update buttons in task detail modal
+            const taskModal = document.getElementById('taskModal');
+            if (taskModal) {
+                const actions = taskModal.querySelector('.actions');
+                if (actions) {
+                    actions.innerHTML = `
+                        <button class="btn btn-secondary" onclick="closeModal()">${t('taskDetail.close')}</button>
+                        <button class="btn btn-secondary" onclick="deleteCurrentTask()" style="background: #ef4444; color: white;">${t('taskDetail.delete')}</button>
+                        <button class="btn btn-secondary" onclick="archiveCurrentTask()" style="background: #f59e0b; color: white;">${t('taskDetail.archive')}</button>
+                        <button class="btn btn-primary" id="editTaskBtn" onclick="editCurrentTask()">${t('taskDetail.edit')}</button>
+                    `;
+                }
+            }
+        }
+
+        // Update task form labels and placeholders
+        function updateTaskFormLabels() {
+            const formLabels = {
+                'taskTitle': { prev: 'label', text: t('taskForm.titleLabel') },
+                'taskStatus': { prev: 'label', text: t('taskForm.columnLabel') },
+                'taskPriority': { prev: 'label', text: t('taskForm.priorityLabel') },
+                'taskCategory': { prev: 'label', text: t('taskForm.categoryLabel'), placeholder: t('taskForm.categoryPlaceholder') },
+                'taskAssignee': { prev: 'label', text: t('taskForm.assignedLabel'), placeholder: t('taskForm.assignedPlaceholder') },
+                'taskCreated': { prev: 'label', text: t('taskForm.createdLabel') },
+                'taskStarted': { prev: 'label', text: t('taskForm.startedLabel') },
+                'taskDue': { prev: 'label', text: t('taskForm.dueLabel') },
+                'taskCompleted': { prev: 'label', text: t('taskForm.completedLabel') },
+                'taskTags': { prev: 'label', text: t('taskForm.tagsLabel'), placeholder: t('taskForm.tagsPlaceholder') },
+                'taskDescription': { prev: 'label', text: t('taskForm.descriptionLabel') },
+                'taskNotes': { prev: 'label', text: t('taskForm.notesLabel'), placeholder: t('taskForm.notesPlaceholder') },
+                'formSubtaskInput': { placeholder: t('taskForm.subtaskPlaceholder') }
+            };
+
+            // Update all labels and placeholders
+            Object.keys(formLabels).forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+
+                const config = formLabels[id];
+
+                // Update label
+                if (config.prev === 'label') {
+                    const label = el.previousElementSibling;
+                    if (label && label.tagName === 'LABEL') {
+                        label.textContent = config.text;
+                    } else {
+                        // Try to find label by for attribute
+                        const labelEl = document.querySelector(`label[for="${id}"]`);
+                        if (labelEl) labelEl.textContent = config.text;
+                    }
+                }
+
+                // Update placeholder
+                if (config.placeholder) {
+                    el.placeholder = config.placeholder;
+                }
+            });
+
+            // Update priority options
+            const prioritySelect = document.getElementById('taskPriority');
+            if (prioritySelect) {
+                prioritySelect.innerHTML = `
+                    <option value="">${t('taskForm.priorityNone')}</option>
+                    <option value="Critique">${t('taskForm.priorityCritical')}</option>
+                    <option value="Haute">${t('taskForm.priorityHigh')}</option>
+                    <option value="Moyenne">${t('taskForm.priorityMedium')}</option>
+                    <option value="Basse">${t('taskForm.priorityLow')}</option>
+                `;
+            }
+
+            // Update form help texts
+            const tagsHelp = document.querySelector('label[for="taskTags"] + input + small');
+            if (tagsHelp) tagsHelp.textContent = t('taskForm.tagsHelp');
+
+            const notesHelp = document.querySelector('#taskNotes + small');
+            if (notesHelp) notesHelp.textContent = t('taskForm.notesHelp');
+
+            // Update subtasks label
+            const subtasksLabel = document.querySelector('#formSubtasksList').previousElementSibling;
+            if (subtasksLabel) subtasksLabel.textContent = t('taskForm.subtasksLabel');
+
+            // Update subtask add button
+            const subtaskBtn = document.querySelector('#formSubtaskInput + button');
+            if (subtaskBtn) subtaskBtn.textContent = t('taskForm.subtaskAdd');
+
+            // Update cancel button
+            const cancelBtn = document.querySelector('#newTaskForm .actions button[type="button"]');
+            if (cancelBtn) cancelBtn.textContent = t('taskForm.cancel');
+        }
+
+        // Update filter bar labels
+        function updateFilterLabels() {
+            const filterBar = document.getElementById('filterBar');
+            if (!filterBar) return;
+
+            // Update global search placeholder
+            const searchInput = document.getElementById('globalSearchInput');
+            if (searchInput) searchInput.placeholder = t('filters.search');
+
+            // Update filter labels
+            const labels = filterBar.querySelectorAll('label');
+            if (labels[0]) labels[0].textContent = t('filters.tags');
+            if (labels[1]) labels[1].textContent = t('filters.category');
+            if (labels[2]) labels[2].textContent = t('filters.user');
+
+            // Update select options
+            const selects = filterBar.querySelectorAll('select option[value=""]');
+            selects.forEach(opt => opt.textContent = t('filters.select'));
+
+            // Update clear button
+            const clearBtn = filterBar.querySelector('button[onclick="clearFilters()"]');
+            if (clearBtn) clearBtn.textContent = t('filters.clearAll');
+        }
+
+        // Render columns modal structure with translations
+        function renderColumnsModal() {
+            const modalTitle = document.getElementById('columnsModalTitle');
+            if (modalTitle) modalTitle.textContent = t('columns.title');
+
+            const addBtn = document.getElementById('addColumnBtn');
+            if (addBtn) addBtn.textContent = t('columns.add');
+        }
+
+        // Render archives modal structure with translations
+        function renderArchivesModal() {
+            const modalTitle = document.getElementById('archiveModalTitle');
+            if (modalTitle) modalTitle.textContent = t('archives.title');
+
+            const searchInput = document.getElementById('archiveSearch');
+            if (searchInput) searchInput.placeholder = t('archives.search');
+        }
+
+        // Set language and save to localStorage
+        function setLanguage(lang) {
+            if (!translations[lang]) {
+                console.warn(`Language "${lang}" not available, falling back to English`);
+                lang = 'en';
+            }
+
+            currentLanguage = lang;
+            localStorage.setItem('preferredLanguage', lang);
+
+            // Update static text elements
+            updateStaticTexts();
+
+            // Re-render the interface
+            renderKanban();
+            updateProjectSelector();
+            updateArchivesModal();
+
+            console.log(`Language changed to: ${lang}`);
+        }
+
+        // Initialize language based on saved preference or browser language
+        function initLanguage() {
+            // Check for saved preference first
+            const savedLang = localStorage.getItem('preferredLanguage');
+            if (savedLang) {
+                currentLanguage = savedLang;
+                return;
+            }
+
+            // Detect browser language
+            const browserLang = navigator.language || navigator.userLanguage;
+            const langCode = browserLang.toLowerCase().split('-')[0]; // e.g., "en-US" -> "en"
+
+            // Check if we support this language, otherwise fallback to English
+            if (translations[langCode]) {
+                currentLanguage = langCode;
+            } else {
+                currentLanguage = 'en'; // Default fallback
+            }
+
+            // Save the detected/default language
+            localStorage.setItem('preferredLanguage', currentLanguage);
+
+            console.log(`Language initialized to: ${currentLanguage}`);
+        }
+
+        // Initialize language on page load
+        initLanguage();
+        // Update static texts after DOM loads
+        document.addEventListener('DOMContentLoaded', updateStaticTexts);
+
+        // Check if File System Access API is supported
+        if (!('showDirectoryPicker' in window)) {
+            alert(t('alert.browserNotSupported'));
+        }
+
+        // IndexedDB for persisting directory handles (multiple projects)
+        const DB_NAME = 'TaskManagerDB';
+        const DB_VERSION = 2; // Increment version for schema change
+        const STORE_NAME = 'settings';
+        const PROJECTS_KEY = 'recentProjects';
+        const MAX_RECENT_PROJECTS = 10;
+
+        async function openDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => resolve(request.result);
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME);
+                    }
+                };
+            });
+        }
+
+        async function saveDirectoryHandle(handle, customName = null) {
+            try {
+                const db = await openDB();
+                const transaction = db.transaction(STORE_NAME, 'readwrite');
+                const store = transaction.objectStore(STORE_NAME);
+
+                // Get existing projects
+                const getRequest = store.get(PROJECTS_KEY);
+                const projects = await new Promise((resolve, reject) => {
+                    getRequest.onsuccess = () => resolve(getRequest.result || []);
+                    getRequest.onerror = () => reject(getRequest.error);
+                });
+
+                // Get project name (directory name)
+                const projectName = handle.name;
+
+                // Check if project already exists
+                const existingIndex = projects.findIndex(p => p.name === projectName);
+                const isNewProject = existingIndex < 0;
+
+                // Ask for custom name for new projects if not provided
+                let finalCustomName = customName;
+                if (isNewProject && !customName) {
+                    finalCustomName = prompt(t('prompt.projectName', {name: projectName})) || '';
+                }
+
+                const projectData = {
+                    handle: handle,
+                    name: projectName,
+                    customName: finalCustomName || (existingIndex >= 0 ? projects[existingIndex].customName : ''),
+                    lastAccessed: Date.now()
+                };
+
+                if (existingIndex >= 0) {
+                    // Update existing project (keep custom name if not changing)
+                    projectData.customName = customName !== null ? customName : projects[existingIndex].customName;
+                    projects[existingIndex] = projectData;
+                } else {
+                    // Add new project at the beginning
+                    projects.unshift(projectData);
+                }
+
+                // Keep only MAX_RECENT_PROJECTS
+                const recentProjects = projects.slice(0, MAX_RECENT_PROJECTS);
+
+                // Save updated list
+                store.put(recentProjects, PROJECTS_KEY);
+
+                await new Promise((resolve, reject) => {
+                    transaction.oncomplete = resolve;
+                    transaction.onerror = () => reject(transaction.error);
+                });
+
+                console.log('Project saved to recent list:', projectData.customName || projectName);
+                updateProjectSelector();
+            } catch (error) {
+                console.error('Failed to save directory handle:', error);
+            }
+        }
+
+        async function loadRecentProjects() {
+            try {
+                const db = await openDB();
+                const transaction = db.transaction(STORE_NAME, 'readonly');
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.get(PROJECTS_KEY);
+
+                return new Promise((resolve, reject) => {
+                    request.onsuccess = () => resolve(request.result || []);
+                    request.onerror = () => reject(request.error);
+                });
+            } catch (error) {
+                console.error('Failed to load recent projects:', error);
+                return [];
+            }
+        }
+
+        async function loadDirectoryHandle() {
+            try {
+                const projects = await loadRecentProjects();
+                // Return the most recent project (first in list)
+                return projects.length > 0 ? projects[0].handle : null;
+            } catch (error) {
+                console.error('Failed to load directory handle:', error);
+                return null;
+            }
+        }
+
+        async function verifyPermission(handle) {
+            const options = { mode: 'readwrite' };
+            if ((await handle.queryPermission(options)) === 'granted') {
+                return true;
+            }
+            if ((await handle.requestPermission(options)) === 'granted') {
+                return true;
+            }
+            return false;
+        }
+
+        // Update project selector dropdown
+        async function updateProjectSelector() {
+            const projects = await loadRecentProjects();
+            const selector = document.getElementById('projectSelector');
+            const renameBtn = document.getElementById('renameProjectBtn');
+
+            if (projects.length > 0) {
+                selector.style.display = 'block';
+
+                // Only mark as selected if kanban is actually loaded
+                const isKanbanLoaded = document.getElementById('kanbanView').style.display !== 'none';
+                const currentProject = (isKanbanLoaded && directoryHandle) ? directoryHandle.name : '';
+
+                // Show/hide rename button
+                if (isKanbanLoaded) {
+                    renameBtn.style.display = 'inline-flex';
+                } else {
+                    renameBtn.style.display = 'none';
+                }
+
+                // Add empty option if no project is loaded
+                let html = '';
+                if (!isKanbanLoaded) {
+                    html = `<option value="" selected>${t('projects.select')}</option>`;
+                }
+
+                html += projects.map((p, idx) => {
+                    const selected = (isKanbanLoaded && p.name === currentProject) ? 'selected' : '';
+                    const date = new Date(p.lastAccessed).toLocaleDateString('fr-FR');
+                    const displayName = p.customName || p.name;
+                    const details = p.customName ? ` (📁 ${p.name})` : '';
+                    return `<option value="${idx}" ${selected}>${displayName}${details} - ${date}</option>`;
+                }).join('');
+
+                selector.innerHTML = html;
+            } else {
+                selector.style.display = 'none';
+                renameBtn.style.display = 'none';
+            }
+        }
+
+        // Switch to a different project
+        async function switchProject(projectIndex) {
+            try {
+                const projects = await loadRecentProjects();
+                if (projectIndex >= 0 && projectIndex < projects.length) {
+                    const project = projects[projectIndex];
+
+                    // Verify permission
+                    if (await verifyPermission(project.handle)) {
+                        directoryHandle = project.handle;
+
+                        // Update last accessed time and save
+                        await saveDirectoryHandle(directoryHandle);
+
+                        // Load the project
+                        await loadKanbanFile();
+
+                        document.getElementById('welcomeScreen').style.display = 'none';
+                        document.getElementById('kanbanView').style.display = 'block';
+                        document.getElementById('filterBar').style.display = 'block';
+                        document.getElementById('newTaskBtn').style.display = 'inline-flex';
+                        document.getElementById('archiveBtn').style.display = 'inline-flex';
+                        document.getElementById('manageColsBtn').style.display = 'inline-flex';
+
+                        showNotification(t('notif.projectLoaded', {name: project.customName || project.name}), 'success');
+                    } else {
+                        showNotification(t('notif.permissionDenied'), 'error');
+                    }
+                }
+            } catch (error) {
+                console.error('Error switching project:', error);
+                showNotification(t('notif.projectError'), 'error');
+            }
+        }
+
+        // Rename current project
+        async function renameCurrentProject() {
+            if (!directoryHandle) return;
+
+            try {
+                const projects = await loadRecentProjects();
+                const currentProject = projects.find(p => p.name === directoryHandle.name);
+
+                if (currentProject) {
+                    const currentName = currentProject.customName || currentProject.name;
+                    const newName = prompt(t('prompt.renameProject'), currentName);
+
+                    if (newName !== null && newName.trim() !== currentName) {
+                        await saveDirectoryHandle(directoryHandle, newName.trim());
+                        showNotification(t('notif.projectRenamed'), 'success');
+                    }
+                }
+            } catch (error) {
+                console.error('Error renaming project:', error);
+                showNotification(t('notif.renameError'), 'error');
+            }
+        }
+
+        // Try to restore previous directory on page load
+        async function tryRestorePreviousDirectory() {
+            const savedHandle = await loadDirectoryHandle();
+            console.log('Attempting to restore previous directory:', savedHandle ? savedHandle.name : 'none');
+
+            if (savedHandle) {
+                try {
+                    // Verify we still have permission
+                    console.log('Verifying permissions...');
+                    if (await verifyPermission(savedHandle)) {
+                        console.log('Permission granted, loading kanban file...');
+                        directoryHandle = savedHandle;
+                        await loadKanbanFile();
+
+                        document.getElementById('welcomeScreen').style.display = 'none';
+                        document.getElementById('kanbanView').style.display = 'block';
+                        document.getElementById('filterBar').style.display = 'block';
+                        document.getElementById('newTaskBtn').style.display = 'inline-flex';
+                        document.getElementById('archiveBtn').style.display = 'inline-flex';
+                        document.getElementById('manageColsBtn').style.display = 'inline-flex';
+
+                        showNotification(t('notif.projectRestored'), 'success');
+                        await updateProjectSelector(); // Show project selector
+                        console.log('Project restored successfully');
+                        return true;
+                    } else {
+                        console.log('Permission denied or cancelled');
+                    }
+                } catch (error) {
+                    console.error('Could not restore previous directory:', error);
+                }
+            }
+            // Even if no project is loaded, update selector to show recent projects
+            await updateProjectSelector();
+            return false;
+        }
+
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', async () => {
+            await tryRestorePreviousDirectory();
+
+            // Add event listener for project selector
+            document.getElementById('projectSelector').addEventListener('change', async (e) => {
+                const projectIndex = parseInt(e.target.value);
+                if (!isNaN(projectIndex)) {
+                    await switchProject(projectIndex);
+                }
+            });
+        });
+
+        // Select folder
+        document.getElementById('selectFolderBtn').addEventListener('click', async () => {
+            try {
+                // Start in last used directory if available
+                const options = {};
+                if (directoryHandle) {
+                    options.startIn = directoryHandle;
+                }
+
+                directoryHandle = await window.showDirectoryPicker(options);
+                await saveDirectoryHandle(directoryHandle); // Save for next time
+                await loadKanbanFile();
+
+                document.getElementById('welcomeScreen').style.display = 'none';
+                document.getElementById('kanbanView').style.display = 'block';
+                document.getElementById('filterBar').style.display = 'block';
+                document.getElementById('newTaskBtn').style.display = 'inline-flex';
+                document.getElementById('archiveBtn').style.display = 'inline-flex';
+                document.getElementById('manageColsBtn').style.display = 'inline-flex';
+
+                showNotification(t('notif.folderLoaded'), 'success');
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    showNotification(t('notif.folderError'), 'error');
+                    console.error(error);
+                }
+            }
+        });
+
+        // Load kanban.md file
+        async function loadKanbanFile() {
+            try {
+                kanbanFileHandle = await directoryHandle.getFileHandle('kanban.md');
+                const file = await kanbanFileHandle.getFile();
+                currentKanbanContent = await file.text();
+
+                console.log('File loaded, size:', currentKanbanContent.length);
+                parseMarkdown(currentKanbanContent);
+                await loadArchive(); // Load archive for historical autocomplete data
+                updateAutocomplete();
+                renderKanban();
+            } catch (error) {
+                // Only create default files if the file truly doesn't exist
+                if (error.name === 'NotFoundError') {
+                    showNotification(t('notif.initializingFolder'), 'success');
+                    console.log('kanban.md not found, creating default files...');
+
+                    try {
+                        // Create kanban.md
+                        currentKanbanContent = createDefaultKanbanContent();
+                        kanbanFileHandle = await directoryHandle.getFileHandle('kanban.md', { create: true });
+                        const writable = await kanbanFileHandle.createWritable();
+                        await writable.write(currentKanbanContent);
+                        await writable.close();
+
+                        // Create archive.md
+                        const archiveContent = createDefaultArchiveContent();
+                        const archiveFileHandle = await directoryHandle.getFileHandle('archive.md', { create: true });
+                        const archiveWritable = await archiveFileHandle.createWritable();
+                        await archiveWritable.write(archiveContent);
+                        await archiveWritable.close();
+
+                        showNotification(t('notif.filesInitialized'), 'success');
+
+                        parseMarkdown(currentKanbanContent);
+                        updateAutocomplete();
+                        renderKanban();
+                    } catch (createError) {
+                        showNotification(t('notif.filesError'), 'error');
+                        console.error(createError);
+                    }
+                } else {
+                    // Different error (permissions, read error, etc.) - show error and don't overwrite
+                    showNotification(t('notif.loadError') || 'Erreur lors du chargement du fichier', 'error');
+                    console.error('Error loading kanban.md:', error);
+                }
+            }
+        }
+
+        // Create default kanban.md content
+        function createDefaultKanbanContent() {
+            return `# Kanban Board
+
+<!-- Config: Last Task ID: 0 -->
+
+## ⚙️ Configuration
+
+**Columns**: 📝 To Do (todo) | 🚀 In Progress (in-progress) | 👀 In Review (in-review) | ✅ Done (done)
+
+**Categories**: Frontend, Backend, Design, DevOps, Tests, Documentation
+
+**Users**: @user (User)
+
+**Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
+
+**Tags**: #bug #feature #ui #backend #urgent #refactor #docs #test
+
+---
+
+## 📝 To Do
+
+## 🚀 In Progress
+
+## 👀 In Review
+
+## ✅ Done
+`;
+        }
+
+        // Create default archive.md content
+        function createDefaultArchiveContent() {
+            return `${t('markdown.archiveTitle')}
+
+${t('markdown.archiveDesc')}
+
+${t('markdown.archiveSection')}
+
+`;
+        }
+
+        // Parse Markdown - IMPROVED VERSION
+        function parseMarkdown(content) {
+            tasks = [];
+            config = {
+                lastTaskId: 0,
+                columns: [],
+                categories: [],
+                users: [],
+                priorities: [],
+                tags: []
+            };
+
+            console.log('=== Starting parseMarkdown ===');
+
+            // Parse config comment
+            const configMatch = content.match(/<!-- Config: Last Task ID: (\d+) -->/);
+            if (configMatch) {
+                config.lastTaskId = parseInt(configMatch[1]);
+                console.log('Last Task ID:', config.lastTaskId);
+            }
+
+            // Parse config section
+            const configSection = content.match(/## ⚙️ Configuration\s+([\s\S]*?)---/);
+            if (configSection) {
+                const configText = configSection[1];
+                console.log('Config section found');
+
+                // Parse columns - FIXED REGEX
+                const columnsMatch = configText.match(/\*\*Colonnes\*\*:\s*(.+)/);
+                if (columnsMatch) {
+                    console.log('Raw columns:', columnsMatch[1]);
+                    config.columns = columnsMatch[1].split('|').map(col => {
+                        // Fixed regex to handle space before parenthesis
+                        const match = col.trim().match(/(.+?)\s*\((.+?)\)/);
+                        if (match) {
+                            return { name: match[1].trim(), id: match[2].trim() };
+                        }
+                        return null;
+                    }).filter(Boolean);
+                    console.log('Parsed columns:', config.columns);
+                }
+
+                // Parse categories
+                const categoriesMatch = configText.match(/\*\*Catégories\*\*:\s*(.+)/);
+                if (categoriesMatch) {
+                    config.categories = categoriesMatch[1].split(',').map(c => c.trim()).filter(Boolean);
+                    console.log('Parsed categories:', config.categories);
+                }
+
+                // Parse users
+                const usersMatch = configText.match(/\*\*Utilisateurs\*\*:\s*(.+)/);
+                if (usersMatch) {
+                    config.users = usersMatch[1].split(',').map(u => u.trim()).filter(Boolean);
+                    console.log('Parsed users:', config.users);
+                }
+
+                // Parse priorities
+                const prioritiesMatch = configText.match(/\*\*Priorités\*\*:\s*(.+)/);
+                if (prioritiesMatch) {
+                    config.priorities = prioritiesMatch[1].split('|').map(p => p.trim()).filter(Boolean);
+                    console.log('Parsed priorities:', config.priorities);
+                }
+
+                // Parse tags
+                const tagsMatch = configText.match(/\*\*Tags\*\*:\s*(.+)/);
+                if (tagsMatch) {
+                    config.tags = tagsMatch[1].split(/\s+/).filter(t => t.startsWith('#')).map(t => t.replace('#', ''));
+                    console.log('Parsed tags:', config.tags);
+                }
+            }
+
+            // Default columns if not found
+            if (config.columns.length === 0) {
+                config.columns = [
+                    { name: '📝 To Do', id: 'todo' },
+                    { name: '🚀 In Progress', id: 'in-progress' },
+                    { name: '👀 In Review', id: 'in-review' },
+                    { name: '✅ Done', id: 'done' }
+                ];
+                console.log('Using default columns');
+            }
+
+            // Default categories if not found
+            if (config.categories.length === 0) {
+                config.categories = ['Frontend', 'Backend', 'Design', 'DevOps', 'Tests', 'Documentation'];
+            }
+
+            // Default users if not found
+            if (config.users.length === 0) {
+                config.users = ['@user (User)'];
+            }
+
+            // Default priorities if not found
+            if (config.priorities.length === 0) {
+                config.priorities = ['🔴 Critical', '🟠 High', '🟡 Medium', '🟢 Low'];
+            }
+
+            // Default tags if not found
+            if (config.tags.length === 0) {
+                config.tags = ['bug', 'feature', 'ui', 'backend', 'urgent', 'refactor', 'docs', 'test'];
+            }
+
+            // Parse tasks by sections using the unified parser
+            config.columns.forEach(column => {
+                const columnTasks = parseTasksFromSection(content, column.name, column.id);
+                tasks.push(...columnTasks);
+            });
+
+            console.log(`\n=== Total tasks parsed: ${tasks.length} ===`);
+            console.log('Tasks:', tasks.map(t => `${t.id} (${t.status})`).join(', '));
+        }
+
+        // Parse tasks from a markdown section (reusable for both kanban and archive)
+        function parseTasksFromSection(content, sectionName, statusId) {
+            console.log(`\n--- Parsing section: ${sectionName} (status: ${statusId}) ---`);
+            const tasksFound = [];
+
+            // Split by ## to get sections
+            const sections = content.split(/\n##\s+/);
+            let sectionContent = null;
+
+            for (let section of sections) {
+                if (section.startsWith(sectionName)) {
+                    // Extract content after the section title
+                    sectionContent = section.substring(sectionName.length).trim();
+                    break;
+                }
+            }
+
+            if (!sectionContent) {
+                console.log(`Section "${sectionName}" not found or empty`);
+                return tasksFound;
+            }
+
+            console.log(`Section content length: ${sectionContent.length}`);
+
+            // SIMPLE PARSING: Split by ### TASK-
+            const taskBlocks = sectionContent.split(/###\s+TASK-/).slice(1); // Skip first empty element
+            console.log(`Found ${taskBlocks.length} task blocks`);
+
+            taskBlocks.forEach((block, index) => {
+                // Each block starts with: XXX | Title
+                const lines = block.split('\n');
+                const firstLine = lines[0].trim();
+
+                console.log(`Block ${index + 1} first line: "${firstLine}"`);
+
+                // Extract ID and title from first line
+                const pipeIndex = firstLine.indexOf('|');
+                if (pipeIndex > 0) {
+                    const idPart = firstLine.substring(0, pipeIndex).trim();
+                    const titlePart = firstLine.substring(pipeIndex + 1).trim();
+
+                    // Check if idPart is a valid number
+                    const idMatch = idPart.match(/^(\d+)$/);
+                    if (idMatch && titlePart) {
+                        const taskId = 'TASK-' + idPart.padStart(3, '0');
+                        const title = titlePart;
+                        const taskContent = lines.slice(1).join('\n');
+
+                        console.log(`✓ Matched! Parsing task: ${taskId} - ${title}`);
+                        const task = parseTask(taskId, title, taskContent, statusId);
+                        if (task) {
+                            tasksFound.push(task);
+                            console.log(`✓ Task added. Total in this section: ${tasksFound.length}`);
+                        } else {
+                            console.log(`✗ parseTask returned null`);
+                        }
+                    } else {
+                        console.log(`✗ Invalid ID format: "${idPart}"`);
+                    }
+                } else {
+                    console.log(`✗ No pipe character found in first line`);
+                }
+            });
+
+            console.log(`Total tasks parsed from "${sectionName}": ${tasksFound.length}`);
+            return tasksFound;
+        }
+
+        // Parse individual task
+        function parseTask(id, title, content, status) {
+            const task = {
+                id,
+                title: title.trim(),
+                status,
+                priority: '',
+                category: '',
+                assignees: [],
+                tags: [],
+                created: '',
+                started: '',
+                due: '',
+                completed: '',
+                description: '',
+                subtasks: [],
+                notes: ''
+            };
+
+            // Parse metadata line
+            const metaMatch = content.match(/\*\*Priority\*\*:\s*(\w+)\s*\|\s*\*\*Category\*\*:\s*([^|]+?)(?:\s*\|\s*\*\*Assigned\*\*:\s*(.+?))?$/m);
+            if (metaMatch) {
+                task.priority = metaMatch[1].trim();
+                task.category = metaMatch[2].trim();
+                if (metaMatch[3]) {
+                    task.assignees = metaMatch[3].split(',').map(a => a.trim());
+                }
+            }
+
+            // Parse dates - support all date fields
+            const createdMatch = content.match(/\*\*Created\*\*:\s*([\d-]+)/);
+            if (createdMatch) task.created = createdMatch[1];
+
+            const startedMatch = content.match(/\*\*Started\*\*:\s*([\d-]+)/);
+            if (startedMatch) task.started = startedMatch[1];
+
+            const dueMatch = content.match(/\*\*Due\*\*:\s*([\d-]+)/);
+            if (dueMatch) task.due = dueMatch[1];
+
+            const completedMatch = content.match(/\*\*Finished\*\*:\s*([\d-]+)/);
+            if (completedMatch) task.completed = completedMatch[1];
+
+            // Parse tags
+            const tagsMatch = content.match(/\*\*Tags\*\*:\s*(.+)/);
+            if (tagsMatch) {
+                task.tags = tagsMatch[1].match(/#[\w-]+/g) || [];
+            }
+
+            // Parse description (text after dates/tags but before "**Sous-tâches**" or "**Notes**")
+            const lines = content.split('\n');
+            let descriptionLines = [];
+            let inDescription = false;
+
+            for (let line of lines) {
+                // Skip metadata lines
+                if (line.match(/^\*\*(Priority|Category|Assigned|Created|Started|Due|Finished|Tags)\*\*/)) {
+                    continue;
+                }
+                // Stop at subsections
+                if (line.match(/^\*\*(Subtasks|Notes|Links|Review|Dependencies)\*\*/)) {
+                    break;
+                }
+                // Collect description lines
+                if (line.trim() && !inDescription) {
+                    inDescription = true;
+                }
+                if (inDescription && line.trim()) {
+                    descriptionLines.push(line.trim());
+                }
+            }
+            task.description = descriptionLines.join(' ').substring(0, 200);
+
+            // Parse subtasks
+            const subtaskMatches = content.matchAll(/- \[(x| )\] (.+)/g);
+            for (const match of subtaskMatches) {
+                task.subtasks.push({
+                    completed: match[1] === 'x',
+                    text: match[2].trim()
+                });
+            }
+
+            // Parse notes - everything after **Notes**: until end of task
+            const notesMatch = content.match(/\*\*Notes\*\*:\s*\n([\s\S]*?)$/);
+            if (notesMatch) {
+                task.notes = notesMatch[1].trim();
+            }
+
+            return task;
+        }
+
+        // Enhanced markdown to HTML converter for notes
+        function markdownToHtml(markdown) {
+            if (!markdown) return '';
+
+            let html = markdown;
+
+            // First, extract code blocks before escaping HTML
+            // Use very flexible regex to capture all code block formats
+            const codeBlocks = [];
+            html = html.replace(/```([^\n`]*)\n?([\s\S]*?)```/g, (match, language, code) => {
+                const lang = (language || '').trim() || 'text';
+                const placeholder = `\n__CODE_BLOCK_${codeBlocks.length}__\n`;
+
+                // Remove trailing newline if present
+                const cleanCode = code.replace(/\n$/, '');
+
+                // Escape HTML in code for safe display
+                const escapedCode = cleanCode
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+
+                // Create simple code block with language label
+                const codeBlock = `<div style="margin: 1rem 0;"><div style="background: #1a1a1a; color: #888; padding: 0.25rem 0.5rem; border-radius: 6px 6px 0 0; font-size: 0.75rem; font-family: 'Consolas', 'Monaco', monospace;">${lang}</div><pre style="margin: 0; border-radius: 0 0 6px 6px;"><code>${escapedCode}</code></pre></div>`;
+                codeBlocks.push(codeBlock);
+                return placeholder;
+            });
+
+            // Escape HTML tags in remaining text (after extracting code blocks)
+            html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+            // Convert **Bold subsections** with colon (e.g., **Résultat**:)
+            html = html.replace(/\*\*([^*]+)\*\*:/g, '<strong style="color: var(--primary); display: block; margin-top: 1rem; margin-bottom: 0.5rem;">$1:</strong>');
+
+            // Convert **Bold** (remaining)
+            html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+            // Convert *Italic*
+            html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+            // Convert `inline code`
+            html = html.replace(/`([^`]+)`/g, '<code style="background: #2d2d2d; color: #f8f8f2; padding: 0.125rem 0.35rem; border-radius: 3px; font-family: \'Consolas\', \'Monaco\', monospace; font-size: 0.9em;">$1</code>');
+
+            // Convert links [text](url)
+            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color: var(--primary); text-decoration: underline;">$1</a>');
+
+            // Convert bullet lists and paragraphs
+            const lines = html.split('\n');
+            let inList = false;
+            let result = [];
+
+            for (let line of lines) {
+                // Check if it's a code block placeholder - preserve it exactly
+                if (line.trim() === '' || line.trim().match(/^__CODE_BLOCK_\d+__$/)) {
+                    if (inList) {
+                        result.push('</ul>');
+                        inList = false;
+                    }
+                    if (line.trim().startsWith('__CODE_BLOCK_')) {
+                        result.push(line.trim());
+                    } else if (line.trim() === '') {
+                        // Empty line - add spacing only if not in list
+                        if (!inList) {
+                            result.push('');
+                        }
+                    }
+                    continue;
+                }
+
+                if (line.trim().startsWith('- ')) {
+                    if (!inList) {
+                        result.push('<ul style="margin: 0.5rem 0; padding-left: 1.5rem;">');
+                        inList = true;
+                    }
+                    result.push('<li>' + line.trim().substring(2) + '</li>');
+                } else {
+                    if (inList) {
+                        result.push('</ul>');
+                        inList = false;
+                    }
+                    if (line.trim()) {
+                        result.push('<p style="margin: 0.5rem 0;">' + line + '</p>');
+                    }
+                }
+            }
+
+            if (inList) {
+                result.push('</ul>');
+            }
+
+            html = result.join('\n');
+
+            // Replace code block placeholders with actual code blocks
+            codeBlocks.forEach((block, index) => {
+                html = html.replace(`__CODE_BLOCK_${index}__`, block);
+            });
+
+            return html;
+        }
+
+        // Auto-save function
+        async function autoSave() {
+            if (!kanbanFileHandle) return;
+            try {
+                const newContent = generateMarkdown();
+                const writable = await kanbanFileHandle.createWritable();
+                await writable.write(newContent);
+                await writable.close();
+                currentKanbanContent = newContent;
+                console.log('Auto-saved');
+            } catch (error) {
+                console.error('Auto-save failed:', error);
+            }
+        }
+
+        // Extract unique values for autocomplete (including historical archived data)
+        function extractUniqueValues() {
+            // Start with values from config (always keep these)
+            const categories = new Set(config.categories || []);
+            const users = new Set(config.users || []);
+            const tags = new Set(config.tags || []);
+
+            // Extract from active tasks
+            tasks.forEach(t => {
+                if (t.category) categories.add(t.category);
+                t.assignees.forEach(u => users.add(u));
+                t.tags.forEach(tag => tags.add(tag.replace('#', '')));
+            });
+
+            // Extract from archived tasks (historical data)
+            archivedTasks.forEach(t => {
+                if (t.category) categories.add(t.category);
+                t.assignees.forEach(u => users.add(u));
+                t.tags.forEach(tag => tags.add(tag.replace('#', '')));
+            });
+
+            return { categories: [...categories], users: [...users], tags: [...tags] };
+        }
+
+        // Update autocomplete datalists and filter selects
+        function updateAutocomplete() {
+            const { categories, users, tags } = extractUniqueValues();
+
+            // Update form datalists
+            document.getElementById('categoriesList').innerHTML = categories.map(c => `<option value="${c}">`).join('');
+            document.getElementById('usersList').innerHTML = users.map(u => `<option value="${u}">`).join('');
+            document.getElementById('tagsList').innerHTML = tags.map(t => `<option value="${t}">`).join('');
+
+            // Update filter selects
+            document.getElementById('filterTagSelect').innerHTML = `<option value="">${t('filters.select')}</option>` + tags.map(t => `<option value="${t}">${t}</option>`).join('');
+            document.getElementById('filterCategorySelect').innerHTML = `<option value="">${t('filters.select')}</option>` + categories.map(c => `<option value="${c}">${c}</option>`).join('');
+            document.getElementById('filterUserSelect').innerHTML = `<option value="">${t('filters.select')}</option>` + users.map(u => `<option value="${u}">${u}</option>`).join('');
+
+            // Update priority filter select from config
+            const priorities = (config.priorities || []).map(p => p.replace(/^[🔴🟠🟡🟢]\s*/, '').trim());
+            document.getElementById('filterPrioritySelect').innerHTML = `<option value="">${t('filters.select')}</option>` + priorities.map(p => `<option value="${p}">${p}</option>`).join('');
+        }
+
+        // Filter functions
+        function addFilter(type) {
+            let value;
+            if (type === 'tag') {
+                value = document.getElementById('filterTagSelect').value;
+                document.getElementById('filterTagSelect').value = '';
+            } else if (type === 'category') {
+                value = document.getElementById('filterCategorySelect').value;
+                document.getElementById('filterCategorySelect').value = '';
+            } else if (type === 'user') {
+                value = document.getElementById('filterUserSelect').value;
+                document.getElementById('filterUserSelect').value = '';
+            } else if (type === 'priority') {
+                value = document.getElementById('filterPrioritySelect').value;
+                document.getElementById('filterPrioritySelect').value = '';
+            }
+
+            if (value && !activeFilters.find(f => f.type === type && f.value === value)) {
+                activeFilters.push({ type, value });
+                renderFilters();
+                renderKanban();
+            }
+        }
+
+        function removeFilter(idx) {
+            activeFilters.splice(idx, 1);
+            renderFilters();
+            renderKanban();
+        }
+
+        function clearFilters() {
+            activeFilters = [];
+            renderFilters();
+            renderKanban();
+        }
+
+        // Global search functions
+        function applyGlobalSearch() {
+            const input = document.getElementById('globalSearchInput');
+            const clearBtn = document.getElementById('clearGlobalSearch');
+            globalSearchTerm = input.value.trim();
+
+            // Show/hide clear button
+            clearBtn.style.display = globalSearchTerm ? 'block' : 'none';
+
+            // Re-render kanban with search filter
+            renderKanban();
+        }
+
+        function clearGlobalSearch() {
+            const input = document.getElementById('globalSearchInput');
+            const clearBtn = document.getElementById('clearGlobalSearch');
+            input.value = '';
+            globalSearchTerm = '';
+            clearBtn.style.display = 'none';
+            renderKanban();
+        }
+
+        function renderFilters() {
+            const container = document.getElementById('activeFilters');
+            const colors = {
+                tag: '#3b82f6',      // Blue
+                category: '#8b5cf6', // Purple
+                user: '#10b981',     // Green
+                priority: '#f59e0b'  // Orange
+            };
+
+            container.innerHTML = activeFilters.map((f, idx) => {
+                const escapedValue = f.value.replace(/'/g, "\\'");
+                return `
+                <span style="background: ${colors[f.type]}; color: white; padding: 0.35rem 0.75rem; border-radius: 16px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 500;">
+                    ${f.value}
+                    <button onclick="removeFilter(${idx})" style="background: none; border: none; color: white; cursor: pointer; padding: 0; font-weight: bold; font-size: 1.1rem; line-height: 1;" title="Supprimer ce filtre">✕</button>
+                </span>
+                `;
+            }).join('');
+        }
+
+        function matchesFilters(task) {
+            // Check active filters (tags, category, user, priority)
+            if (activeFilters.length > 0) {
+                const matchesActiveFilters = activeFilters.every(filter => {
+                    if (filter.type === 'tag') {
+                        return task.tags.includes(filter.value) || task.tags.includes('#' + filter.value);
+                    } else if (filter.type === 'category') {
+                        return task.category === filter.value;
+                    } else if (filter.type === 'user') {
+                        return task.assignees.includes(filter.value);
+                    } else if (filter.type === 'priority') {
+                        return task.priority === filter.value;
+                    }
+                    return false;
+                });
+                if (!matchesActiveFilters) return false;
+            }
+
+            // Check global search term (searches in title, description, and notes)
+            if (globalSearchTerm) {
+                const searchLower = globalSearchTerm.toLowerCase();
+                const matchesSearch =
+                    (task.title && task.title.toLowerCase().includes(searchLower)) ||
+                    (task.description && task.description.toLowerCase().includes(searchLower)) ||
+                    (task.notes && task.notes.toLowerCase().includes(searchLower));
+                if (!matchesSearch) return false;
+            }
+
+            return true;
+        }
+
+        // Click to add filter
+        function clickToFilter(type, value) {
+            if (!activeFilters.find(f => f.type === type && f.value === value)) {
+                activeFilters.push({ type, value });
+                renderFilters();
+                renderKanban();
+            }
+        }
+
+        // Column management
+        function openColumnsModal() {
+            const modal = document.getElementById('columnsModal');
+            const list = document.getElementById('columnsList');
+            list.innerHTML = config.columns.map((col, idx) => `
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.75rem; background: white; border: 2px solid #cbd5e0; border-radius: 6px; align-items: center;">
+                    <div style="display: flex; gap: 0.25rem;">
+                        <button onclick="moveColumn(${idx}, -1)" ${idx === 0 ? 'disabled' : ''} class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;" title="${t('action.moveUp')}">↑</button>
+                        <button onclick="moveColumn(${idx}, 1)" ${idx === config.columns.length - 1 ? 'disabled' : ''} class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;" title="${t('action.moveDown')}">↓</button>
+                    </div>
+                    <input type="text" value="${col.name}" onchange="updateColumn(${idx}, 'name', this.value)" style="flex: 1; padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px;">
+                    <input type="text" value="${col.id}" onchange="updateColumn(${idx}, 'id', this.value)" style="width: 120px; padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px;" placeholder="ID">
+                    <button onclick="deleteColumn(${idx})" class="btn btn-secondary" style="padding: 0.5rem;">🗑️</button>
+                </div>
+            `).join('');
+            modal.classList.add('active');
+        }
+
+        function closeColumnsModal() {
+            document.getElementById('columnsModal').classList.remove('active');
+        }
+
+        function addColumn() {
+            const name = prompt(t('prompt.columnName'));
+            const id = prompt(t('prompt.columnId'));
+            if (name && id) {
+                config.columns.push({ name, id });
+                openColumnsModal();
+                autoSave();
+                renderKanban();
+            }
+        }
+
+        function updateColumn(idx, field, value) {
+            config.columns[idx][field] = value;
+            autoSave();
+            renderKanban();
+        }
+
+        function deleteColumn(idx) {
+            if (confirm(t('confirm.deleteColumn'))) {
+                config.columns.splice(idx, 1);
+                openColumnsModal();
+                autoSave();
+                renderKanban();
+            }
+        }
+
+        function moveColumn(idx, direction) {
+            const newIdx = idx + direction;
+            if (newIdx < 0 || newIdx >= config.columns.length) return;
+
+            // Swap columns
+            [config.columns[idx], config.columns[newIdx]] = [config.columns[newIdx], config.columns[idx]];
+
+            openColumnsModal();
+            autoSave();
+            renderKanban();
+        }
+
+        // Task edit/create modal
+        function openTaskModal(task = null) {
+            isEditMode = !!task;
+            const modal = document.getElementById('newTaskModal');
+            const form = document.getElementById('newTaskForm');
+            const title = modal.querySelector('h2');
+            const submitBtn = document.getElementById('taskFormSubmitBtn');
+
+            title.textContent = isEditMode ? t('taskForm.editTask') : t('taskForm.newTask');
+            submitBtn.textContent = isEditMode ? t('taskForm.save') : t('taskForm.create');
+
+            // Populate columns select
+            document.getElementById('taskStatus').innerHTML = config.columns.map(col =>
+                `<option value="${col.id}">${col.name}</option>`
+            ).join('');
+
+            // Update autocomplete
+            updateAutocomplete();
+
+            if (isEditMode) {
+                document.getElementById('taskEditId').value = task.id;
+                document.getElementById('taskTitle').value = task.title;
+                document.getElementById('taskStatus').value = task.status;
+                document.getElementById('taskPriority').value = task.priority || '';
+                document.getElementById('taskCategory').value = task.category || '';
+                document.getElementById('taskAssignee').value = task.assignees.join(', ');
+                document.getElementById('taskCreated').value = task.created || '';
+                document.getElementById('taskStarted').value = task.started || '';
+                document.getElementById('taskDue').value = task.due || '';
+                document.getElementById('taskCompleted').value = task.completed || '';
+                document.getElementById('taskTags').value = task.tags.join(' ');
+                document.getElementById('taskDescription').value = task.description || '';
+                document.getElementById('taskNotes').value = task.notes || '';
+                formSubtasks = JSON.parse(JSON.stringify(task.subtasks || []));
+            } else {
+                form.reset();
+                document.getElementById('taskEditId').value = '';
+                formSubtasks = [];
+            }
+
+            renderFormSubtasks();
+            modal.classList.add('active');
+        }
+
+        function closeTaskModal() {
+            document.getElementById('newTaskModal').classList.remove('active');
+            document.getElementById('newTaskForm').reset();
+            formSubtasks = [];
+            isEditMode = false;
+        }
+
+        // Form subtasks management
+        function renderFormSubtasks() {
+            const list = document.getElementById('formSubtasksList');
+            list.innerHTML = formSubtasks.map((st, idx) => `
+                <li style="padding: 0.5rem; margin-bottom: 0.25rem; background: white; border: 1px solid #cbd5e0; border-radius: 4px; display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="checkbox" ${st.completed ? 'checked' : ''} onchange="toggleFormSubtask(${idx})" style="width: 16px; height: 16px; cursor: pointer;">
+                    <span style="flex: 1; ${st.completed ? 'text-decoration: line-through; color: #999;' : ''}">${st.text.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
+                    <button type="button" onclick="deleteFormSubtask(${idx})" style="background: none; border: none; cursor: pointer; color: #e53e3e; font-size: 1rem;">🗑️</button>
+                </li>
+            `).join('');
+        }
+
+        function addFormSubtask() {
+            const input = document.getElementById('formSubtaskInput');
+            const text = input.value.trim();
+            if (!text) return;
+            formSubtasks.push({ completed: false, text });
+            input.value = '';
+            renderFormSubtasks();
+        }
+
+        function toggleFormSubtask(idx) {
+            if (formSubtasks[idx]) {
+                formSubtasks[idx].completed = !formSubtasks[idx].completed;
+                renderFormSubtasks();
+            }
+        }
+
+        function deleteFormSubtask(idx) {
+            formSubtasks.splice(idx, 1);
+            renderFormSubtasks();
+        }
+
+        // Render Kanban board
+        function renderKanban() {
+            const board = document.getElementById('kanbanBoard');
+            board.innerHTML = '';
+
+            console.log('Rendering kanban with', tasks.length, 'tasks');
+
+            // Debug info
+            const debugInfo = document.getElementById('debugInfo');
+            debugInfo.textContent = `Loaded ${tasks.length} tasks\nColumns: ${config.columns.map(c => c.name).join(', ')}`;
+            // debugInfo.style.display = 'block'; // Uncomment to show debug info
+
+            config.columns.forEach(column => {
+                const columnTasks = tasks.filter(t => t.status === column.id && matchesFilters(t));
+                console.log(`Column ${column.id}: ${columnTasks.length} tasks`);
+
+                const columnEl = document.createElement('div');
+                columnEl.className = 'kanban-column';
+                columnEl.dataset.columnId = column.id;
+
+                columnEl.innerHTML = `
+                    <div class="column-header">
+                        <div class="column-title">
+                            ${column.name}
+                        </div>
+                        <div class="column-count">${columnTasks.length}</div>
+                    </div>
+                    <div class="task-list" ondrop="drop(event)" ondragover="allowDrop(event)">
+                        ${columnTasks.length === 0 ? `<div class="empty-state">${t('empty.noTasks')}</div>` : ''}
+                    </div>
+                `;
+
+                const taskList = columnEl.querySelector('.task-list');
+
+                columnTasks.forEach(task => {
+                    const taskEl = createTaskElement(task);
+                    taskList.appendChild(taskEl);
+                });
+
+                board.appendChild(columnEl);
+            });
+        }
+
+        // Create task element
+        function createTaskElement(task) {
+            const taskEl = document.createElement('div');
+            taskEl.className = 'task-card';
+            taskEl.draggable = true;
+            taskEl.dataset.taskId = task.id;
+
+            const subtaskProgress = task.subtasks.length > 0 ?
+                `<div class="task-subtasks">
+                    <div class="subtask-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${(task.subtasks.filter(s => s.completed).length / task.subtasks.length * 100)}%"></div>
+                        </div>
+                        <span>${task.subtasks.filter(s => s.completed).length}/${task.subtasks.length}</span>
+                    </div>
+                </div>` : '';
+
+            taskEl.innerHTML = `
+                <div class="task-header">
+                    <span class="task-id">${task.id}</span>
+                    <button class="task-edit-btn" onclick="event.stopPropagation(); openTaskModal(tasks.find(t => t.id === '${task.id}'))" style="background: none; border: none; cursor: pointer; font-size: 1.1rem; padding: 0.25rem;">✏️</button>
+                </div>
+                <div class="task-title">${task.title}</div>
+                ${task.description ? `<div class="task-description">${markdownToHtml(task.description)}</div>` : ''}
+                <div class="task-meta">
+                    ${task.priority ? `<span class="badge badge-priority ${task.priority}" onclick="event.stopPropagation(); clickToFilter('priority', '${task.priority.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByPriority')}">${task.priority}</span>` : ''}
+                    ${task.category ? `<span class="badge badge-category" onclick="event.stopPropagation(); clickToFilter('category', '${task.category.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByCategory')}">${task.category}</span>` : ''}
+                    ${task.assignees.map(a => `<span class="badge badge-assignee" onclick="event.stopPropagation(); clickToFilter('user', '${a.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByUser')}">${a}</span>`).join('')}
+                    ${task.tags.map(tag => `<span class="tag" onclick="event.stopPropagation(); clickToFilter('tag', '${tag.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByTag')}">${tag}</span>`).join('')}
+                </div>
+                ${subtaskProgress}
+            `;
+
+            taskEl.addEventListener('dragstart', drag);
+            taskEl.addEventListener('click', () => showTaskDetail(task));
+
+            return taskEl;
+        }
+
+        // Drag & Drop
+        function allowDrop(event) {
+            event.preventDefault();
+        }
+
+        function drag(event) {
+            event.dataTransfer.setData('taskId', event.target.dataset.taskId);
+            event.target.classList.add('dragging');
+        }
+
+        function drop(event) {
+            event.preventDefault();
+            const taskId = event.dataTransfer.getData('taskId');
+            const taskEl = document.querySelector(`[data-task-id="${taskId}"]`);
+
+            if (taskEl) {
+                taskEl.classList.remove('dragging');
+
+                // Find the column
+                let dropTarget = event.target;
+                while (dropTarget && !dropTarget.classList.contains('task-list')) {
+                    dropTarget = dropTarget.parentElement;
+                }
+
+                if (dropTarget && dropTarget.classList.contains('task-list')) {
+                    const columnEl = dropTarget.closest('.kanban-column');
+                    const newStatus = columnEl.dataset.columnId;
+
+                    // Update task status
+                    const task = tasks.find(t => t.id === taskId);
+                    if (task && task.status !== newStatus) {
+                        task.status = newStatus;
+                        renderKanban();
+                        autoSave();
+                        showNotification(t('notif.taskMoved'), 'success');
+                    }
+                }
+            }
+        }
+
+        // Show task detail
+        function showTaskDetail(task) {
+            currentDetailTask = task;
+            const modal = document.getElementById('taskModal');
+            const modalBody = document.getElementById('modalBody');
+
+            // Get priority icon
+            const priorityIcons = {
+                'Critique': '🔴',
+                'Haute': '🟠',
+                'Moyenne': '🟡',
+                'Basse': '🟢'
+            };
+
+            // Get status name
+            const statusColumn = config.columns.find(col => col.id === task.status);
+            const statusName = statusColumn ? statusColumn.name : task.status;
+
+            modalBody.innerHTML = `
+                <div style="padding: 1.5rem;">
+                    <!-- Task ID Badge -->
+                    <div style="display: inline-block; background: var(--primary); color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.85rem; font-weight: 600; margin-bottom: 1rem;">
+                        ${task.id}
+                    </div>
+
+                    <!-- Title -->
+                    <h3 style="margin: 0 0 1.5rem 0; font-size: 1.5rem; color: var(--text);">${task.title}</h3>
+
+                    <!-- Metadata Grid -->
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1.5rem; padding: 1rem; background: var(--bg); border-radius: 8px;">
+                        ${task.priority ? `
+                            <div>
+                                <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">${t('meta.priority')}</div>
+                                <div style="font-weight: 500;">${priorityIcons[task.priority] || ''} ${task.priority}</div>
+                            </div>
+                        ` : ''}
+
+                        <div>
+                            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">${t('meta.status')}</div>
+                            <div style="font-weight: 500;">${statusName}</div>
+                        </div>
+
+                        ${task.category ? `
+                            <div>
+                                <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">${t('meta.category')}</div>
+                                <div style="font-weight: 500;">${task.category}</div>
+                            </div>
+                        ` : ''}
+
+                        ${task.assignees.length > 0 ? `
+                            <div>
+                                <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">${t('meta.assigned')}</div>
+                                <div style="font-weight: 500;">${task.assignees.join(', ')}</div>
+                            </div>
+                        ` : ''}
+
+                        ${task.created ? `
+                            <div>
+                                <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">${t('meta.created')}</div>
+                                <div style="font-weight: 500;">${task.created}</div>
+                            </div>
+                        ` : ''}
+
+                        ${task.started ? `
+                            <div>
+                                <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">${t('meta.started')}</div>
+                                <div style="font-weight: 500;">${task.started}</div>
+                            </div>
+                        ` : ''}
+
+                        ${task.due ? `
+                            <div>
+                                <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">${t('meta.due')}</div>
+                                <div style="font-weight: 500;">${task.due}</div>
+                            </div>
+                        ` : ''}
+
+                        ${task.completed ? `
+                            <div>
+                                <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">${t('meta.completed')}</div>
+                                <div style="font-weight: 500;">${task.completed}</div>
+                            </div>
+                        ` : ''}
+                    </div>
+
+                    <!-- Tags -->
+                    ${task.tags.length > 0 ? `
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">${t('meta.tags')}</div>
+                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                ${task.tags.map(tag => `
+                                    <span style="background: var(--primary); color: white; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.85rem;">
+                                        ${tag}
+                                    </span>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <!-- Description -->
+                    ${task.description ? `
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem; font-weight: 600;">${t('meta.description')}</div>
+                            <div style="line-height: 1.6; color: var(--text);">${markdownToHtml(task.description)}</div>
+                        </div>
+                    ` : ''}
+
+                    <!-- Subtasks -->
+                    <div style="margin-bottom: 1.5rem;">
+                        <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem; font-weight: 600;">${t('meta.subtasks', {completed: task.subtasks.filter(st => st.completed).length, total: task.subtasks.length})}</div>
+                        <ul id="subtasksList" style="list-style: none; padding: 0; margin: 0 0 1rem 0;">
+                            ${task.subtasks.map((st, idx) => {
+                                const escapedText = st.text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                                return `
+                                <li style="padding: 0.5rem; margin-bottom: 0.25rem; background: var(--bg); border-radius: 4px; display: flex; align-items: center; gap: 0.5rem;">
+                                    <input type="checkbox" ${st.completed ? 'checked' : ''} onchange="toggleSubtask('${task.id}', ${idx})" style="width: 18px; height: 18px; cursor: pointer;">
+                                    <span ondblclick="editSubtask('${task.id}', ${idx})" style="flex: 1; ${st.completed ? 'text-decoration: line-through; color: var(--text-secondary);' : ''} cursor: pointer;" title="${t('tooltip.doubleClickEdit')}">${escapedText}</span>
+                                    <button onclick="deleteSubtask('${task.id}', ${idx})" style="background: none; border: none; cursor: pointer; color: #e53e3e; font-size: 1.1rem; padding: 0.25rem;" title="${t('tooltip.delete')}">🗑️</button>
+                                </li>
+                                `;
+                            }).join('')}
+                        </ul>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <input type="text" id="newSubtaskInput" placeholder="${t('subtask.newPlaceholder')}" onkeypress="if(event.key==='Enter') addSubtask('${task.id}')" style="flex: 1; padding: 0.5rem; border: 2px solid #cbd5e0; border-radius: 4px; font-size: 0.9rem;">
+                            <button onclick="addSubtask('${task.id}')" class="btn btn-primary" style="padding: 0.5rem 1rem;">${t('taskForm.subtaskAdd')}</button>
+                        </div>
+                    </div>
+
+                    <!-- Notes -->
+                    ${task.notes ? `
+                        <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0;">
+                            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem; font-weight: 600;">${t('meta.notes')}</div>
+                            <div style="line-height: 1.7; color: var(--text); background: var(--bg); padding: 1rem; border-radius: 8px; border-left: 4px solid var(--primary);">
+                                ${markdownToHtml(task.notes)}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            modal.classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('taskModal').classList.remove('active');
+        }
+
+        function editCurrentTask() {
+            if (currentDetailTask) {
+                closeModal();
+                openTaskModal(currentDetailTask);
+            }
+        }
+
+        // Subtask management
+        function toggleSubtask(taskId, subtaskIdx) {
+            const task = tasks.find(t => t.id === taskId);
+            if (task && task.subtasks[subtaskIdx]) {
+                task.subtasks[subtaskIdx].completed = !task.subtasks[subtaskIdx].completed;
+                currentDetailTask = task; // Update reference
+                showTaskDetail(task); // Refresh display
+                renderKanban(); // Update card progress
+                autoSave();
+            }
+        }
+
+        function deleteSubtask(taskId, subtaskIdx) {
+            const task = tasks.find(t => t.id === taskId);
+            if (task && confirm(t('confirm.deleteSubtask'))) {
+                task.subtasks.splice(subtaskIdx, 1);
+                currentDetailTask = task;
+                showTaskDetail(task);
+                renderKanban();
+                autoSave();
+            }
+        }
+
+        function addSubtask(taskId) {
+            const input = document.getElementById('newSubtaskInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            const task = tasks.find(t => t.id === taskId);
+            if (task) {
+                task.subtasks.push({ completed: false, text });
+                currentDetailTask = task;
+                input.value = '';
+                showTaskDetail(task);
+                renderKanban();
+                autoSave();
+            }
+        }
+
+        function editSubtask(taskId, subtaskIdx) {
+            const task = tasks.find(t => t.id === taskId);
+            if (!task || !task.subtasks[subtaskIdx]) return;
+
+            const newText = prompt(t('prompt.editSubtask'), task.subtasks[subtaskIdx].text);
+            if (newText !== null && newText.trim()) {
+                task.subtasks[subtaskIdx].text = newText.trim();
+                currentDetailTask = task;
+                showTaskDetail(task);
+                renderKanban();
+                autoSave();
+            }
+        }
+
+        // Handle task form submission (create or edit)
+        document.getElementById('newTaskForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Get form values
+            const title = document.getElementById('taskTitle').value.trim();
+            const status = document.getElementById('taskStatus').value;
+            const priority = document.getElementById('taskPriority').value;
+            const category = document.getElementById('taskCategory').value.trim();
+            const assignee = document.getElementById('taskAssignee').value.trim();
+            const created = document.getElementById('taskCreated').value;
+            const started = document.getElementById('taskStarted').value;
+            const due = document.getElementById('taskDue').value;
+            const completed = document.getElementById('taskCompleted').value;
+            const tagsInput = document.getElementById('taskTags').value.trim();
+            const description = document.getElementById('taskDescription').value.trim();
+            const notes = document.getElementById('taskNotes').value.trim();
+
+            // Parse tags and assignees
+            const tags = tagsInput ? tagsInput.split(/\s+/).filter(t => t.startsWith('#') || t).map(t => t.startsWith('#') ? t : '#' + t) : [];
+            const assignees = assignee ? assignee.split(',').map(a => a.trim()) : [];
+
+            if (isEditMode) {
+                // Edit existing task
+                const taskId = document.getElementById('taskEditId').value;
+                const task = tasks.find(t => t.id === taskId);
+                if (task) {
+                    task.title = title;
+                    task.status = status;
+                    task.priority = priority;
+                    task.category = category;
+                    task.assignees = assignees;
+                    task.tags = tags;
+                    task.created = created;
+                    task.started = started;
+                    task.due = due;
+                    task.completed = completed;
+                    task.description = description;
+                    task.subtasks = formSubtasks;
+                    task.notes = notes;
+                    showNotification(t('notif.taskEdited', {id: taskId}), 'success');
+                }
+            } else {
+                // Create new task
+                config.lastTaskId++;
+                const newTaskId = 'TASK-' + String(config.lastTaskId).padStart(3, '0');
+                tasks.push({
+                    id: newTaskId,
+                    title,
+                    status,
+                    priority,
+                    category,
+                    assignees,
+                    tags,
+                    created: created || new Date().toISOString().split('T')[0],
+                    started: started || '',
+                    due,
+                    completed: completed || '',
+                    description,
+                    subtasks: formSubtasks,
+                    notes
+                });
+                showNotification(t('notif.taskCreated', {id: newTaskId}), 'success');
+            }
+
+            closeTaskModal();
+            renderKanban();
+            autoSave();
+        });
+
+        // Archive functions
+        async function loadArchive() {
+            console.log('🗃️ === LOADING ARCHIVE ===');
+            try {
+                archiveFileHandle = await directoryHandle.getFileHandle('archive.md');
+                console.log('✓ Archive file handle obtained');
+                const file = await archiveFileHandle.getFile();
+                console.log('✓ Archive file loaded, size:', file.size, 'bytes');
+                const content = await file.text();
+                console.log('✓ Archive content read, length:', content.length, 'characters');
+                console.log('Archive content preview:', content.substring(0, 500));
+
+                // Use the SAME section parser for archive.md!
+                console.log('📖 Using unified parseTasksFromSection() parser...');
+
+                // Parse the "✅ Archives" section directly with status 'archived'
+                archivedTasks = parseTasksFromSection(content, '✅ Archives', 'archived');
+
+                console.log('✓ Archive parsed. Total archived tasks:', archivedTasks.length);
+                if (archivedTasks.length > 0) {
+                    console.log('Archive tasks:', archivedTasks.map(t => `${t.id} (${t.status})`).join(', '));
+                }
+            } catch (error) {
+                console.error('❌ archive.md not found or error:', error);
+                archivedTasks = [];
+            }
+        }
+
+        async function saveArchive() {
+            if (!archiveFileHandle) {
+                archiveFileHandle = await directoryHandle.getFileHandle('archive.md', { create: true });
+            }
+
+            let md = `${t('markdown.archiveTitle')}\n\n${t('markdown.archiveDesc')}\n\n${t('markdown.archiveSection')}\n\n`;
+            archivedTasks.forEach(task => {
+                md += `### ${task.id} | ${task.title}\n`;
+                let meta = '';
+                if (task.priority) meta += `**Priority**: ${task.priority}`;
+                if (task.category) meta += ` | **Category**: ${task.category}`;
+                if (task.assignees.length > 0) meta += ` | **Assigned**: ${task.assignees.join(', ')}`;
+                if (meta) md += `${meta}\n`;
+
+                // Write dates line
+                let dates = '';
+                if (task.created) dates += `**Created**: ${task.created}`;
+                if (task.started) dates += (dates ? ' | ' : '') + `**Started**: ${task.started}`;
+                if (task.due) dates += (dates ? ' | ' : '') + `**Due**: ${task.due}`;
+                if (task.completed) dates += (dates ? ' | ' : '') + `**Finished**: ${task.completed}`;
+                if (dates) md += `${dates}\n`;
+                if (task.tags.length > 0) md += `**Tags**: ${task.tags.join(' ')}\n`;
+                if (task.description) md += `\n${task.description}\n`;
+                if (task.subtasks.length > 0) {
+                    md += `\n**Subtasks**:\n`;
+                    task.subtasks.forEach(st => md += `- [${st.completed ? 'x' : ' '}] ${st.text}\n`);
+                }
+                if (task.notes) {
+                    md += `\n**Notes**:\n${task.notes}\n`;
+                }
+                md += `\n`;
+            });
+
+            const writable = await archiveFileHandle.createWritable();
+            await writable.write(md);
+            await writable.close();
+        }
+
+        function archiveCurrentTask() {
+            if (!currentDetailTask) return;
+            if (confirm(t('confirm.archiveTask', {title: currentDetailTask.title}))) {
+                // Remove from active tasks
+                const idx = tasks.findIndex(t => t.id === currentDetailTask.id);
+                if (idx >= 0) {
+                    const task = tasks.splice(idx, 1)[0];
+                    archivedTasks.push(task);
+                    saveArchive();
+                    autoSave();
+                    updateAutocomplete(); // Keep historical values in autocomplete
+                    renderKanban();
+                    closeModal();
+                    showNotification(t('notif.taskArchived'), 'success');
+                }
+            }
+        }
+
+        function deleteCurrentTask() {
+            if (!currentDetailTask) return;
+            deleteTask(currentDetailTask.id, false);
+        }
+
+        function deleteTask(taskId, fromArchive = false) {
+            const taskList = fromArchive ? archivedTasks : tasks;
+            const task = taskList.find(t => t.id === taskId);
+
+            if (!task) return;
+
+            const confirmMessage = fromArchive
+                ? t('confirm.deleteTask', {title: task.title})
+                : t('confirm.deleteTaskFromArchive', {title: task.title});
+
+            if (confirm(confirmMessage)) {
+                const idx = taskList.findIndex(t => t.id === taskId);
+                if (idx >= 0) {
+                    taskList.splice(idx, 1);
+
+                    // Save both files
+                    if (fromArchive) {
+                        saveArchive();
+                    } else {
+                        autoSave();
+                    }
+
+                    // Update UI
+                    if (fromArchive) {
+                        renderArchiveList(document.getElementById('archiveSearch').value);
+                    } else {
+                        renderKanban();
+                        closeModal();
+                    }
+
+                    showNotification(t('notif.taskDeleted'), 'success');
+                }
+            }
+        }
+
+        async function openArchiveModal() {
+            console.log('\n📂 === OPENING ARCHIVE MODAL ===');
+            await loadArchive();
+            renderArchiveList();
+            document.getElementById('archiveModal').classList.add('active');
+            console.log('✓ Archive modal opened');
+        }
+
+        function closeArchiveModal() {
+            document.getElementById('archiveModal').classList.remove('active');
+        }
+
+        function renderArchiveList(searchTerm = '') {
+            console.log('\n🎨 === RENDERING ARCHIVE LIST ===');
+            console.log('Search term:', searchTerm || '(none)');
+            console.log('Total archived tasks:', archivedTasks.length);
+
+            const list = document.getElementById('archiveList');
+            if (!list) {
+                console.error('❌ archiveList element not found!');
+                return;
+            }
+
+            const filtered = searchTerm ?
+                archivedTasks.filter(t =>
+                    t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    t.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                    t.category.toLowerCase().includes(searchTerm.toLowerCase())
+                ) : archivedTasks;
+
+            console.log('Filtered tasks:', filtered.length);
+
+            if (filtered.length === 0) {
+                console.log('⚠️ No tasks to display - showing empty message');
+                list.innerHTML = `<p style="text-align: center; color: #999; padding: 2rem;">${t('archives.empty')}</p>`;
+                return;
+            }
+
+            console.log('✓ Rendering', filtered.length, 'tasks');
+
+            list.innerHTML = filtered.map(task => `
+                <div style="background: white; border: 2px solid #e2e8f0; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+                        <div>
+                            <span style="background: #6b7280; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${task.id}</span>
+                            <strong style="margin-left: 0.5rem; font-size: 1.1rem;">${task.title}</strong>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button onclick="deleteTask('${task.id}', true)" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; background: #ef4444; color: white;">🗑️</button>
+                            <button onclick="unarchiveTask('${task.id}')" class="btn btn-primary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">↩️ Restaurer</button>
+                        </div>
+                    </div>
+                    ${task.description ? `<p style="color: #666; margin: 0.5rem 0;">${markdownToHtml(task.description)}</p>` : ''}
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+                        ${task.priority ? `<span style="background: #fbbf24; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${task.priority}</span>` : ''}
+                        ${task.category ? `<span style="background: #8b5cf6; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${task.category}</span>` : ''}
+                        ${task.tags.map(t => `<span style="background: #3b82f6; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${t}</span>`).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function unarchiveTask(taskId) {
+            const idx = archivedTasks.findIndex(t => t.id === taskId);
+            if (idx >= 0) {
+                const task = archivedTasks.splice(idx, 1)[0];
+                // Keep original column status
+                // If the column no longer exists, use first column as fallback
+                if (!config.columns.find(col => col.id === task.status)) {
+                    task.status = config.columns[0]?.id || 'todo';
+                }
+                tasks.push(task);
+                saveArchive();
+                autoSave();
+                updateAutocomplete(); // Update autocomplete after restoring
+                renderKanban();
+                renderArchiveList(document.getElementById('archiveSearch').value);
+                showNotification(t('notif.taskRestored'), 'success');
+            }
+        }
+
+        // Archive search
+        document.getElementById('archiveSearch').addEventListener('input', (e) => {
+            renderArchiveList(e.target.value);
+        });
+
+        // Event listeners
+        document.getElementById('newTaskBtn').addEventListener('click', () => openTaskModal());
+        document.getElementById('archiveBtn').addEventListener('click', openArchiveModal);
+        document.getElementById('manageColsBtn').addEventListener('click', openColumnsModal);
+
+        // Generate Markdown from tasks - SIMPLIFIED!
+        function generateMarkdown() {
+            let md = `# Kanban Board\n\n<!-- Config: Last Task ID: ${config.lastTaskId} -->\n\n`;
+
+            // Update config with values from tasks (merge with existing)
+            const allCategories = new Set(config.categories || []);
+            const allUsers = new Set(config.users || []);
+            const allTags = new Set(config.tags || []);
+
+            tasks.forEach(task => {
+                if (task.category) allCategories.add(task.category);
+                task.assignees.forEach(u => allUsers.add(u));
+                task.tags.forEach(t => allTags.add(t.replace('#', '')));
+            });
+
+            // Update config with merged values
+            config.categories = [...allCategories];
+            config.users = [...allUsers];
+            config.tags = [...allTags];
+
+            // Ensure defaults exist
+            if (config.categories.length === 0) {
+                config.categories = ['Frontend', 'Backend', 'Design', 'DevOps', 'Tests', 'Documentation'];
+            }
+            if (config.users.length === 0) {
+                config.users = ['@user (Utilisateur)'];
+            }
+            if (config.priorities.length === 0) {
+                config.priorities = ['🔴 Critique', '🟠 Haute', '🟡 Moyenne', '🟢 Basse'];
+            }
+            if (config.tags.length === 0) {
+                config.tags = ['bug', 'feature', 'ui', 'backend', 'urgent', 'refactor', 'docs', 'test'];
+            }
+
+            // Add config section
+            md += `## ⚙️ Configuration\n\n`;
+            md += `**Colonnes**: ${config.columns.map(c => `${c.name} (${c.id})`).join(' | ')}\n\n`;
+            md += `**Catégories**: ${config.categories.join(', ')}\n\n`;
+            md += `**Utilisateurs**: ${config.users.join(', ')}\n\n`;
+            md += `**Priorités**: ${config.priorities.join(' | ')}\n\n`;
+            md += `**Tags**: ${config.tags.map(t => '#' + t).join(' ')}\n\n`;
+            md += `---\n\n`;
+
+            // Add tasks by column
+            config.columns.forEach(column => {
+                md += `## ${column.name}\n\n`;
+
+                const columnTasks = tasks.filter(t => t.status === column.id);
+                columnTasks.forEach(task => {
+                    md += `### ${task.id} | ${task.title}\n`;
+
+                    let meta = '';
+                    if (task.priority) meta += `**Priority**: ${task.priority}`;
+                    if (task.category) meta += ` | **Category**: ${task.category}`;
+                    if (task.assignees.length > 0) meta += ` | **Assigned**: ${task.assignees.join(', ')}`;
+                    if (meta) md += meta + '\n';
+
+                    // Write dates line
+                    let dates = '';
+                    if (task.created) dates += `**Created**: ${task.created}`;
+                    if (task.started) dates += (dates ? ' | ' : '') + `**Started**: ${task.started}`;
+                    if (task.due) dates += (dates ? ' | ' : '') + `**Due**: ${task.due}`;
+                    if (task.completed) dates += (dates ? ' | ' : '') + `**Finished**: ${task.completed}`;
+                    if (dates) md += dates + '\n';
+
+                    if (task.tags.length > 0) {
+                        md += `**Tags**: ${task.tags.join(' ')}\n`;
+                    }
+
+                    if (task.description) {
+                        md += `\n${task.description}\n`;
+                    }
+
+                    if (task.subtasks.length > 0) {
+                        md += `\n**Subtasks**:\n`;
+                        task.subtasks.forEach(st => {
+                            md += `- [${st.completed ? 'x' : ' '}] ${st.text}\n`;
+                        });
+                    }
+
+                    if (task.notes) {
+                        md += `\n**Notes**:\n${task.notes}\n`;
+                    }
+
+                    md += `\n`; // Just one blank line between tasks, no ---
+                });
+            });
+
+            return md;
+        }
+
+        // Show notification
+        function showNotification(message, type = 'success') {
+            const notification = document.getElementById('notification');
+            const notificationText = document.getElementById('notificationText');
+
+            notificationText.textContent = message;
+            notification.className = `notification ${type} show`;
+
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

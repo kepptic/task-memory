@@ -1,0 +1,58 @@
+# Instructions for GitHub Copilot
+
+## 📋 Task Management System
+
+**Every action = One documented task in kanban.md**
+
+This project uses a Markdown-based task management system.
+
+## 📚 Complete Documentation
+
+**⚠️ CONSULT**: `AI_WORKFLOW.md` at the project root
+
+This file contains everything: format, workflow, commands, examples.
+
+## ⚙️ Critical Rule #1
+
+**NO `##` or `###` headings inside a task**
+- Use `**Subtasks**:` and `**Notes**:` with colons
+- Subsections: `**Result**:`, `**Modified files**:`
+
+**Why?** The HTML parser does not recognize `##` inside tasks.
+
+## 📁 Important Files
+
+- `kanban.md` - Active tasks (To Do, In Progress, Done)
+- `archive.md` - Archived tasks
+- `AI_WORKFLOW.md` - Complete workflow documentation
+- `task-manager.html` - Kanban visualization application
+
+## 🔄 Task Workflow
+
+### New task
+1. Create in `kanban.md` → "📝 To Do" section
+2. Auto-incremented ID (TASK-XXX)
+3. Strict format required (see AI_WORKFLOW.md)
+
+### In progress
+1. Move → "🚀 In Progress"
+2. Add `**Started**: YYYY-MM-DD`
+3. Check off subtasks progressively
+
+### Done
+1. Move → "✅ Done"
+2. Add `**Finished**: YYYY-MM-DD`
+3. Document in `**Notes**:`
+4. **Archive only on user request** (do not archive automatically)
+
+## 💬 User commands
+
+- "Do TASK-XXX" - Execute a task
+- "Continue TASK-XXX" - Resume a task
+- "Plan [feature]" - Create a new task
+- "Where are we?" - Status update
+- "Archive completed tasks" - Move to archive.md
+
+---
+
+**Consult AI_WORKFLOW.md for complete details.**
