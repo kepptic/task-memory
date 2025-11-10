@@ -274,6 +274,24 @@ For **Claude**:
 cp CLAUDE.md.exemple your-project/CLAUDE.md
 ```
 
+**For Claude Code (CLI)**: A dedicated skill is available!
+```bash
+# Copy the skill to your global Claude Code configuration
+cp .claude/skills/markdown-task-manager.md ~/.claude/skills/
+# Restart Claude Code to activate the skill
+```
+
+The `markdown-task-manager` skill enables Claude Code to automatically manage your tasks with the required strict format. Once installed globally, it's available across all your projects.
+
+**Using the Claude Code skill:**
+Once the skill is installed and Claude Code is restarted, the skill will automatically detect projects containing `kanban.md` and `archive.md`. You can simply ask:
+- "Create a task to implement authentication"
+- "Update TASK-007 with results"
+- "List all tasks in progress"
+- "Archive completed tasks"
+
+Claude Code will automatically follow the strict format and manage your tasks correctly.
+
 For **GitHub Copilot**:
 ```bash
 mkdir -p your-project/.github
