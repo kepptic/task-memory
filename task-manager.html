@@ -135,9 +135,8 @@
             border-radius: 8px;
             padding: 1rem;
             box-shadow: var(--shadow);
-            min-width: 320px;
-            width: 320px;
-            flex-shrink: 0;
+            min-width: 280px;
+            flex: 1 1 0;
             display: flex;
             flex-direction: column;
         }
@@ -461,6 +460,11 @@
             to { transform: rotate(360deg); }
         }
 
+        #deleteProjectBtn:hover {
+            background: #ef4444 !important;
+            color: white !important;
+        }
+
         .empty-state {
             text-align: center;
             padding: 2rem;
@@ -492,6 +496,7 @@
                 <select id="projectSelector" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.9rem; background: white; cursor: pointer; min-width: 180px;">
                 </select>
                 <button id="renameProjectBtn" class="btn btn-secondary" style="display: none; padding: 0.6rem;" title="Renommer le projet" onclick="renameCurrentProject()">✏️</button>
+                <button id="deleteProjectBtn" class="btn btn-secondary" style="display: none; padding: 0.6rem;" title="Supprimer le projet" onclick="deleteCurrentProject()">🗑️</button>
                 <button id="selectFolderBtn" class="btn btn-primary">📁 Dossier</button>
                 <button id="newTaskBtn" class="btn btn-secondary" style="display: none;">➕ Tâche</button>
                 <button id="archiveBtn" class="btn btn-secondary" style="display: none;">📦 Archives</button>
@@ -750,6 +755,7 @@
                 // Header
                 'header.title': '📋 Task Manager',
                 'header.renameProject': 'Rename project',
+                'header.deleteProject': 'Remove project from list',
                 'header.folder': '📁 Folder',
                 'header.newTask': '➕ Task',
                 'header.archives': '📦 Archives',
@@ -872,6 +878,7 @@
                 'notif.permissionDenied': 'Permission denied for this project',
                 'notif.projectError': 'Error switching project',
                 'notif.projectRenamed': 'Project renamed successfully',
+                'notif.projectDeleted': 'Project removed from list',
                 'notif.renameError': 'Error renaming',
                 'notif.projectRestored': 'Project restored automatically',
                 'notif.taskMoved': 'Task moved!',
@@ -889,6 +896,7 @@
                 'prompt.editSubtask': 'Edit subtask:',
                 'confirm.deleteColumn': 'Delete this column?',
                 'confirm.deleteSubtask': 'Delete this subtask?',
+                'confirm.deleteProject': 'Remove project "{name}" from the recent list?\n\nThis only removes it from the dropdown - your files will not be deleted.',
                 'confirm.archiveTask': 'Archive task "{title}"?',
                 'confirm.deleteTask': '⚠️ WARNING: Permanently delete task "{title}"?\n\nThis action cannot be undone.',
                 'confirm.deleteTaskFromArchive': '⚠️ WARNING: Permanently delete task "{title}"?\n\nThis action cannot be undone.\n\nIf you want to keep it in history, use "Archive" instead.',
@@ -922,6 +930,7 @@
                 // Header
                 'header.title': '📋 Task Manager',
                 'header.renameProject': 'Renommer le projet',
+                'header.deleteProject': 'Retirer le projet de la liste',
                 'header.folder': '📁 Dossier',
                 'header.newTask': '➕ Tâche',
                 'header.archives': '📦 Archives',
@@ -1044,6 +1053,7 @@
                 'notif.permissionDenied': 'Permission refusée pour ce projet',
                 'notif.projectError': 'Erreur lors du changement de projet',
                 'notif.projectRenamed': 'Projet renommé avec succès',
+                'notif.projectDeleted': 'Projet retiré de la liste',
                 'notif.renameError': 'Erreur lors du renommage',
                 'notif.projectRestored': 'Projet restauré automatiquement',
                 'notif.taskMoved': 'Tâche déplacée !',
@@ -1061,6 +1071,7 @@
                 'prompt.editSubtask': 'Modifier la sous-tâche:',
                 'confirm.deleteColumn': 'Supprimer cette colonne ?',
                 'confirm.deleteSubtask': 'Supprimer cette sous-tâche ?',
+                'confirm.deleteProject': 'Retirer le projet "{name}" de la liste récente ?\n\nCeci retire seulement le projet du menu déroulant - vos fichiers ne seront pas supprimés.',
                 'confirm.archiveTask': 'Archiver la tâche "{title}" ?',
                 'confirm.deleteTask': '⚠️ ATTENTION : Supprimer définitivement la tâche "{title}" ?\n\nCette action est irréversible.',
                 'confirm.deleteTaskFromArchive': '⚠️ ATTENTION : Supprimer définitivement la tâche "{title}" ?\n\nCette action est irréversible.\n\nSi vous voulez la conserver dans l\'historique, utilisez plutôt "Archiver".',
@@ -1109,6 +1120,7 @@
             // Update header
             document.getElementById('headerTitle').textContent = t('header.title');
             document.getElementById('renameProjectBtn').title = t('header.renameProject');
+            document.getElementById('deleteProjectBtn').title = t('header.deleteProject');
             document.getElementById('selectFolderBtn').innerHTML = t('header.folder');
             document.getElementById('newTaskBtn').innerHTML = t('header.newTask');
             document.getElementById('archiveBtn').innerHTML = t('header.archives');
@@ -1268,6 +1280,7 @@
             if (labels[0]) labels[0].textContent = t('filters.tags');
             if (labels[1]) labels[1].textContent = t('filters.category');
             if (labels[2]) labels[2].textContent = t('filters.user');
+            if (labels[3]) labels[3].textContent = t('filters.priority');
 
             // Update select options
             const selects = filterBar.querySelectorAll('select option[value=""]');
@@ -1478,6 +1491,7 @@
             const projects = await loadRecentProjects();
             const selector = document.getElementById('projectSelector');
             const renameBtn = document.getElementById('renameProjectBtn');
+            const deleteBtn = document.getElementById('deleteProjectBtn');
 
             if (projects.length > 0) {
                 selector.style.display = 'block';
@@ -1486,11 +1500,13 @@
                 const isKanbanLoaded = document.getElementById('kanbanView').style.display !== 'none';
                 const currentProject = (isKanbanLoaded && directoryHandle) ? directoryHandle.name : '';
 
-                // Show/hide rename button
+                // Show/hide rename and delete buttons
                 if (isKanbanLoaded) {
                     renameBtn.style.display = 'inline-flex';
+                    deleteBtn.style.display = 'inline-flex';
                 } else {
                     renameBtn.style.display = 'none';
+                    deleteBtn.style.display = 'none';
                 }
 
                 // Add empty option if no project is loaded
@@ -1511,6 +1527,7 @@
             } else {
                 selector.style.display = 'none';
                 renameBtn.style.display = 'none';
+                deleteBtn.style.display = 'none';
             }
         }
 
@@ -1537,6 +1554,9 @@
                         document.getElementById('newTaskBtn').style.display = 'inline-flex';
                         document.getElementById('archiveBtn').style.display = 'inline-flex';
                         document.getElementById('manageColsBtn').style.display = 'inline-flex';
+
+                        // Update project selector now that kanban is visible
+                        await updateProjectSelector();
 
                         showNotification(t('notif.projectLoaded', {name: project.customName || project.name}), 'success');
                     } else {
@@ -1568,6 +1588,54 @@
                 }
             } catch (error) {
                 console.error('Error renaming project:', error);
+                showNotification(t('notif.renameError'), 'error');
+            }
+        }
+
+        // Delete current project from recent list
+        async function deleteCurrentProject() {
+            if (!directoryHandle) return;
+
+            try {
+                const projects = await loadRecentProjects();
+                const currentProject = projects.find(p => p.name === directoryHandle.name);
+
+                if (currentProject) {
+                    const displayName = currentProject.customName || currentProject.name;
+
+                    if (confirm(t('confirm.deleteProject', {name: displayName}))) {
+                        // Remove from projects list
+                        const updatedProjects = projects.filter(p => p.name !== directoryHandle.name);
+
+                        // Save updated list to IndexedDB
+                        const db = await openDB();
+                        const transaction = db.transaction(STORE_NAME, 'readwrite');
+                        const store = transaction.objectStore(STORE_NAME);
+                        store.put(updatedProjects, PROJECTS_KEY);
+
+                        await new Promise((resolve, reject) => {
+                            transaction.oncomplete = resolve;
+                            transaction.onerror = () => reject(transaction.error);
+                        });
+
+                        // Clear current project and show welcome screen
+                        directoryHandle = null;
+                        kanbanFileHandle = null;
+                        tasks = [];
+
+                        document.getElementById('kanbanView').style.display = 'none';
+                        document.getElementById('filterBar').style.display = 'none';
+                        document.getElementById('newTaskBtn').style.display = 'none';
+                        document.getElementById('archiveBtn').style.display = 'none';
+                        document.getElementById('manageColsBtn').style.display = 'none';
+                        document.getElementById('welcomeScreen').style.display = 'block';
+
+                        await updateProjectSelector();
+                        showNotification(t('notif.projectDeleted'), 'success');
+                    }
+                }
+            } catch (error) {
+                console.error('Error deleting project:', error);
                 showNotification(t('notif.renameError'), 'error');
             }
         }
@@ -1641,6 +1709,9 @@
                 document.getElementById('newTaskBtn').style.display = 'inline-flex';
                 document.getElementById('archiveBtn').style.display = 'inline-flex';
                 document.getElementById('manageColsBtn').style.display = 'inline-flex';
+
+                // Update project selector now that kanban is visible
+                await updateProjectSelector();
 
                 showNotification(t('notif.folderLoaded'), 'success');
             } catch (error) {
@@ -2166,8 +2237,12 @@ ${t('markdown.archiveSection')}
             document.getElementById('filterUserSelect').innerHTML = `<option value="">${t('filters.select')}</option>` + users.map(u => `<option value="${u}">${u}</option>`).join('');
 
             // Update priority filter select from config
-            const priorities = (config.priorities || []).map(p => p.replace(/^[🔴🟠🟡🟢]\s*/, '').trim());
-            document.getElementById('filterPrioritySelect').innerHTML = `<option value="">${t('filters.select')}</option>` + priorities.map(p => `<option value="${p}">${p}</option>`).join('');
+            const priorities = (config.priorities || []);
+            const prioritiesWithoutPrefix = priorities.map(p => {
+                // Remove any non-alphanumeric characters (emojis, symbols, etc.) from the start
+                return p.replace(/^[^\w\s]+\s*/, '').trim();
+            });
+            document.getElementById('filterPrioritySelect').innerHTML = `<option value="">${t('filters.select')}</option>` + priorities.map((p, i) => `<option value="${prioritiesWithoutPrefix[i]}">${p}</option>`).join('');
         }
 
         // Filter functions
@@ -2239,9 +2314,25 @@ ${t('markdown.archiveSection')}
 
             container.innerHTML = activeFilters.map((f, idx) => {
                 const escapedValue = f.value.replace(/'/g, "\\'");
+
+                // Determine display value based on filter type
+                let displayValue = f.value;
+
+                // For priority filters, display with prefix/emoji from config
+                if (f.type === 'priority' && config.priorities) {
+                    const priorityWithPrefix = config.priorities.find(p => {
+                        // Remove any non-alphanumeric prefix (emojis, symbols, etc.) from the start
+                        const withoutPrefix = p.replace(/^[^\w\s]+\s*/, '').trim();
+                        return withoutPrefix === f.value;
+                    });
+                    if (priorityWithPrefix) {
+                        displayValue = priorityWithPrefix;
+                    }
+                }
+
                 return `
                 <span style="background: ${colors[f.type]}; color: white; padding: 0.35rem 0.75rem; border-radius: 16px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 500;">
-                    ${f.value}
+                    ${displayValue}
                     <button onclick="removeFilter(${idx})" style="background: none; border: none; color: white; cursor: pointer; padding: 0; font-weight: bold; font-size: 1.1rem; line-height: 1;" title="Supprimer ce filtre">✕</button>
                 </span>
                 `;
