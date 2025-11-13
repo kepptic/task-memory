@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -23,10 +23,15 @@
             --shadow-hover: 0 4px 8px rgba(0,0,0,0.15);
 
             /* Priority colors */
-            --priority-critical: #EF4444;
-            --priority-high: #F97316;
-            --priority-medium: #EAB308;
-            --priority-low: #22C55E;
+            --priority-default: #888888;
+            --priority-red: #EF4444;
+            --priority-orange: #F97316;
+            --priority-yellow: #EAB308;
+            --priority-green: #22C55E;
+            --priority-blue: #3B82F6;
+            --priority-purple: #A855F7;
+            --priority-white: #E5E7EB;
+            --priority-black: #1F2937;
         }
 
         body {
@@ -228,12 +233,18 @@
 
         .badge-priority {
             color: white;
+            background: var(--priority-default);
         }
 
-        .badge-priority.Critical { background: var(--priority-critical); }
-        .badge-priority.High { background: var(--priority-high); }
-        .badge-priority.Medium { background: var(--priority-medium); }
-        .badge-priority.Low { background: var(--priority-low); }
+        .badge-priority.Default { background: var(--priority-default); }
+        .badge-priority.Red { background: var(--priority-red); }
+        .badge-priority.Orange { background: var(--priority-orange); }
+        .badge-priority.Yellow { background: var(--priority-yellow); }
+        .badge-priority.Green { background: var(--priority-green); }
+        .badge-priority.Blue { background: var(--priority-blue); }
+        .badge-priority.Purple { background: var(--priority-purple); }
+        .badge-priority.White { background: var(--priority-white); color: #1F2937; }
+        .badge-priority.Black { background: var(--priority-black); }
 
         .badge-category {
             background: #E3F2FD;
@@ -798,10 +809,10 @@
                 'taskForm.columnLabel': 'Column *',
                 'taskForm.priorityLabel': 'Priority',
                 'taskForm.priorityNone': 'None',
-                'taskForm.priorityCritical': '🔴 Critical',
-                'taskForm.priorityHigh': '🟠 High',
-                'taskForm.priorityMedium': '🟡 Medium',
-                'taskForm.priorityLow': '🟢 Low',
+                'taskForm.priorityCritical': 'Critical',
+                'taskForm.priorityHigh': 'High',
+                'taskForm.priorityMedium': 'Medium',
+                'taskForm.priorityLow': 'Low',
                 'taskForm.categoryLabel': 'Category',
                 'taskForm.categoryPlaceholder': 'Frontend, Backend...',
                 'taskForm.assignedLabel': 'Assigned to',
@@ -973,10 +984,10 @@
                 'taskForm.columnLabel': 'Colonne *',
                 'taskForm.priorityLabel': 'Priorité',
                 'taskForm.priorityNone': 'Aucune',
-                'taskForm.priorityCritical': '🔴 Critique',
-                'taskForm.priorityHigh': '🟠 Haute',
-                'taskForm.priorityMedium': '🟡 Moyenne',
-                'taskForm.priorityLow': '🟢 Basse',
+                'taskForm.priorityCritical': 'Critique',
+                'taskForm.priorityHigh': 'Haute',
+                'taskForm.priorityMedium': 'Moyenne',
+                'taskForm.priorityLow': 'Basse',
                 'taskForm.categoryLabel': 'Catégorie',
                 'taskForm.categoryPlaceholder': 'Frontend, Backend...',
                 'taskForm.assignedLabel': 'Assigné à',
@@ -1100,6 +1111,60 @@
             }
         };
 
+        const priorityIconClasses = {
+          // Color circles
+          '🟢': 'Green',
+          '🟡': 'Yellow',
+          '🟠': 'Orange',
+          '🔴': 'Red',
+          '🔵': 'Blue',
+          '🟣': 'Purple',
+          '⚪': 'White',
+          '⚫': 'Black',
+          // Hearts
+          '❤️': 'Red',
+          '🧡': 'Orange',
+          '💛': 'Yellow',
+          '💚': 'Green',
+          '💙': 'Blue',
+          '💜': 'Purple',
+          '🤍': 'White',
+          '🖤': 'Black',
+          // Squares
+          '🟥': 'Red',
+          '🟧': 'Orange',
+          '🟨': 'Yellow',
+          '🟩': 'Green',
+          '🟦': 'Blue',
+          '🟪': 'Purple',
+          // Diamonds
+          '🔶': 'Orange',
+          '🔷': 'Blue',
+          '🔸': 'Orange',
+          '🔹': 'Blue',
+          // Stars
+          '⭐': 'Yellow',
+          '🌟': 'Yellow',
+          // Flags
+          '🚩': 'Red',
+          '🏴': 'Black',
+          '🏳️': 'White',
+          // Alert symbols
+          '⚠️': 'Yellow',
+          '🔥': 'Orange',
+          '💥': 'Red',
+          '⚡': 'Yellow',
+          // Arrows
+          '⬆️': 'Red',
+          '➡️': 'Blue',
+          '⬇️': 'Green',
+          // Exclamation/Question
+          '❗': 'Red',
+          '❓': 'Blue',
+          '❕': 'Red',
+          '❔': 'Blue',
+        }
+
         // Translation function
         function t(key, params = {}) {
             let text = translations[currentLanguage]?.[key] || translations['en'][key] || key;
@@ -1110,6 +1175,49 @@
             });
 
             return text;
+        }
+
+        // Clean function
+        function clean(text) {
+            // Remove any non-alphanumeric characters (emojis, symbols, etc.)
+            return text.replace(/[^\w\s]+/, '').trim();
+        }
+
+        // Get first emoji from text
+        function getFirstEmoji(text) {
+            const matches = text.match(/[^\w\s]+/);
+            if (!matches) {
+                return '';
+            }
+
+            // Take matched emojis, expand to array, take first element
+            // This method is required to handle double byte characters
+            return [...matches[0]][0] || '';
+        }
+
+        // Translate priority default values
+        function displayPriority(priority) {
+            if (!priority || currentLanguage === 'en') return priority;
+
+            const emoji = getFirstEmoji(priority);
+            const text = clean(priority);
+
+            // Map default English priorities to translation keys
+            const keyMap = {
+                'Critical': 'taskForm.priorityCritical',
+                'High': 'taskForm.priorityHigh',
+                'Medium': 'taskForm.priorityMedium',
+                'Low': 'taskForm.priorityLow'
+            };
+
+            // If it's a default priority, translate it
+            if (keyMap[text]) {
+                const translatedText = t(keyMap[text]);
+                return emoji + (emoji ? ' ' : '') + translatedText;
+            }
+
+            // Custom priority - return as-is
+            return priority;
         }
 
         // Update all static text elements in the UI
@@ -1234,15 +1342,15 @@
                 }
             });
 
-            // Update priority options
+            // Update priority options - use language-independent keys
             const prioritySelect = document.getElementById('taskPriority');
             if (prioritySelect) {
                 prioritySelect.innerHTML = `
                     <option value="">${t('taskForm.priorityNone')}</option>
-                    <option value="Critique">${t('taskForm.priorityCritical')}</option>
-                    <option value="Haute">${t('taskForm.priorityHigh')}</option>
-                    <option value="Moyenne">${t('taskForm.priorityMedium')}</option>
-                    <option value="Basse">${t('taskForm.priorityLow')}</option>
+                    <option value="Critical">${t('taskForm.priorityCritical')}</option>
+                    <option value="High">${t('taskForm.priorityHigh')}</option>
+                    <option value="Medium">${t('taskForm.priorityMedium')}</option>
+                    <option value="Low">${t('taskForm.priorityLow')}</option>
                 `;
             }
 
@@ -1321,6 +1429,9 @@
 
             // Update static text elements
             updateStaticTexts();
+
+            // Update filter dropdowns (including priorities)
+            updateAutocomplete();
 
             // Re-render the interface
             renderKanban();
@@ -1841,7 +1952,7 @@ ${t('markdown.archiveSection')}
                 console.log('Config section found');
 
                 // Parse columns - FIXED REGEX
-                const columnsMatch = configText.match(/\*\*Colonnes\*\*:\s*(.+)/);
+                const columnsMatch = configText.match(/\*\*Columns\*\*:\s*(.+)/);
                 if (columnsMatch) {
                     console.log('Raw columns:', columnsMatch[1]);
                     config.columns = columnsMatch[1].split('|').map(col => {
@@ -1856,21 +1967,21 @@ ${t('markdown.archiveSection')}
                 }
 
                 // Parse categories
-                const categoriesMatch = configText.match(/\*\*Catégories\*\*:\s*(.+)/);
+                const categoriesMatch = configText.match(/\*\*Categories\*\*:\s*(.+)/);
                 if (categoriesMatch) {
                     config.categories = categoriesMatch[1].split(',').map(c => c.trim()).filter(Boolean);
                     console.log('Parsed categories:', config.categories);
                 }
 
                 // Parse users
-                const usersMatch = configText.match(/\*\*Utilisateurs\*\*:\s*(.+)/);
+                const usersMatch = configText.match(/\*\*Users\*\*:\s*(.+)/);
                 if (usersMatch) {
                     config.users = usersMatch[1].split(',').map(u => u.trim()).filter(Boolean);
                     console.log('Parsed users:', config.users);
                 }
 
                 // Parse priorities
-                const prioritiesMatch = configText.match(/\*\*Priorités\*\*:\s*(.+)/);
+                const prioritiesMatch = configText.match(/\*\*Priorities\*\*:\s*(.+)/);
                 if (prioritiesMatch) {
                     config.priorities = prioritiesMatch[1].split('|').map(p => p.trim()).filter(Boolean);
                     console.log('Parsed priorities:', config.priorities);
@@ -2238,11 +2349,7 @@ ${t('markdown.archiveSection')}
 
             // Update priority filter select from config
             const priorities = (config.priorities || []);
-            const prioritiesWithoutPrefix = priorities.map(p => {
-                // Remove any non-alphanumeric characters (emojis, symbols, etc.) from the start
-                return p.replace(/^[^\w\s]+\s*/, '').trim();
-            });
-            document.getElementById('filterPrioritySelect').innerHTML = `<option value="">${t('filters.select')}</option>` + priorities.map((p, i) => `<option value="${prioritiesWithoutPrefix[i]}">${p}</option>`).join('');
+            document.getElementById('filterPrioritySelect').innerHTML = `<option value="">${t('filters.select')}</option>` + priorities.map((p, i) => `<option value="${clean(p)}">${displayPriority(p)}</option>`).join('');
         }
 
         // Filter functions
@@ -2320,19 +2427,15 @@ ${t('markdown.archiveSection')}
 
                 // For priority filters, display with prefix/emoji from config
                 if (f.type === 'priority' && config.priorities) {
-                    const priorityWithPrefix = config.priorities.find(p => {
-                        // Remove any non-alphanumeric prefix (emojis, symbols, etc.) from the start
-                        const withoutPrefix = p.replace(/^[^\w\s]+\s*/, '').trim();
-                        return withoutPrefix === f.value;
-                    });
-                    if (priorityWithPrefix) {
-                        displayValue = priorityWithPrefix;
+                    const priority = config.priorities.find(p => clean(p) === f.value);
+                    if (priority) {
+                        displayValue = priority;
                     }
                 }
 
                 return `
                 <span style="background: ${colors[f.type]}; color: white; padding: 0.35rem 0.75rem; border-radius: 16px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 500;">
-                    ${displayValue}
+                    ${displayPriority(displayValue)}
                     <button onclick="removeFilter(${idx})" style="background: none; border: none; color: white; cursor: pointer; padding: 0; font-weight: bold; font-size: 1.1rem; line-height: 1;" title="Supprimer ce filtre">✕</button>
                 </span>
                 `;
@@ -2455,6 +2558,11 @@ ${t('markdown.archiveSection')}
                 `<option value="${col.id}">${col.name}</option>`
             ).join('');
 
+            // Populate priorities select
+            document.getElementById('taskPriority').innerHTML = config.priorities.map(priority =>
+                `<option value="${clean(priority)}">${displayPriority(priority)}</option>`
+            ).join('');
+
             // Update autocomplete
             updateAutocomplete();
 
@@ -2573,6 +2681,17 @@ ${t('markdown.archiveSection')}
             taskEl.draggable = true;
             taskEl.dataset.taskId = task.id;
 
+            var priorityBadgeClass = "Default";
+            if (config.priorities) {
+                const priority = config.priorities.find(p => clean(p) === task.priority);
+                if (priority) {
+                    const emoji = getFirstEmoji(priority);
+                    if (emoji && priorityIconClasses[emoji]) {
+                        priorityBadgeClass = priorityIconClasses[emoji];
+                    }
+                }
+            }
+
             const subtaskProgress = task.subtasks.length > 0 ?
                 `<div class="task-subtasks">
                     <div class="subtask-progress">
@@ -2591,7 +2710,7 @@ ${t('markdown.archiveSection')}
                 <div class="task-title">${task.title}</div>
                 ${task.description ? `<div class="task-description">${markdownToHtml(task.description)}</div>` : ''}
                 <div class="task-meta">
-                    ${task.priority ? `<span class="badge badge-priority ${task.priority}" onclick="event.stopPropagation(); clickToFilter('priority', '${task.priority.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByPriority')}">${task.priority}</span>` : ''}
+                    ${task.priority ? `<span class="badge badge-priority ${priorityBadgeClass}" onclick="event.stopPropagation(); clickToFilter('priority', '${task.priority.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByPriority')}">${displayPriority(task.priority)}</span>` : ''}
                     ${task.category ? `<span class="badge badge-category" onclick="event.stopPropagation(); clickToFilter('category', '${task.category.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByCategory')}">${task.category}</span>` : ''}
                     ${task.assignees.map(a => `<span class="badge badge-assignee" onclick="event.stopPropagation(); clickToFilter('user', '${a.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByUser')}">${a}</span>`).join('')}
                     ${task.tags.map(tag => `<span class="tag" onclick="event.stopPropagation(); clickToFilter('tag', '${tag.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByTag')}">${tag}</span>`).join('')}
@@ -2651,13 +2770,14 @@ ${t('markdown.archiveSection')}
             const modal = document.getElementById('taskModal');
             const modalBody = document.getElementById('modalBody');
 
-            // Get priority icon
-            const priorityIcons = {
-                'Critique': '🔴',
-                'Haute': '🟠',
-                'Moyenne': '🟡',
-                'Basse': '🟢'
-            };
+            // Get priority with translation
+            let priorityWithIcon = task.priority;
+            if (task.priority) {
+                const priority = config.priorities.find(p => clean(p) === task.priority);
+                if (priority) {
+                    priorityWithIcon = displayPriority(priority);
+                }
+            }
 
             // Get status name
             const statusColumn = config.columns.find(col => col.id === task.status);
@@ -2678,7 +2798,7 @@ ${t('markdown.archiveSection')}
                         ${task.priority ? `
                             <div>
                                 <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">${t('meta.priority')}</div>
-                                <div style="font-weight: 500;">${priorityIcons[task.priority] || ''} ${task.priority}</div>
+                                <div style="font-weight: 500;">${displayPriority(priorityWithIcon)}</div>
                             </div>
                         ` : ''}
 
@@ -3101,7 +3221,7 @@ ${t('markdown.archiveSection')}
                     </div>
                     ${task.description ? `<p style="color: #666; margin: 0.5rem 0;">${markdownToHtml(task.description)}</p>` : ''}
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
-                        ${task.priority ? `<span style="background: #fbbf24; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${task.priority}</span>` : ''}
+                        ${task.priority ? `<span style="background: #fbbf24; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${displayPriority(task.priority)}</span>` : ''}
                         ${task.category ? `<span style="background: #8b5cf6; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${task.category}</span>` : ''}
                         ${task.tags.map(t => `<span style="background: #3b82f6; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${t}</span>`).join('')}
                     </div>
@@ -3163,10 +3283,10 @@ ${t('markdown.archiveSection')}
                 config.categories = ['Frontend', 'Backend', 'Design', 'DevOps', 'Tests', 'Documentation'];
             }
             if (config.users.length === 0) {
-                config.users = ['@user (Utilisateur)'];
+                config.users = ['@user (User)'];
             }
             if (config.priorities.length === 0) {
-                config.priorities = ['🔴 Critique', '🟠 Haute', '🟡 Moyenne', '🟢 Basse'];
+                config.priorities = ['🔴 Critical', '🟠 High', '🟡 Medium', '🟢 Low'];
             }
             if (config.tags.length === 0) {
                 config.tags = ['bug', 'feature', 'ui', 'backend', 'urgent', 'refactor', 'docs', 'test'];
@@ -3174,10 +3294,10 @@ ${t('markdown.archiveSection')}
 
             // Add config section
             md += `## ⚙️ Configuration\n\n`;
-            md += `**Colonnes**: ${config.columns.map(c => `${c.name} (${c.id})`).join(' | ')}\n\n`;
-            md += `**Catégories**: ${config.categories.join(', ')}\n\n`;
-            md += `**Utilisateurs**: ${config.users.join(', ')}\n\n`;
-            md += `**Priorités**: ${config.priorities.join(' | ')}\n\n`;
+            md += `**Columns**: ${config.columns.map(c => `${c.name} (${c.id})`).join(' | ')}\n\n`;
+            md += `**Categories**: ${config.categories.join(', ')}\n\n`;
+            md += `**Users**: ${config.users.join(', ')}\n\n`;
+            md += `**Priorities**: ${config.priorities.join(' | ')}\n\n`;
             md += `**Tags**: ${config.tags.map(t => '#' + t).join(' ')}\n\n`;
             md += `---\n\n`;
 
