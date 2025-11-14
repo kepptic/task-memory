@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -23,10 +23,15 @@
             --shadow-hover: 0 4px 8px rgba(0,0,0,0.15);
 
             /* Priority colors */
-            --priority-critical: #EF4444;
-            --priority-high: #F97316;
-            --priority-medium: #EAB308;
-            --priority-low: #22C55E;
+            --priority-default: #888888;
+            --priority-red: #EF4444;
+            --priority-orange: #F97316;
+            --priority-yellow: #EAB308;
+            --priority-green: #22C55E;
+            --priority-blue: #3B82F6;
+            --priority-purple: #A855F7;
+            --priority-white: #E5E7EB;
+            --priority-black: #1F2937;
         }
 
         body {
@@ -135,9 +140,8 @@
             border-radius: 8px;
             padding: 1rem;
             box-shadow: var(--shadow);
-            min-width: 320px;
-            width: 320px;
-            flex-shrink: 0;
+            min-width: 280px;
+            flex: 1 1 0;
             display: flex;
             flex-direction: column;
         }
@@ -229,12 +233,18 @@
 
         .badge-priority {
             color: white;
+            background: var(--priority-default);
         }
 
-        .badge-priority.Critical { background: var(--priority-critical); }
-        .badge-priority.High { background: var(--priority-high); }
-        .badge-priority.Medium { background: var(--priority-medium); }
-        .badge-priority.Low { background: var(--priority-low); }
+        .badge-priority.Default { background: var(--priority-default); }
+        .badge-priority.Red { background: var(--priority-red); }
+        .badge-priority.Orange { background: var(--priority-orange); }
+        .badge-priority.Yellow { background: var(--priority-yellow); }
+        .badge-priority.Green { background: var(--priority-green); }
+        .badge-priority.Blue { background: var(--priority-blue); }
+        .badge-priority.Purple { background: var(--priority-purple); }
+        .badge-priority.White { background: var(--priority-white); color: #1F2937; }
+        .badge-priority.Black { background: var(--priority-black); }
 
         .badge-category {
             background: #E3F2FD;
@@ -461,6 +471,11 @@
             to { transform: rotate(360deg); }
         }
 
+        #deleteProjectBtn:hover {
+            background: #ef4444 !important;
+            color: white !important;
+        }
+
         .empty-state {
             text-align: center;
             padding: 2rem;
@@ -492,6 +507,7 @@
                 <select id="projectSelector" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.9rem; background: white; cursor: pointer; min-width: 180px;">
                 </select>
                 <button id="renameProjectBtn" class="btn btn-secondary" style="display: none; padding: 0.6rem;" title="Renommer le projet" onclick="renameCurrentProject()">✏️</button>
+                <button id="deleteProjectBtn" class="btn btn-secondary" style="display: none; padding: 0.6rem;" title="Supprimer le projet" onclick="deleteCurrentProject()">🗑️</button>
                 <button id="selectFolderBtn" class="btn btn-primary">📁 Dossier</button>
                 <button id="newTaskBtn" class="btn btn-secondary" style="display: none;">➕ Tâche</button>
                 <button id="archiveBtn" class="btn btn-secondary" style="display: none;">📦 Archives</button>
@@ -750,6 +766,7 @@
                 // Header
                 'header.title': '📋 Task Manager',
                 'header.renameProject': 'Rename project',
+                'header.deleteProject': 'Remove project from list',
                 'header.folder': '📁 Folder',
                 'header.newTask': '➕ Task',
                 'header.archives': '📦 Archives',
@@ -792,10 +809,10 @@
                 'taskForm.columnLabel': 'Column *',
                 'taskForm.priorityLabel': 'Priority',
                 'taskForm.priorityNone': 'None',
-                'taskForm.priorityCritical': '🔴 Critical',
-                'taskForm.priorityHigh': '🟠 High',
-                'taskForm.priorityMedium': '🟡 Medium',
-                'taskForm.priorityLow': '🟢 Low',
+                'taskForm.priorityCritical': 'Critical',
+                'taskForm.priorityHigh': 'High',
+                'taskForm.priorityMedium': 'Medium',
+                'taskForm.priorityLow': 'Low',
                 'taskForm.categoryLabel': 'Category',
                 'taskForm.categoryPlaceholder': 'Frontend, Backend...',
                 'taskForm.assignedLabel': 'Assigned to',
@@ -872,6 +889,7 @@
                 'notif.permissionDenied': 'Permission denied for this project',
                 'notif.projectError': 'Error switching project',
                 'notif.projectRenamed': 'Project renamed successfully',
+                'notif.projectDeleted': 'Project removed from list',
                 'notif.renameError': 'Error renaming',
                 'notif.projectRestored': 'Project restored automatically',
                 'notif.taskMoved': 'Task moved!',
@@ -889,6 +907,7 @@
                 'prompt.editSubtask': 'Edit subtask:',
                 'confirm.deleteColumn': 'Delete this column?',
                 'confirm.deleteSubtask': 'Delete this subtask?',
+                'confirm.deleteProject': 'Remove project "{name}" from the recent list?\n\nThis only removes it from the dropdown - your files will not be deleted.',
                 'confirm.archiveTask': 'Archive task "{title}"?',
                 'confirm.deleteTask': '⚠️ WARNING: Permanently delete task "{title}"?\n\nThis action cannot be undone.',
                 'confirm.deleteTaskFromArchive': '⚠️ WARNING: Permanently delete task "{title}"?\n\nThis action cannot be undone.\n\nIf you want to keep it in history, use "Archive" instead.',
@@ -922,6 +941,7 @@
                 // Header
                 'header.title': '📋 Task Manager',
                 'header.renameProject': 'Renommer le projet',
+                'header.deleteProject': 'Retirer le projet de la liste',
                 'header.folder': '📁 Dossier',
                 'header.newTask': '➕ Tâche',
                 'header.archives': '📦 Archives',
@@ -964,10 +984,10 @@
                 'taskForm.columnLabel': 'Colonne *',
                 'taskForm.priorityLabel': 'Priorité',
                 'taskForm.priorityNone': 'Aucune',
-                'taskForm.priorityCritical': '🔴 Critique',
-                'taskForm.priorityHigh': '🟠 Haute',
-                'taskForm.priorityMedium': '🟡 Moyenne',
-                'taskForm.priorityLow': '🟢 Basse',
+                'taskForm.priorityCritical': 'Critique',
+                'taskForm.priorityHigh': 'Haute',
+                'taskForm.priorityMedium': 'Moyenne',
+                'taskForm.priorityLow': 'Basse',
                 'taskForm.categoryLabel': 'Catégorie',
                 'taskForm.categoryPlaceholder': 'Frontend, Backend...',
                 'taskForm.assignedLabel': 'Assigné à',
@@ -1044,6 +1064,7 @@
                 'notif.permissionDenied': 'Permission refusée pour ce projet',
                 'notif.projectError': 'Erreur lors du changement de projet',
                 'notif.projectRenamed': 'Projet renommé avec succès',
+                'notif.projectDeleted': 'Projet retiré de la liste',
                 'notif.renameError': 'Erreur lors du renommage',
                 'notif.projectRestored': 'Projet restauré automatiquement',
                 'notif.taskMoved': 'Tâche déplacée !',
@@ -1061,6 +1082,7 @@
                 'prompt.editSubtask': 'Modifier la sous-tâche:',
                 'confirm.deleteColumn': 'Supprimer cette colonne ?',
                 'confirm.deleteSubtask': 'Supprimer cette sous-tâche ?',
+                'confirm.deleteProject': 'Retirer le projet "{name}" de la liste récente ?\n\nCeci retire seulement le projet du menu déroulant - vos fichiers ne seront pas supprimés.',
                 'confirm.archiveTask': 'Archiver la tâche "{title}" ?',
                 'confirm.deleteTask': '⚠️ ATTENTION : Supprimer définitivement la tâche "{title}" ?\n\nCette action est irréversible.',
                 'confirm.deleteTaskFromArchive': '⚠️ ATTENTION : Supprimer définitivement la tâche "{title}" ?\n\nCette action est irréversible.\n\nSi vous voulez la conserver dans l\'historique, utilisez plutôt "Archiver".',
@@ -1089,6 +1111,60 @@
             }
         };
 
+        const priorityIconClasses = {
+          // Color circles
+          '🟢': 'Green',
+          '🟡': 'Yellow',
+          '🟠': 'Orange',
+          '🔴': 'Red',
+          '🔵': 'Blue',
+          '🟣': 'Purple',
+          '⚪': 'White',
+          '⚫': 'Black',
+          // Hearts
+          '❤️': 'Red',
+          '🧡': 'Orange',
+          '💛': 'Yellow',
+          '💚': 'Green',
+          '💙': 'Blue',
+          '💜': 'Purple',
+          '🤍': 'White',
+          '🖤': 'Black',
+          // Squares
+          '🟥': 'Red',
+          '🟧': 'Orange',
+          '🟨': 'Yellow',
+          '🟩': 'Green',
+          '🟦': 'Blue',
+          '🟪': 'Purple',
+          // Diamonds
+          '🔶': 'Orange',
+          '🔷': 'Blue',
+          '🔸': 'Orange',
+          '🔹': 'Blue',
+          // Stars
+          '⭐': 'Yellow',
+          '🌟': 'Yellow',
+          // Flags
+          '🚩': 'Red',
+          '🏴': 'Black',
+          '🏳️': 'White',
+          // Alert symbols
+          '⚠️': 'Yellow',
+          '🔥': 'Orange',
+          '💥': 'Red',
+          '⚡': 'Yellow',
+          // Arrows
+          '⬆️': 'Red',
+          '➡️': 'Blue',
+          '⬇️': 'Green',
+          // Exclamation/Question
+          '❗': 'Red',
+          '❓': 'Blue',
+          '❕': 'Red',
+          '❔': 'Blue',
+        }
+
         // Translation function
         function t(key, params = {}) {
             let text = translations[currentLanguage]?.[key] || translations['en'][key] || key;
@@ -1101,6 +1177,49 @@
             return text;
         }
 
+        // Clean function
+        function clean(text) {
+            // Remove any non-alphanumeric characters (emojis, symbols, etc.)
+            return text.replace(/[^\w\s]+/, '').trim();
+        }
+
+        // Get first emoji from text
+        function getFirstEmoji(text) {
+            const matches = text.match(/[^\w\s]+/);
+            if (!matches) {
+                return '';
+            }
+
+            // Take matched emojis, expand to array, take first element
+            // This method is required to handle double byte characters
+            return [...matches[0]][0] || '';
+        }
+
+        // Translate priority default values
+        function displayPriority(priority) {
+            if (!priority || currentLanguage === 'en') return priority;
+
+            const emoji = getFirstEmoji(priority);
+            const text = clean(priority);
+
+            // Map default English priorities to translation keys
+            const keyMap = {
+                'Critical': 'taskForm.priorityCritical',
+                'High': 'taskForm.priorityHigh',
+                'Medium': 'taskForm.priorityMedium',
+                'Low': 'taskForm.priorityLow'
+            };
+
+            // If it's a default priority, translate it
+            if (keyMap[text]) {
+                const translatedText = t(keyMap[text]);
+                return emoji + (emoji ? ' ' : '') + translatedText;
+            }
+
+            // Custom priority - return as-is
+            return priority;
+        }
+
         // Update all static text elements in the UI
         function updateStaticTexts() {
             // Update page title
@@ -1109,6 +1228,7 @@
             // Update header
             document.getElementById('headerTitle').textContent = t('header.title');
             document.getElementById('renameProjectBtn').title = t('header.renameProject');
+            document.getElementById('deleteProjectBtn').title = t('header.deleteProject');
             document.getElementById('selectFolderBtn').innerHTML = t('header.folder');
             document.getElementById('newTaskBtn').innerHTML = t('header.newTask');
             document.getElementById('archiveBtn').innerHTML = t('header.archives');
@@ -1222,15 +1342,15 @@
                 }
             });
 
-            // Update priority options
+            // Update priority options - use language-independent keys
             const prioritySelect = document.getElementById('taskPriority');
             if (prioritySelect) {
                 prioritySelect.innerHTML = `
                     <option value="">${t('taskForm.priorityNone')}</option>
-                    <option value="Critique">${t('taskForm.priorityCritical')}</option>
-                    <option value="Haute">${t('taskForm.priorityHigh')}</option>
-                    <option value="Moyenne">${t('taskForm.priorityMedium')}</option>
-                    <option value="Basse">${t('taskForm.priorityLow')}</option>
+                    <option value="Critical">${t('taskForm.priorityCritical')}</option>
+                    <option value="High">${t('taskForm.priorityHigh')}</option>
+                    <option value="Medium">${t('taskForm.priorityMedium')}</option>
+                    <option value="Low">${t('taskForm.priorityLow')}</option>
                 `;
             }
 
@@ -1268,6 +1388,7 @@
             if (labels[0]) labels[0].textContent = t('filters.tags');
             if (labels[1]) labels[1].textContent = t('filters.category');
             if (labels[2]) labels[2].textContent = t('filters.user');
+            if (labels[3]) labels[3].textContent = t('filters.priority');
 
             // Update select options
             const selects = filterBar.querySelectorAll('select option[value=""]');
@@ -1308,6 +1429,9 @@
 
             // Update static text elements
             updateStaticTexts();
+
+            // Update filter dropdowns (including priorities)
+            updateAutocomplete();
 
             // Re-render the interface
             renderKanban();
@@ -1478,6 +1602,7 @@
             const projects = await loadRecentProjects();
             const selector = document.getElementById('projectSelector');
             const renameBtn = document.getElementById('renameProjectBtn');
+            const deleteBtn = document.getElementById('deleteProjectBtn');
 
             if (projects.length > 0) {
                 selector.style.display = 'block';
@@ -1486,11 +1611,13 @@
                 const isKanbanLoaded = document.getElementById('kanbanView').style.display !== 'none';
                 const currentProject = (isKanbanLoaded && directoryHandle) ? directoryHandle.name : '';
 
-                // Show/hide rename button
+                // Show/hide rename and delete buttons
                 if (isKanbanLoaded) {
                     renameBtn.style.display = 'inline-flex';
+                    deleteBtn.style.display = 'inline-flex';
                 } else {
                     renameBtn.style.display = 'none';
+                    deleteBtn.style.display = 'none';
                 }
 
                 // Add empty option if no project is loaded
@@ -1511,6 +1638,7 @@
             } else {
                 selector.style.display = 'none';
                 renameBtn.style.display = 'none';
+                deleteBtn.style.display = 'none';
             }
         }
 
@@ -1537,6 +1665,9 @@
                         document.getElementById('newTaskBtn').style.display = 'inline-flex';
                         document.getElementById('archiveBtn').style.display = 'inline-flex';
                         document.getElementById('manageColsBtn').style.display = 'inline-flex';
+
+                        // Update project selector now that kanban is visible
+                        await updateProjectSelector();
 
                         showNotification(t('notif.projectLoaded', {name: project.customName || project.name}), 'success');
                     } else {
@@ -1568,6 +1699,54 @@
                 }
             } catch (error) {
                 console.error('Error renaming project:', error);
+                showNotification(t('notif.renameError'), 'error');
+            }
+        }
+
+        // Delete current project from recent list
+        async function deleteCurrentProject() {
+            if (!directoryHandle) return;
+
+            try {
+                const projects = await loadRecentProjects();
+                const currentProject = projects.find(p => p.name === directoryHandle.name);
+
+                if (currentProject) {
+                    const displayName = currentProject.customName || currentProject.name;
+
+                    if (confirm(t('confirm.deleteProject', {name: displayName}))) {
+                        // Remove from projects list
+                        const updatedProjects = projects.filter(p => p.name !== directoryHandle.name);
+
+                        // Save updated list to IndexedDB
+                        const db = await openDB();
+                        const transaction = db.transaction(STORE_NAME, 'readwrite');
+                        const store = transaction.objectStore(STORE_NAME);
+                        store.put(updatedProjects, PROJECTS_KEY);
+
+                        await new Promise((resolve, reject) => {
+                            transaction.oncomplete = resolve;
+                            transaction.onerror = () => reject(transaction.error);
+                        });
+
+                        // Clear current project and show welcome screen
+                        directoryHandle = null;
+                        kanbanFileHandle = null;
+                        tasks = [];
+
+                        document.getElementById('kanbanView').style.display = 'none';
+                        document.getElementById('filterBar').style.display = 'none';
+                        document.getElementById('newTaskBtn').style.display = 'none';
+                        document.getElementById('archiveBtn').style.display = 'none';
+                        document.getElementById('manageColsBtn').style.display = 'none';
+                        document.getElementById('welcomeScreen').style.display = 'block';
+
+                        await updateProjectSelector();
+                        showNotification(t('notif.projectDeleted'), 'success');
+                    }
+                }
+            } catch (error) {
+                console.error('Error deleting project:', error);
                 showNotification(t('notif.renameError'), 'error');
             }
         }
@@ -1641,6 +1820,9 @@
                 document.getElementById('newTaskBtn').style.display = 'inline-flex';
                 document.getElementById('archiveBtn').style.display = 'inline-flex';
                 document.getElementById('manageColsBtn').style.display = 'inline-flex';
+
+                // Update project selector now that kanban is visible
+                await updateProjectSelector();
 
                 showNotification(t('notif.folderLoaded'), 'success');
             } catch (error) {
@@ -1770,7 +1952,7 @@ ${t('markdown.archiveSection')}
                 console.log('Config section found');
 
                 // Parse columns - FIXED REGEX
-                const columnsMatch = configText.match(/\*\*Colonnes\*\*:\s*(.+)/);
+                const columnsMatch = configText.match(/\*\*Columns\*\*:\s*(.+)/);
                 if (columnsMatch) {
                     console.log('Raw columns:', columnsMatch[1]);
                     config.columns = columnsMatch[1].split('|').map(col => {
@@ -1785,21 +1967,21 @@ ${t('markdown.archiveSection')}
                 }
 
                 // Parse categories
-                const categoriesMatch = configText.match(/\*\*Catégories\*\*:\s*(.+)/);
+                const categoriesMatch = configText.match(/\*\*Categories\*\*:\s*(.+)/);
                 if (categoriesMatch) {
                     config.categories = categoriesMatch[1].split(',').map(c => c.trim()).filter(Boolean);
                     console.log('Parsed categories:', config.categories);
                 }
 
                 // Parse users
-                const usersMatch = configText.match(/\*\*Utilisateurs\*\*:\s*(.+)/);
+                const usersMatch = configText.match(/\*\*Users\*\*:\s*(.+)/);
                 if (usersMatch) {
                     config.users = usersMatch[1].split(',').map(u => u.trim()).filter(Boolean);
                     console.log('Parsed users:', config.users);
                 }
 
                 // Parse priorities
-                const prioritiesMatch = configText.match(/\*\*Priorités\*\*:\s*(.+)/);
+                const prioritiesMatch = configText.match(/\*\*Priorities\*\*:\s*(.+)/);
                 if (prioritiesMatch) {
                     config.priorities = prioritiesMatch[1].split('|').map(p => p.trim()).filter(Boolean);
                     console.log('Parsed priorities:', config.priorities);
@@ -2127,35 +2309,69 @@ ${t('markdown.archiveSection')}
             }
         }
 
+        // Helper function to normalize user identifier (extract @username from @username (Display Name))
+        function normalizeUserId(userString) {
+            if (!userString) return '';
+            // Extract @username before the space or parenthesis
+            const match = userString.match(/^(@[^\s(]+)/);
+            return match ? match[1] : userString;
+        }
+
+        // Helper function to get full user format from user ID
+        function getUserFullFormat(userId) {
+            // Check if there's a defined user in config with this ID
+            const configUser = (config.users || []).find(u => normalizeUserId(u) === userId);
+            return configUser || userId;
+        }
+
         // Extract unique values for autocomplete (including historical archived data)
         function extractUniqueValues() {
             // Start with values from config (always keep these)
             const categories = new Set(config.categories || []);
-            const users = new Set(config.users || []);
+            const userMap = new Map(); // Map from normalized ID to full format
             const tags = new Set(config.tags || []);
+
+            // First, add config users (these have the full format with display names)
+            (config.users || []).forEach(u => {
+                const normalizedId = normalizeUserId(u);
+                if (!userMap.has(normalizedId)) {
+                    userMap.set(normalizedId, u);
+                }
+            });
 
             // Extract from active tasks
             tasks.forEach(t => {
                 if (t.category) categories.add(t.category);
-                t.assignees.forEach(u => users.add(u));
+                t.assignees.forEach(u => {
+                    const normalizedId = normalizeUserId(u);
+                    // Only add if not already in map (prefer config version)
+                    if (!userMap.has(normalizedId)) {
+                        userMap.set(normalizedId, u);
+                    }
+                });
                 t.tags.forEach(tag => tags.add(tag.replace('#', '')));
             });
 
             // Extract from archived tasks (historical data)
             archivedTasks.forEach(t => {
                 if (t.category) categories.add(t.category);
-                t.assignees.forEach(u => users.add(u));
+                t.assignees.forEach(u => {
+                    const normalizedId = normalizeUserId(u);
+                    if (!userMap.has(normalizedId)) {
+                        userMap.set(normalizedId, u);
+                    }
+                });
                 t.tags.forEach(tag => tags.add(tag.replace('#', '')));
             });
 
-            return { categories: [...categories], users: [...users], tags: [...tags] };
+            return { categories: [...categories], users: [...userMap.values()], tags: [...tags] };
         }
 
         // Update autocomplete datalists and filter selects
         function updateAutocomplete() {
             const { categories, users, tags } = extractUniqueValues();
 
-            // Update form datalists
+            // Update form datalists (keep full format for proper storage)
             document.getElementById('categoriesList').innerHTML = categories.map(c => `<option value="${c}">`).join('');
             document.getElementById('usersList').innerHTML = users.map(u => `<option value="${u}">`).join('');
             document.getElementById('tagsList').innerHTML = tags.map(t => `<option value="${t}">`).join('');
@@ -2163,11 +2379,14 @@ ${t('markdown.archiveSection')}
             // Update filter selects
             document.getElementById('filterTagSelect').innerHTML = `<option value="">${t('filters.select')}</option>` + tags.map(t => `<option value="${t}">${t}</option>`).join('');
             document.getElementById('filterCategorySelect').innerHTML = `<option value="">${t('filters.select')}</option>` + categories.map(c => `<option value="${c}">${c}</option>`).join('');
-            document.getElementById('filterUserSelect').innerHTML = `<option value="">${t('filters.select')}</option>` + users.map(u => `<option value="${u}">${u}</option>`).join('');
+            document.getElementById('filterUserSelect').innerHTML = `<option value="">${t('filters.select')}</option>` + users.map(u => {
+                const normalizedId = normalizeUserId(u);
+                return `<option value="${normalizedId}">${u}</option>`;
+            }).join('');
 
             // Update priority filter select from config
-            const priorities = (config.priorities || []).map(p => p.replace(/^[🔴🟠🟡🟢]\s*/, '').trim());
-            document.getElementById('filterPrioritySelect').innerHTML = `<option value="">${t('filters.select')}</option>` + priorities.map(p => `<option value="${p}">${p}</option>`).join('');
+            const priorities = (config.priorities || []);
+            document.getElementById('filterPrioritySelect').innerHTML = `<option value="">${t('filters.select')}</option>` + priorities.map((p, i) => `<option value="${clean(p)}">${displayPriority(p)}</option>`).join('');
         }
 
         // Filter functions
@@ -2239,9 +2458,27 @@ ${t('markdown.archiveSection')}
 
             container.innerHTML = activeFilters.map((f, idx) => {
                 const escapedValue = f.value.replace(/'/g, "\\'");
+
+                // Determine display value based on filter type
+                let displayValue = f.value;
+
+                // For priority filters, display with prefix/emoji from config
+                if (f.type === 'priority' && config.priorities) {
+                    const priority = config.priorities.find(p => clean(p) === f.value);
+                    if (priority) {
+                        displayValue = priority;
+                    }
+                }
+
+                // For user filters, display with full format from config
+                if (f.type === 'user') {
+                    const fullUserFormat = getUserFullFormat(f.value);
+                    displayValue = fullUserFormat;
+                }
+
                 return `
                 <span style="background: ${colors[f.type]}; color: white; padding: 0.35rem 0.75rem; border-radius: 16px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 500;">
-                    ${f.value}
+                    ${displayPriority(displayValue)}
                     <button onclick="removeFilter(${idx})" style="background: none; border: none; color: white; cursor: pointer; padding: 0; font-weight: bold; font-size: 1.1rem; line-height: 1;" title="Supprimer ce filtre">✕</button>
                 </span>
                 `;
@@ -2257,7 +2494,8 @@ ${t('markdown.archiveSection')}
                     } else if (filter.type === 'category') {
                         return task.category === filter.value;
                     } else if (filter.type === 'user') {
-                        return task.assignees.includes(filter.value);
+                        // Normalize both the filter value and task assignees for comparison
+                        return task.assignees.some(assignee => normalizeUserId(assignee) === filter.value);
                     } else if (filter.type === 'priority') {
                         return task.priority === filter.value;
                     }
@@ -2362,6 +2600,11 @@ ${t('markdown.archiveSection')}
             // Populate columns select
             document.getElementById('taskStatus').innerHTML = config.columns.map(col =>
                 `<option value="${col.id}">${col.name}</option>`
+            ).join('');
+
+            // Populate priorities select
+            document.getElementById('taskPriority').innerHTML = config.priorities.map(priority =>
+                `<option value="${clean(priority)}">${displayPriority(priority)}</option>`
             ).join('');
 
             // Update autocomplete
@@ -2482,6 +2725,17 @@ ${t('markdown.archiveSection')}
             taskEl.draggable = true;
             taskEl.dataset.taskId = task.id;
 
+            var priorityBadgeClass = "Default";
+            if (config.priorities) {
+                const priority = config.priorities.find(p => clean(p) === task.priority);
+                if (priority) {
+                    const emoji = getFirstEmoji(priority);
+                    if (emoji && priorityIconClasses[emoji]) {
+                        priorityBadgeClass = priorityIconClasses[emoji];
+                    }
+                }
+            }
+
             const subtaskProgress = task.subtasks.length > 0 ?
                 `<div class="task-subtasks">
                     <div class="subtask-progress">
@@ -2500,9 +2754,12 @@ ${t('markdown.archiveSection')}
                 <div class="task-title">${task.title}</div>
                 ${task.description ? `<div class="task-description">${markdownToHtml(task.description)}</div>` : ''}
                 <div class="task-meta">
-                    ${task.priority ? `<span class="badge badge-priority ${task.priority}" onclick="event.stopPropagation(); clickToFilter('priority', '${task.priority.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByPriority')}">${task.priority}</span>` : ''}
+                    ${task.priority ? `<span class="badge badge-priority ${priorityBadgeClass}" onclick="event.stopPropagation(); clickToFilter('priority', '${task.priority.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByPriority')}">${displayPriority(task.priority)}</span>` : ''}
                     ${task.category ? `<span class="badge badge-category" onclick="event.stopPropagation(); clickToFilter('category', '${task.category.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByCategory')}">${task.category}</span>` : ''}
-                    ${task.assignees.map(a => `<span class="badge badge-assignee" onclick="event.stopPropagation(); clickToFilter('user', '${a.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByUser')}">${a}</span>`).join('')}
+                    ${task.assignees.map(a => {
+                        const normalizedId = normalizeUserId(a);
+                        return `<span class="badge badge-assignee" onclick="event.stopPropagation(); clickToFilter('user', '${normalizedId.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByUser')}">${a}</span>`;
+                    }).join('')}
                     ${task.tags.map(tag => `<span class="tag" onclick="event.stopPropagation(); clickToFilter('tag', '${tag.replace(/'/g, "\\'")}');" style="cursor: pointer;" title="${t('tooltip.filterByTag')}">${tag}</span>`).join('')}
                 </div>
                 ${subtaskProgress}
@@ -2560,13 +2817,14 @@ ${t('markdown.archiveSection')}
             const modal = document.getElementById('taskModal');
             const modalBody = document.getElementById('modalBody');
 
-            // Get priority icon
-            const priorityIcons = {
-                'Critique': '🔴',
-                'Haute': '🟠',
-                'Moyenne': '🟡',
-                'Basse': '🟢'
-            };
+            // Get priority with translation
+            let priorityWithIcon = task.priority;
+            if (task.priority) {
+                const priority = config.priorities.find(p => clean(p) === task.priority);
+                if (priority) {
+                    priorityWithIcon = displayPriority(priority);
+                }
+            }
 
             // Get status name
             const statusColumn = config.columns.find(col => col.id === task.status);
@@ -2587,7 +2845,7 @@ ${t('markdown.archiveSection')}
                         ${task.priority ? `
                             <div>
                                 <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">${t('meta.priority')}</div>
-                                <div style="font-weight: 500;">${priorityIcons[task.priority] || ''} ${task.priority}</div>
+                                <div style="font-weight: 500;">${displayPriority(priorityWithIcon)}</div>
                             </div>
                         ` : ''}
 
@@ -3010,7 +3268,7 @@ ${t('markdown.archiveSection')}
                     </div>
                     ${task.description ? `<p style="color: #666; margin: 0.5rem 0;">${markdownToHtml(task.description)}</p>` : ''}
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
-                        ${task.priority ? `<span style="background: #fbbf24; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${task.priority}</span>` : ''}
+                        ${task.priority ? `<span style="background: #fbbf24; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${displayPriority(task.priority)}</span>` : ''}
                         ${task.category ? `<span style="background: #8b5cf6; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${task.category}</span>` : ''}
                         ${task.tags.map(t => `<span style="background: #3b82f6; color: white; padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">${t}</span>`).join('')}
                     </div>
@@ -3072,10 +3330,10 @@ ${t('markdown.archiveSection')}
                 config.categories = ['Frontend', 'Backend', 'Design', 'DevOps', 'Tests', 'Documentation'];
             }
             if (config.users.length === 0) {
-                config.users = ['@user (Utilisateur)'];
+                config.users = ['@user (User)'];
             }
             if (config.priorities.length === 0) {
-                config.priorities = ['🔴 Critique', '🟠 Haute', '🟡 Moyenne', '🟢 Basse'];
+                config.priorities = ['🔴 Critical', '🟠 High', '🟡 Medium', '🟢 Low'];
             }
             if (config.tags.length === 0) {
                 config.tags = ['bug', 'feature', 'ui', 'backend', 'urgent', 'refactor', 'docs', 'test'];
@@ -3083,10 +3341,10 @@ ${t('markdown.archiveSection')}
 
             // Add config section
             md += `## ⚙️ Configuration\n\n`;
-            md += `**Colonnes**: ${config.columns.map(c => `${c.name} (${c.id})`).join(' | ')}\n\n`;
-            md += `**Catégories**: ${config.categories.join(', ')}\n\n`;
-            md += `**Utilisateurs**: ${config.users.join(', ')}\n\n`;
-            md += `**Priorités**: ${config.priorities.join(' | ')}\n\n`;
+            md += `**Columns**: ${config.columns.map(c => `${c.name} (${c.id})`).join(' | ')}\n\n`;
+            md += `**Categories**: ${config.categories.join(', ')}\n\n`;
+            md += `**Users**: ${config.users.join(', ')}\n\n`;
+            md += `**Priorities**: ${config.priorities.join(' | ')}\n\n`;
             md += `**Tags**: ${config.tags.map(t => '#' + t).join(' ')}\n\n`;
             md += `---\n\n`;
 

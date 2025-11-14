@@ -835,6 +835,41 @@ List team members:
 
 Format: `@username (Full Name)`
 
+### Priorities
+
+Define priority levels with emojis for visual identification:
+
+```markdown
+**Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
+```
+
+**Valid emoji icons:**
+Priorities support a wide range of emojis that automatically map to colors. You can use any of these:
+
+- **Circles**: 🔴 🟠 🟡 🟢 🔵 🟣 ⚪ ⚫
+- **Squares**: 🟥 🟧 🟨 🟩 🟦 🟪
+- **Hearts**: ❤️ 🧡 💛 💚 💙 💜 🤍 🖤
+- **Diamonds**: 🔶 🔷 🔸 🔹
+- **Stars**: ⭐ 🌟
+- **Flags**: 🚩 🏴 🏳️
+- **Alerts**: ⚠️ 🔥 💥 ⚡
+- **Arrows**: ⬆️ ➡️ ⬇️
+- **Symbols**: ❗ ❓ ❕ ❔
+
+**Examples of priority systems:**
+```markdown
+# Traditional severity levels
+**Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
+
+# Urgency indicators
+**Priorities**: 🔥 Urgent | ⚡ Important | ⭐ Normal | ⬇️ Low
+
+# Custom workflow
+**Priorities**: 🚩 Blocker | ⚠️ Must Have | 💡 Nice to Have | 💤 Someday
+```
+
+**Note:** The emoji determines the badge color in the UI. For example, 🔴 displays as red, 🟢 as green, etc.
+
 ### Tags
 
 Create an adapted tag system:
