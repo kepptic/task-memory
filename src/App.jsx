@@ -35,9 +35,6 @@ import {
 } from "lucide-react";
 
 function App() {
-  // Language state
-  const [currentLanguage, setCurrentLanguage] = useState("en");
-
   // Main data state
   const [directoryHandle, setDirectoryHandle] = useState(null);
   const [kanbanFileHandle, setKanbanFileHandle] = useState(null);
@@ -123,8 +120,6 @@ function App() {
   5;
   // Initialize
   useEffect(() => {
-    translationSystem.initLanguage();
-    setCurrentLanguage(translationSystem.getCurrentLanguage());
     loadRecentProjects();
     tryRestorePreviousDirectory();
 
@@ -1279,19 +1274,6 @@ function App() {
               <h1 className="text-xl font-bold text-gray-900">
                 {t("header.title")}
               </h1>
-
-              {/* Language Selector */}
-              <Select
-                onChange={(e) => {
-                  translationSystem.setLanguage(e.target.value);
-                  setCurrentLanguage(e.target.value);
-                }}
-                value={currentLanguage}
-                className="w-24 sm:w-32 text-sm"
-              >
-                <option value="en">EN</option>
-                <option value="fr">FR</option>
-              </Select>
 
               {/* Project Selector */}
               {showProjectSelector && (

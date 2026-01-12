@@ -8,6 +8,7 @@ This folder contains example files demonstrating the task-memory kanban format.
 |------|-------------|
 | [kanban.md](kanban.md) | Active kanban board with tasks in various states |
 | [archive.md](archive.md) | Archived completed tasks with preserved context |
+| [findings/](findings/) | Research findings linked from tasks |
 
 ---
 

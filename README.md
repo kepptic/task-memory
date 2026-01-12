@@ -23,7 +23,7 @@ Privacy-first Kanban task manager with Manus-style memory. Tasks remember your r
 
 ### Standalone App (No Claude Code)
 
-Download `task-manager.html` and open in Chrome/Edge/Opera.
+Download `task-memory.html` and open in Chrome/Edge/Opera.
 
 ## What It Does
 

@@ -1,16 +1,18 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { viteSingleFile } from "vite-plugin-singlefile";
-import { copyFileSync } from "fs";
+import { copyFileSync, rmSync } from "fs";
 
 export default defineConfig({
   plugins: [
     react(),
     viteSingleFile(),
     {
-      name: "copy-to-root",
+      name: "output-to-root",
       closeBundle() {
-        copyFileSync("dist/index.html", "task-manager.html");
+        // Copy to task-memory.html in root and remove dist folder
+        copyFileSync("dist/index.html", "task-memory.html");
+        rmSync("dist", { recursive: true, force: true });
       },
     },
   ],

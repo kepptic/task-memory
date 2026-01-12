@@ -26,7 +26,7 @@ Found an issue? Help us fix it!
 
 **Before reporting:**
 - Check the [existing issues](https://github.com/kepptic/task-memory/issues) to avoid duplicates
-- Test with the latest version (`task-manager.html`)
+- Test with the latest version (`task-memory.html`)
 - Gather browser console output (F12 → Console tab)
 
 **When reporting:**
@@ -36,14 +36,14 @@ Found an issue? Help us fix it!
 - **Steps to reproduce**: Clear, numbered steps
 - **Browser & OS**: Chrome/Edge/Opera, macOS/Windows/Linux
 - **Attachments**: Screenshot, console error, or problematic markdown file
-- **Version**: Which `task-manager.html` version
+- **Version**: Which `task-memory.html` version
 
 **Example:**
 ```
 Title: Tasks not updating when markdown file changes
 
 Steps to reproduce:
-1. Open task-manager.html
+1. Open task-memory.html
 2. Select a kanban.md file from disk
 3. Edit kanban.md in another editor (add a new task)
 4. Return to the browser without refreshing
@@ -56,7 +56,7 @@ Environment: Chrome 131 on macOS 15.2
 
 ### 2. Suggest a Feature
 
-Have an idea to make Markdown Task Manager better?
+Have an idea to make Task Memory better?
 
 **Before suggesting:**
 - Check [existing discussions](https://github.com/kepptic/task-memory/discussions)
@@ -115,7 +115,7 @@ without repeatedly reloading the entire file.
 - Reset when loading a new file
 
 ## Testing
-1. Open task-manager.html with a multi-status kanban.md
+1. Open task-memory.html with a multi-status kanban.md
 2. Click filter buttons (To Do, In Progress, Done)
 3. Verify only matching tasks appear
 4. Load a different file and verify filters reset
@@ -169,7 +169,7 @@ pnpm lint
 
 ### Understanding the Build
 
-The project uses **Vite** with a special plugin (`vite-plugin-singlefile`) to bundle everything into a single `task-manager.html` file.
+The project uses **Vite** with a special plugin (`vite-plugin-singlefile`) to bundle everything into a single `task-memory.html` file.
 
 **Why single file?**
 - Easy distribution (copy one file)
@@ -181,7 +181,7 @@ The project uses **Vite** with a special plugin (`vite-plugin-singlefile`) to bu
 ```
 pnpm build
 ├── dist/index.html       (intermediate)
-└── task-manager.html     (final, copied to root)
+└── task-memory.html     (final, copied to root)
 ```
 
 ---
@@ -459,7 +459,7 @@ Since this is a single-file HTML app, manual testing is essential:
    # Then open http://localhost:5173
 
    # Or test the built file
-   open task-manager.html
+   open task-memory.html
    ```
 
 2. **Test with sample markdown:**
@@ -553,7 +553,7 @@ task-memory/
 ├── eslint.config.mjs        # Linting rules
 ├── index.html               # Dev server template
 │
-├── task-manager.html        # Built single-file app (GENERATED)
+├── task-memory.html        # Built single-file app (GENERATED)
 ├── README.md                # User documentation
 ├── CONTRIBUTING.md          # This file
 ├── CODE_OF_CONDUCT.md       # Community guidelines
@@ -677,7 +677,7 @@ Contributors are recognized in:
 - [GitHub Contributors](https://github.com/kepptic/task-memory/graphs/contributors)
 - Release notes for significant contributions
 
-Thank you for contributing to Markdown Task Manager!
+Thank you for contributing to Task Memory!
 
 ---
 

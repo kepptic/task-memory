@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Skill Rules Configuration",
+  "description": "Configuration for task-memory skill evaluation",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version"
+    },
+    "description": {
+      "type": "string"
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "minConfidence": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum score to consider a skill matched"
+        },
+        "maxSkillsToShow": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of matched skills to display"
+        },
+        "showMatchReasons": {
+          "type": "boolean",
+          "description": "Whether to show why skills matched"
+        }
+      }
+    },
+    "triggerWeights": {
+      "type": "object",
+      "properties": {
+        "keyword": { "type": "integer" },
+        "keywordPattern": { "type": "integer" },
+        "intent": { "type": "integer" },
+        "context": { "type": "integer" },
+        "pathPattern": { "type": "integer" },
+        "directoryMapping": { "type": "integer" },
+        "exclusion": { "type": "integer" }
+      },
+      "description": "Weight values for different trigger types"
+    },
+    "skills": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "priority": { "type": "integer" },
+          "keywords": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "keywordPatterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "intentPatterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "excludePatterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "pathPatterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "directoryMappings": {
+            "type": "object",
+            "additionalProperties": { "type": "boolean" }
+          },
+          "contextPatterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "relatedSkills": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["name"]
+      }
+    }
+  },
+  "required": ["skills"]
+}
