@@ -1,0 +1,17 @@
+{
+  "description": "task-memory hooks for logging research operations",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/task-memory.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

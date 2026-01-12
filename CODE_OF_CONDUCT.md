@@ -25,7 +25,7 @@ Examples of unacceptable behavior:
 
 ## Enforcement
 
-Instances of unacceptable behavior may be reported to the project maintainers at the [GitHub Issues](https://github.com/kepptic/MarkdownTaskManager/issues) page.
+Instances of unacceptable behavior may be reported to the project maintainers at the [GitHub Issues](https://github.com/kepptic/task-memory/issues) page.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

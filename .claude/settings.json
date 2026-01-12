@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "task-memory@task-memory": true
+  }
+}

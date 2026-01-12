@@ -1,0 +1,19 @@
+{
+  "name": "task-memory",
+  "version": "1.0.0",
+  "description": "Privacy-first Kanban task manager with Manus-style memory - tasks remember your research across sessions",
+  "author": {
+    "name": "kepptic",
+    "email": "kepptic@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/kepptic/task-memory#readme",
+  "repository": "https://github.com/kepptic/task-memory",
+  "license": "MIT",
+  "keywords": [
+    "manus",
+    "memory",
+    "kanban",
+    "tasks",
+    "context-preservation"
+  ]
+}

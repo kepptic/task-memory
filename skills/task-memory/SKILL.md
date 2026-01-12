@@ -1,14 +1,17 @@
 ---
-name: research-preservation
-version: "3.0.0"
-description: Preserve multimodal research (screenshots, PDFs, browser results) as text using Manus 2-Action Rule. Prevents context loss when visual content disappears. Includes automated inline logging.
-allowed-tools: Read, Write, Edit, WebFetch, WebSearch
+name: task-memory
+description: Log WebFetch and WebSearch operations to your kanban tasks. Use when researching, browsing docs, or searching - automatically preserves context using the Manus 2-Action Rule.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - WebFetch
+  - WebSearch
 ---
 
-# Research Preservation (Manus 2-Action Rule)
+# task-memory
 
-**Priority:** Best Practice | **Based on:** Manus Philosophy (Meta AI - $2B acquisition value)
-**Logging:** Automated Inline Logging | **Version:** 3.0.0
+Automatically logs research operations to your in-progress task in kanban.md.
 
 ---
 
@@ -371,6 +374,6 @@ Result: Findings preserved, can resume work
 
 **Skill Version:** 3.0.0
 **Created:** 2026-01-10 | **Updated:** 2026-01-11 (Inline logging, portable version)
-**Status:** Production | Optional enhancement to MarkdownTaskManager workflow
+**Status:** Production | Optional enhancement to task-memory workflow
 **License:** MIT
-**Portability:** Can be used in any project with MarkdownTaskManager
+**Portability:** Can be used in any project with task-memory

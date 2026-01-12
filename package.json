@@ -1,7 +1,7 @@
 {
-  "name": "markdown-task-manager",
+  "name": "task-memory",
   "version": "1.0.0",
-  "description": "Privacy-first Kanban task manager powered by local Markdown files. Single HTML file, zero dependencies, works offline.",
+  "description": "Privacy-first Kanban task manager with Manus-style memory. Single HTML file, zero dependencies, works offline.",
   "main": "index.js",
   "directories": {
     "doc": "docs",
@@ -15,12 +15,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kepptic/MarkdownTaskManager.git"
+    "url": "git+https://github.com/kepptic/task-memory.git"
   },
   "keywords": [
     "kanban",
     "task-manager",
     "markdown",
+    "manus",
+    "memory",
     "offline-first",
     "local-first",
     "privacy",
@@ -35,9 +37,9 @@
   "license": "MIT",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/kepptic/MarkdownTaskManager/issues"
+    "url": "https://github.com/kepptic/task-memory/issues"
   },
-  "homepage": "https://github.com/kepptic/MarkdownTaskManager#readme",
+  "homepage": "https://github.com/kepptic/task-memory#readme",
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@tailwindcss/forms": "^0.5.10",

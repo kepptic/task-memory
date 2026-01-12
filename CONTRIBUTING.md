@@ -1,10 +1,10 @@
-# Contributing to Markdown Task Manager
+# Contributing to task-memory
 
-Thank you for considering contributing to **Markdown Task Manager**! This project is built by and for developers, and we're excited to have your help making it better.
+Thank you for considering contributing to **task-memory**! This project is built by and for developers, and we're excited to have your help making it better.
 
 ## Welcome!
 
-Markdown Task Manager is a standalone Kanban board that transforms your local Markdown files into an interactive task management system. Whether you're fixing bugs, adding features, improving documentation, or suggesting ideas, **your contribution matters**.
+task-memory is a privacy-first Kanban task manager with Manus-style memory. Whether you're fixing bugs, adding features, improving documentation, or suggesting ideas, **your contribution matters**.
 
 This document guides you through the process of contributing in a way that's smooth and enjoyable for everyone.
 
@@ -25,12 +25,12 @@ We are committed to providing a welcoming and inspiring community for all. Pleas
 Found an issue? Help us fix it!
 
 **Before reporting:**
-- Check the [existing issues](https://github.com/kepptic/MarkdownTaskManager/issues) to avoid duplicates
+- Check the [existing issues](https://github.com/kepptic/task-memory/issues) to avoid duplicates
 - Test with the latest version (`task-manager.html`)
 - Gather browser console output (F12 → Console tab)
 
 **When reporting:**
-- Use the [Bug Report template](https://github.com/kepptic/MarkdownTaskManager/issues/new?template=bug_report.md)
+- Use the [Bug Report template](https://github.com/kepptic/task-memory/issues/new?template=bug_report.md)
 - **What happened**: Describe the unexpected behavior
 - **Expected behavior**: What should happen instead
 - **Steps to reproduce**: Clear, numbered steps
@@ -59,11 +59,11 @@ Environment: Chrome 131 on macOS 15.2
 Have an idea to make Markdown Task Manager better?
 
 **Before suggesting:**
-- Check [existing discussions](https://github.com/kepptic/MarkdownTaskManager/discussions)
+- Check [existing discussions](https://github.com/kepptic/task-memory/discussions)
 - Consider the project's scope (file-based, offline-first, single-HTML)
 
 **When suggesting:**
-- Use the [Feature Request template](https://github.com/kepptic/MarkdownTaskManager/issues/new?template=feature_request.md)
+- Use the [Feature Request template](https://github.com/kepptic/task-memory/issues/new?template=feature_request.md)
 - **Problem**: What's the use case? Who benefits?
 - **Solution**: How would you like it to work?
 - **Alternatives**: Have you considered other approaches?
@@ -138,8 +138,8 @@ Fixes #89
 
 ```bash
 # 1. Fork and clone
-git clone https://github.com/YOUR-USERNAME/MarkdownTaskManager.git
-cd MarkdownTaskManager
+git clone https://github.com/YOUR-USERNAME/task-memory.git
+cd task-memory
 
 # 2. Install dependencies
 pnpm install
@@ -503,14 +503,14 @@ Test in all supported browsers:
 
 ### Getting Help
 
-- **Questions about the code**: Open a [Discussion](https://github.com/kepptic/MarkdownTaskManager/discussions)
-- **Bug reports**: Open an [Issue](https://github.com/kepptic/MarkdownTaskManager/issues)
-- **Feature ideas**: Start a [Discussion](https://github.com/kepptic/MarkdownTaskManager/discussions) first
+- **Questions about the code**: Open a [Discussion](https://github.com/kepptic/task-memory/discussions)
+- **Bug reports**: Open an [Issue](https://github.com/kepptic/task-memory/issues)
+- **Feature ideas**: Start a [Discussion](https://github.com/kepptic/task-memory/discussions) first
 - **Need PR feedback**: Comment on your PR, and maintainers will help
 
 ### Community
 
-- Check [existing discussions](https://github.com/kepptic/MarkdownTaskManager/discussions) for similar questions
+- Check [existing discussions](https://github.com/kepptic/task-memory/discussions) for similar questions
 - Read the [README.md](./README.md) for feature documentation
 - Review [CHANGELOG.md](./CHANGELOG.md) for recent changes
 - Look at [examples/](./examples/) for sample markdown files
@@ -527,7 +527,7 @@ Test in all supported browsers:
 ## Project Structure
 
 ```
-MarkdownTaskManager/
+task-memory/
 ├── src/
 │   ├── components/          # React UI components
 │   │   ├── TaskCard.jsx
@@ -674,7 +674,7 @@ Update documentation when:
 ## Recognition
 
 Contributors are recognized in:
-- [GitHub Contributors](https://github.com/kepptic/MarkdownTaskManager/graphs/contributors)
+- [GitHub Contributors](https://github.com/kepptic/task-memory/graphs/contributors)
 - Release notes for significant contributions
 
 Thank you for contributing to Markdown Task Manager!
@@ -700,8 +700,8 @@ Before every PR submission:
 
 ---
 
-**Questions?** Start a [Discussion](https://github.com/kepptic/MarkdownTaskManager/discussions)
+**Questions?** Start a [Discussion](https://github.com/kepptic/task-memory/discussions)
 
-**Found a bug?** Open an [Issue](https://github.com/kepptic/MarkdownTaskManager/issues)
+**Found a bug?** Open an [Issue](https://github.com/kepptic/task-memory/issues)
 
 **Love the project?** Give us a ⭐ on GitHub!

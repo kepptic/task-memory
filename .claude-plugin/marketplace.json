@@ -1,0 +1,20 @@
+{
+  "name": "task-memory",
+  "owner": {
+    "name": "kepptic",
+    "email": "kepptic@users.noreply.github.com"
+  },
+  "metadata": {
+    "description": "Privacy-first Kanban task manager with Manus-style memory",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "task-memory",
+      "description": "Privacy-first Kanban task manager with Manus-style memory - tasks remember your research across sessions",
+      "source": "./",
+      "category": "productivity",
+      "strict": false
+    }
+  ]
+}

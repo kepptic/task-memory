@@ -1,6 +1,6 @@
 # Kanban Task Management Rules
 
-**Purpose:** Enforce task-driven workflow with MarkdownTaskManager for complete traceability.
+**Purpose:** Enforce task-driven workflow with task-memory for complete traceability.
 
 ---
 
