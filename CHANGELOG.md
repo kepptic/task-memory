@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-01-12
+## [1.0.1] - 2026-01-12
 
 ### Added
 - Initial release of task-memory plugin
@@ -30,5 +30,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Manus Context Engineering](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus) principles
 - [planning-with-files](https://github.com/kepptic/planning-with-files) workflow
 
-[Unreleased]: https://github.com/kepptic/task-memory/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/kepptic/task-memory/releases/tag/v1.0.0
+[Unreleased]: https://github.com/kepptic/task-memory/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/kepptic/task-memory/releases/tag/v1.0.1
