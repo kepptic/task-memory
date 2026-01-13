@@ -1433,13 +1433,12 @@ function App() {
           {/* Theme Selection */}
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="label">Theme</label>
-            <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+            <div className="theme-buttons">
               {Object.entries(THEMES).map(([key, { label, icon: Icon }]) => (
                 <button
                   key={key}
                   className={`btn ${theme === key ? 'btn-primary' : 'btn-secondary'}`}
                   onClick={() => handleThemeChange(key)}
-                  style={{ flex: 1 }}
                 >
                   <Icon className="w-4 h-4" />
                   {label}

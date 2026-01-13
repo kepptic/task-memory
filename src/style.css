@@ -1451,3 +1451,29 @@ body {
 .markdown-content br + br {
   display: none;
 }
+
+/* ============================================
+   THEME BUTTONS - Settings Modal
+   ============================================ */
+
+.theme-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.theme-buttons .btn {
+  flex: 1 1 auto;
+  min-width: 5rem;
+}
+
+@media (max-width: 480px) {
+  .theme-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .theme-buttons .btn {
+    min-width: unset;
+  }
+}
