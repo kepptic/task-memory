@@ -125,13 +125,13 @@ function SmartArchiveModal({ isOpen, onClose, columnId, tasks, fileStats, onArch
           <div className="form-group">
             <label className="label">Keep tasks finished within the last:</label>
             <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-              {[0, 3, 7, 14, 30, 60].map(days => (
+              {[0, 1, 3, 7, 14, 30, 60].map(days => (
                 <button
                   key={days}
                   className={`btn ${keepDays === days ? 'btn-primary' : 'btn-secondary'}`}
                   onClick={() => setKeepDays(days)}
                 >
-                  {days === 0 ? 'Archive all' : `${days} days`}
+                  {days === 0 ? 'Archive all' : `${days} ${days === 1 ? 'day' : 'days'}`}
                 </button>
               ))}
             </div>

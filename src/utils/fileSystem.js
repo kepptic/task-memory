@@ -318,6 +318,60 @@ async function renameProject(projectIndex, newName) {
   }
 }
 
+// Select a single file (for opening kanban.md files)
+async function selectFile() {
+  try {
+    const [fileHandle] = await window.showOpenFilePicker({
+      types: [
+        {
+          description: 'Markdown files',
+          accept: { 'text/markdown': ['.md'] },
+        },
+      ],
+      multiple: false,
+    });
+    return {
+      handle: fileHandle,
+      name: fileHandle.name,
+    };
+  } catch (error) {
+    if (error.name !== 'AbortError') {
+      console.error('Error selecting file:', error);
+      throw error;
+    }
+    return null;
+  }
+}
+
+// Read content from a file handle
+async function readFile(fileHandle) {
+  try {
+    const file = await fileHandle.getFile();
+    return await file.text();
+  } catch (error) {
+    console.error('Error reading file:', error);
+    throw error;
+  }
+}
+
+// Write content to a file handle
+async function writeFile(fileHandle, content) {
+  try {
+    // Request permission if needed
+    if (!(await verifyPermission(fileHandle))) {
+      throw new Error('Permission denied');
+    }
+
+    const writable = await fileHandle.createWritable();
+    await writable.write(content);
+    await writable.close();
+    return true;
+  } catch (error) {
+    console.error('Error writing file:', error);
+    throw error;
+  }
+}
+
 // Export for use in other modules
 export const fileSystem = {
   // Getters for handles
@@ -327,6 +381,11 @@ export const fileSystem = {
   },
   getKanbanFileHandle: () => kanbanFileHandle,
   getArchiveFileHandle: () => archiveFileHandle,
+
+  // Single file operations
+  selectFile,
+  readFile,
+  writeFile,
 
   // Main functions
   requestDirectoryAccess,
@@ -343,6 +402,9 @@ export const fileSystem = {
 };
 
 export {
+  selectFile,
+  readFile,
+  writeFile,
   requestDirectoryAccess,
   verifyPermission,
   saveDirectoryHandle,

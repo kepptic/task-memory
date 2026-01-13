@@ -1,12 +1,12 @@
 {
-  "description": "task-memory hooks - context management, research logging, error tracking, skill evaluation",
+  "description": "task-memory hooks - context management and research logging",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh skill-eval.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/skill-eval.sh",
             "timeout": 5
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh task-memory-hook.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/task-memory-hook.sh",
             "timeout": 10
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh task-memory-hook.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/task-memory-hook.sh",
             "timeout": 30
           }
         ]
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh task-memory-hook.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/task-memory-hook.sh",
             "timeout": 10
           }
         ]
@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh task-memory-hook.py",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/task-memory-hook.sh",
             "timeout": 10
           }
         ]
