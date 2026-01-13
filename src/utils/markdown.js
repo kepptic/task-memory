@@ -27,15 +27,21 @@ function parseMarkdown(content) {
   if (configSection) {
     const configText = configSection[1];
 
-    // Parse columns
+    // Parse columns - supports both "Name (id)" and just "Name" formats
     const columnsMatch = configText.match(/\*\*Columns\*\*:\s*(.+)/);
     if (columnsMatch) {
       config.columns = columnsMatch[1]
         .split("|")
         .map((col) => {
-          const match = col.trim().match(/(.+?)\s*\((.+?)\)/);
+          const trimmed = col.trim();
+          // Try to match "Name (id)" format
+          const match = trimmed.match(/(.+?)\s*\((.+?)\)/);
           if (match) {
             return { name: match[1].trim(), id: match[2].trim() };
+          }
+          // Fallback: use name as id (derive id from name)
+          if (trimmed) {
+            return { name: trimmed, id: trimmed };
           }
           return null;
         })
@@ -125,50 +131,48 @@ function parseMarkdown(content) {
     ];
   }
 
-  // First, detect all section headers in the file (## Header) that are NOT config or special sections
+  // Detect all section headers in the file (for finding orphaned tasks)
   const sectionHeaderRegex = /^##\s+(?!⚙️\s*Configuration)(.+)$/gm;
-  const detectedSections = [];
+  const allSections = [];
   let match;
 
   while ((match = sectionHeaderRegex.exec(content)) !== null) {
     const sectionName = match[1].trim();
-    // Skip the separator line
     if (sectionName === "---") continue;
 
-    // Convert section name to ID (lowercase, replace spaces with hyphens)
-    // Remove emojis and special chars, then clean up any leading/trailing dashes
+    // Derive ID from name
     const sectionId = sectionName
       .toLowerCase()
-      .replace(/[^\w\s-]/g, "") // Remove emojis and special chars
-      .replace(/\s+/g, "-") // Replace spaces with dashes
-      .replace(/^-+|-+$/g, "") // Remove leading/trailing dashes
-      .replace(/-+/g, "-"); // Collapse multiple dashes into one
+      .replace(/[^\w\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .replace(/-+/g, "-") || sectionName;
 
-    detectedSections.push({ name: sectionName, id: sectionId });
+    allSections.push({ name: sectionName, id: sectionId });
   }
 
-  // Merge detected sections with config columns, preserving file order
-  console.log(
-    `📋 Detected ${detectedSections.length} sections in file:`,
-    detectedSections,
-  );
-  detectedSections.forEach((section) => {
-    const exists = config.columns.some(
-      (col) => col.id === section.id || col.name === section.name,
-    );
-    if (!exists) {
-      console.log(
-        `➕ Adding new column from file: ${section.name} (${section.id})`,
-      );
-      config.columns.push(section);
-    }
-  });
-  console.log(`📊 Final columns config:`, config.columns);
-
-  // Parse tasks by sections using the unified parser
+  // Parse tasks from configured columns
   config.columns.forEach((column) => {
     const columnTasks = parseTasksFromSection(content, column.name, column.id);
     tasks.push(...columnTasks);
+  });
+
+  // Find and rescue orphaned tasks (from sections not in config.columns)
+  const defaultColumn = config.columns[0]?.id || "To Do";
+  allSections.forEach((section) => {
+    const isConfigured = config.columns.some(
+      (col) => col.id === section.id || col.name === section.name
+    );
+    if (!isConfigured) {
+      // Parse tasks from this orphaned section and move them to default column
+      const orphanedTasks = parseTasksFromSection(content, section.name, section.id);
+      orphanedTasks.forEach((task) => {
+        task.status = defaultColumn; // Move to first column
+        task._wasOrphaned = true; // Mark for potential notification
+        console.log(`🔄 Rescued orphaned task ${task.id} from "${section.name}" to "${defaultColumn}"`);
+      });
+      tasks.push(...orphanedTasks);
+    }
   });
 
   return { tasks, config };
@@ -243,6 +247,7 @@ function parseTask(id, title, content, status) {
     description: "",
     subtasks: [],
     notes: "",
+    visualOpsLog: [],
   };
 
   // Parse metadata line - now with Status field support
@@ -328,7 +333,8 @@ function parseTask(id, title, content, status) {
       descriptionLines.push(line.trim());
     }
   }
-  task.description = descriptionLines.join(" ").substring(0, 200);
+  // Keep full description with line breaks preserved for markdown rendering
+  task.description = descriptionLines.join("\n");
 
   // Parse subtasks
   const subtaskMatches = content.matchAll(/- \[(x| )\] (.+)/g);
@@ -339,10 +345,19 @@ function parseTask(id, title, content, status) {
     });
   }
 
-  // Parse notes - everything after **Notes**: until end of task
-  const notesMatch = content.match(/\*\*Notes\*\*:\s*\n([\s\S]*?)$/);
+  // Parse notes - everything after **Notes**: until Visual Operations Log or end
+  const notesMatch = content.match(/\*\*Notes\*\*:\s*\n([\s\S]*?)(?=\*\*Visual Operations Log\*\*:|$)/);
   if (notesMatch) {
     task.notes = notesMatch[1].trim();
+  }
+
+  // Parse Visual Operations Log
+  const opsLogMatch = content.match(/\*\*Visual Operations Log\*\*:\s*\n([\s\S]*?)(?=\*\*Errors Log\*\*:|---\s*$|$)/);
+  if (opsLogMatch) {
+    const logLines = opsLogMatch[1].trim().split('\n')
+      .filter(line => line.trim().startsWith('-'))
+      .map(line => line.replace(/^-\s*/, '').trim());
+    task.visualOpsLog = logLines;
   }
 
   return task;
@@ -387,17 +402,24 @@ function parseArchive(content) {
 
 // Generate markdown from tasks and config
 function generateMarkdown(tasks, config) {
-  let md = `# Kanban Board\n\n<!-- Config: Last Task ID: ${config.lastTaskId} -->\n\n`;
+  let md = `# Kanban Board\n\n<!-- Config: Last Task ID: ${config.lastTaskId || 0} -->\n\n`;
+
+  // Ensure config has all required arrays (defensive defaults)
+  config.categories = config.categories || [];
+  config.users = config.users || [];
+  config.priorities = config.priorities || [];
+  config.tags = config.tags || [];
+  config.columns = config.columns || [];
 
   // Update config with values from tasks (merge with existing)
-  const allCategories = new Set(config.categories || []);
-  const allUsers = new Set(config.users || []);
-  const allTags = new Set(config.tags || []);
+  const allCategories = new Set(config.categories);
+  const allUsers = new Set(config.users);
+  const allTags = new Set(config.tags);
 
   tasks.forEach((task) => {
     if (task.category) allCategories.add(task.category);
-    task.assignees.forEach((u) => allUsers.add(u));
-    task.tags.forEach((t) => allTags.add(t.replace("#", "")));
+    (task.assignees || []).forEach((u) => allUsers.add(u));
+    (task.tags || []).forEach((t) => allTags.add(t.replace("#", "")));
   });
 
   // Update config with merged values
@@ -445,7 +467,7 @@ function generateMarkdown(tasks, config) {
   md += `---\n\n`;
 
   // Add tasks by column
-  config.columns.forEach((column, index) => {
+  config.columns.forEach((column) => {
     md += `## ${column.name}\n\n`;
 
     const columnTasks = tasks.filter((t) => t.status === column.id);
@@ -479,7 +501,7 @@ function generateMarkdown(tasks, config) {
         md += `\n${task.description}\n`;
       }
 
-      if (task.subtasks.length > 0) {
+      if (task.subtasks && task.subtasks.length > 0) {
         md += `\n**Subtasks**:\n`;
         task.subtasks.forEach((st) => {
           md += `- [${st.completed ? "x" : " "}] ${st.text}\n`;
@@ -488,6 +510,13 @@ function generateMarkdown(tasks, config) {
 
       if (task.notes) {
         md += `\n**Notes**:\n${task.notes}\n`;
+      }
+
+      if (task.visualOpsLog && task.visualOpsLog.length > 0) {
+        md += `\n**Visual Operations Log**:\n`;
+        task.visualOpsLog.forEach(entry => {
+          md += `- ${entry}\n`;
+        });
       }
 
       md += `\n`; // Just one blank line between tasks
@@ -532,7 +561,7 @@ function generateArchiveMarkdown(archivedTasks) {
       md += `\n${task.description}\n`;
     }
 
-    if (task.subtasks.length > 0) {
+    if (task.subtasks && task.subtasks.length > 0) {
       md += `\n**Subtasks**:\n`;
       task.subtasks.forEach((st) => {
         md += `- [${st.completed ? "x" : " "}] ${st.text}\n`;
