@@ -57,7 +57,7 @@ Decision: Using shadcn/ui for consistency with existing codebase.
 - 2026-01-11 10:32:18 - WebSearch: "React dashboard component patterns 2026"
 - 2026-01-11 10:45:22 - WebFetch: https://tailwindcss.com/docs/grid-template-columns
 
-Research findings documented in findings/TASK-003.md
+Documentation in notes/TASK-003.md
 
 ---
 
@@ -78,6 +78,12 @@ Users report that pagination returns duplicate items on page 2.
 
 **Notes**:
 Reproduced: When sorting by date DESC, offset calculation is wrong.
+
+**Errors Log**:
+| Error | Attempt | Resolution |
+|-------|---------|------------|
+| Test timeout | 1 | Increased jest timeout to 10s |
+| DB connection refused | 2 | Started postgres container |
 
 ---
 
@@ -131,6 +137,6 @@ Completed API research. Recommendations:
 - 2026-01-07 14:25:45 - WebFetch: https://jsonapi.org/format/
 - 2026-01-07 14:40:12 - WebFetch: https://developer.github.com/v3/
 
-Full research documented in findings/TASK-002.md
+Full research documented in notes/TASK-002.md
 
 ---

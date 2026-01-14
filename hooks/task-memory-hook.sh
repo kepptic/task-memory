@@ -16,11 +16,47 @@ set -e
 # =============================================================================
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-TASKS_DIR="$PROJECT_DIR/tasks"
-KANBAN_FILE="$TASKS_DIR/kanban.md"
-FINDINGS_DIR="$TASKS_DIR/findings"
 RESEARCH_COUNTER="/tmp/task-memory-research-count"
 PROGRESS_COUNTER="/tmp/task-memory-progress-count"
+
+# Find planning directory with priority:
+# 1. .task-memory.json config (explicit mapping)
+# 2. Nearest planning/ directory walking up from cwd
+# 3. Project root planning/ directory
+find_planning_dir() {
+    local config_file="$PROJECT_DIR/.task-memory.json"
+
+    # Option C: Check for explicit config
+    if [ -f "$config_file" ]; then
+        local config_dir
+        config_dir=$(grep -o '"planning_dir"[[:space:]]*:[[:space:]]*"[^"]*"' "$config_file" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' | head -1)
+        if [ -n "$config_dir" ]; then
+            if [[ "$config_dir" = /* ]]; then
+                echo "$config_dir"
+            else
+                echo "$PROJECT_DIR/$config_dir"
+            fi
+            return
+        fi
+    fi
+
+    # Option A: Walk up from current directory to find nearest planning/
+    local search_dir="${PWD:-$PROJECT_DIR}"
+    while [ "$search_dir" != "/" ] && [[ "$search_dir" == "$PROJECT_DIR"* ]]; do
+        if [ -d "$search_dir/planning" ] && [ -f "$search_dir/planning/tasks.md" ]; then
+            echo "$search_dir/planning"
+            return
+        fi
+        search_dir=$(dirname "$search_dir")
+    done
+
+    # Default: Project root planning/
+    echo "$PROJECT_DIR/planning"
+}
+
+PLANNING_DIR=$(find_planning_dir)
+TASKS_FILE="$PLANNING_DIR/tasks.md"
+NOTES_DIR="$PLANNING_DIR/notes"
 
 # =============================================================================
 # Utilities
@@ -28,13 +64,13 @@ PROGRESS_COUNTER="/tmp/task-memory-progress-count"
 
 get_current_task() {
     # Returns: TASK_ID|TITLE|COMPLETED|TOTAL or empty
-    if [ ! -f "$KANBAN_FILE" ]; then
+    if [ ! -f "$TASKS_FILE" ]; then
         return
     fi
 
     # Find in-progress task
     local task_line
-    task_line=$(grep -B 20 '\*\*Status\*\*: in-progress' "$KANBAN_FILE" 2>/dev/null | grep '^### TASK-' | tail -1)
+    task_line=$(grep -B 20 '\*\*Status\*\*: in-progress' "$TASKS_FILE" 2>/dev/null | grep '^### TASK-' | tail -1)
 
     if [ -z "$task_line" ]; then
         return
@@ -47,7 +83,7 @@ get_current_task() {
 
     # Count subtasks
     local task_block completed total
-    task_block=$(sed -n "/^### $task_id/,/^---$/p" "$KANBAN_FILE" 2>/dev/null | head -n -1)
+    task_block=$(sed -n "/^### $task_id/,/^---$/p" "$TASKS_FILE" 2>/dev/null | head -n -1)
     completed=$(echo "$task_block" | grep -c '\- \[x\]' 2>/dev/null) || completed=0
     total=$(echo "$task_block" | grep -c '\- \[.\]' 2>/dev/null) || total=0
 
@@ -56,11 +92,11 @@ get_current_task() {
 
 get_incomplete_subtasks() {
     local task_id="$1"
-    if [ ! -f "$KANBAN_FILE" ]; then
+    if [ ! -f "$TASKS_FILE" ]; then
         return
     fi
 
-    sed -n "/^### $task_id/,/^---$/p" "$KANBAN_FILE" 2>/dev/null | \
+    sed -n "/^### $task_id/,/^---$/p" "$TASKS_FILE" 2>/dev/null | \
         grep '\- \[ \]' | \
         sed 's/- \[ \] //' | \
         head -5
@@ -84,11 +120,11 @@ increment_counter() {
 }
 
 ensure_tasks_structure() {
-    mkdir -p "$TASKS_DIR" "$FINDINGS_DIR"
+    mkdir -p "$PLANNING_DIR" "$NOTES_DIR"
 
-    if [ ! -f "$KANBAN_FILE" ]; then
-        cat > "$KANBAN_FILE" << 'KANBAN'
-# Kanban Board
+    if [ ! -f "$TASKS_FILE" ]; then
+        cat > "$TASKS_FILE" << 'TASKS'
+# Task Board
 
 <!-- Config: Last Task ID: 000 -->
 
@@ -111,19 +147,19 @@ ensure_tasks_structure() {
 ## Done
 
 ---
-KANBAN
-        echo "Created $KANBAN_FILE" >&2
+TASKS
+        echo "Created $TASKS_FILE" >&2
     fi
 
-    if [ ! -f "$TASKS_DIR/archive.md" ]; then
-        cat > "$TASKS_DIR/archive.md" << 'ARCHIVE'
+    if [ ! -f "$PLANNING_DIR/archive.md" ]; then
+        cat > "$PLANNING_DIR/archive.md" << 'ARCHIVE'
 # Task Archive
 
 > Completed and archived tasks with preserved context.
 
 ---
 ARCHIVE
-        echo "Created $TASKS_DIR/archive.md" >&2
+        echo "Created $PLANNING_DIR/archive.md" >&2
     fi
 }
 
@@ -132,20 +168,20 @@ append_log_entry() {
     local log_line="$2"
     local section="${3:-Visual Operations Log}"
 
-    if [ ! -f "$KANBAN_FILE" ]; then
+    if [ ! -f "$TASKS_FILE" ]; then
         return 1
     fi
 
     # Check if section exists in task
     local task_block
-    task_block=$(sed -n "/^### $task_id/,/^---$/p" "$KANBAN_FILE" 2>/dev/null)
+    task_block=$(sed -n "/^### $task_id/,/^---$/p" "$TASKS_FILE" 2>/dev/null)
 
     if echo "$task_block" | grep -q "^\*\*$section\*\*:"; then
         # Append to existing section - add after the header
         sed -i.bak "/^### $task_id/,/^---$/{
             /^\*\*$section\*\*:/a\\
 $log_line
-        }" "$KANBAN_FILE"
+        }" "$TASKS_FILE"
     elif echo "$task_block" | grep -q '^\*\*Notes\*\*:'; then
         # Add new section before ---
         sed -i.bak "/^### $task_id/,/^---$/{
@@ -153,7 +189,7 @@ $log_line
 \\
 **$section**:\\
 $log_line
-        }" "$KANBAN_FILE"
+        }" "$TASKS_FILE"
     else
         # Add Notes and section before ---
         sed -i.bak "/^### $task_id/,/^---$/{
@@ -163,10 +199,10 @@ $log_line
 \\
 **$section**:\\
 $log_line
-        }" "$KANBAN_FILE"
+        }" "$TASKS_FILE"
     fi
 
-    rm -f "$KANBAN_FILE.bak"
+    rm -f "$TASKS_FILE.bak"
     return 0
 }
 
@@ -183,9 +219,9 @@ handle_session_start() {
     echo "TASK-MEMORY SESSION START" >&2
     echo "============================================================" >&2
 
-    if [ ! -f "$KANBAN_FILE" ]; then
+    if [ ! -f "$TASKS_FILE" ]; then
         echo "" >&2
-        echo "No kanban.md found" >&2
+        echo "No tasks.md found" >&2
         echo "Will be created when you start working." >&2
         echo "============================================================" >&2
         echo "" >&2
@@ -194,7 +230,7 @@ handle_session_start() {
 
     if [ -z "$task_info" ]; then
         echo "" >&2
-        echo "Kanban: $KANBAN_FILE" >&2
+        echo "Planning: $TASKS_FILE" >&2
         echo "" >&2
         echo "No in-progress tasks" >&2
         echo "" >&2
@@ -309,11 +345,11 @@ handle_pre_tool_use() {
                     IFS='|' read -r task_id _ _ _ <<< "$task_info"
                     echo "Task: $task_id" >&2
                     echo "" >&2
-                    echo "Create/update: $FINDINGS_DIR/$task_id.md" >&2
+                    echo "Create/update: $NOTES_DIR/$task_id.md" >&2
                 else
                     echo "No in-progress task" >&2
                     echo "" >&2
-                    echo "Create/update: $FINDINGS_DIR/TASK-XXX.md" >&2
+                    echo "Create/update: $NOTES_DIR/TASK-XXX.md" >&2
                 fi
 
                 echo "" >&2
@@ -362,7 +398,7 @@ handle_post_tool_use() {
                 echo "   - [ ] $subtask" >&2
             done
             echo "" >&2
-            echo "Edit: $KANBAN_FILE" >&2
+            echo "Edit: $TASKS_FILE" >&2
             echo "--------------------------------------------------" >&2
             echo "" >&2
             ;;
@@ -429,11 +465,11 @@ handle_stop() {
         echo "✅ $task_id - all $total subtasks complete!" >&2
         echo "" >&2
         echo "⚠️  TASK STILL IN PROGRESS - Please complete:" >&2
-        echo "   1. Move task to '## Done' section in kanban.md" >&2
+        echo "   1. Move task to '## Done' section in tasks.md" >&2
         echo "   2. Change **Status**: in-progress → done" >&2
         echo "   3. Add **Finished**: $(date '+%Y-%m-%d')" >&2
         echo "" >&2
-        echo "Edit: $KANBAN_FILE" >&2
+        echo "Edit: $TASKS_FILE" >&2
         echo "============================================================" >&2
         echo "" >&2
         exit 1  # Block until task moved to Done

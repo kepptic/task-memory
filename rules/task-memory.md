@@ -1,4 +1,4 @@
-# Kanban Task Management Rules
+# Task Management Rules
 
 **Purpose:** Enforce task-driven workflow with task-memory for complete traceability.
 
@@ -6,10 +6,10 @@
 
 ## Core Principle
 
-**No work without a kanban task.**
+**No work without a task.**
 
 Before writing code, editing files, implementing features, or starting any work:
-1. Create a task in `kanban.md`
+1. Create a task in `planning/tasks.md`
 2. Set `**Status**: in-progress`
 3. Do the work
 4. Set `**Status**: done`
@@ -29,7 +29,7 @@ Every piece of work must have a corresponding task. This ensures:
 
 ### Rule 2: Never Move Task Blocks
 
-**The kanban system auto-reorganizes tasks based on the `Status:` field.**
+**The task system auto-reorganizes tasks based on the `Status:` field.**
 
 To change task status:
 - ✅ Change `**Status**: todo` → `**Status**: in-progress` → `**Status**: done`
@@ -43,7 +43,7 @@ The React app detects status changes and moves tasks automatically.
 ### Rule 3: Increment Task Counter
 
 When creating new tasks:
-1. Check `<!-- Config: Last Task ID: XXX -->` in kanban.md
+1. Check `<!-- Config: Last Task ID: XXX -->` in tasks.md
 2. Use next number: `TASK-XXX+1`
 3. Update the config comment
 
@@ -97,13 +97,11 @@ Tasks stay in "Done" until explicitly archived:
 When doing visual research (WebFetch, WebSearch, screenshots):
 
 1. Operations are auto-logged to task's **Notes** section
-2. After every 2 operations, create a findings file:
-   - Location: `findings/TASK-XXX.md`
-   - Link from task: `**Research Log**: See findings/TASK-XXX.md`
+2. After every 2 operations, create a notes file:
+   - Location: `planning/notes/TASK-XXX.md`
+   - Link from task: `**Documentation**: See notes/TASK-XXX.md`
 
 This prevents context loss when visual content disappears.
-
-See: [research-preservation.md](../skills/research-preservation.md)
 
 ---
 
@@ -139,7 +137,7 @@ git commit -m "feat: Add API endpoint (TASK-042 - 3/5)"
 ## Quick Reference
 
 ```
-1. Check kanban.md for existing task or create new one
+1. Check planning/tasks.md for existing task or create new one
 2. Set Status: in-progress + Started date
 3. Do the work, check off subtasks
 4. Document results in Notes section

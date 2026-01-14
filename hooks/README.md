@@ -7,29 +7,15 @@ Single unified hook for context management, research logging, error tracking, an
 ```
 hooks/
 ├── hooks.json              # Hook configuration
-├── run-hook.sh             # Wrapper script (checks python3)
-├── task-memory-hook.py     # Unified hook handler
-├── skill-eval.py           # Skill evaluation engine
-├── skill-rules.json        # Task detection rules
-├── skill-rules.schema.json # JSON schema for validation
+├── task-memory-hook.sh     # Unified hook handler
+├── skill-eval.sh           # Skill evaluation engine
 └── README.md               # This file
 ```
 
 ## Requirements
 
-- **Python 3.6+** (standard library only, no pip install needed)
-- Python 3 is pre-installed on macOS and most Linux distributions
-
-The `run-hook.sh` wrapper automatically checks for python3 and shows a friendly warning if missing:
-
-```
-⚠️  task-memory: python3 not found
-   Install Python 3 to enable task tracking features
-   macOS: brew install python3
-   Ubuntu: sudo apt install python3
-```
-
-Hooks exit gracefully (exit 0) if python3 is unavailable, so Claude continues working.
+- **Bash** (standard on macOS and Linux)
+- No additional dependencies required
 
 ## Hook Events
 
@@ -59,7 +45,7 @@ Detection uses weighted scoring:
 | Keywords | +3 | "implement", "fix", "build", "create" |
 | Intent patterns | +4 | "add.*feature", "fix.*bug" |
 | File paths | +4 | "src/components/Header.tsx" |
-| Directory mappings | +5 | "tasks/", "src/", "lib/" |
+| Directory mappings | +5 | "planning/", "src/", "lib/" |
 | Exclusions | -5 | Questions: "what", "how", "?" |
 
 Example task detection output (injected into Claude's context):
@@ -72,7 +58,7 @@ Example task detection output (injected into Claude's context):
 🎯 Current task: TASK-004 | Test hook functionality
 
 📝 Instructions:
-   - Track progress via subtasks in kanban.md
+   - Track progress via subtasks in tasks.md
    - Log research to Visual Operations Log (auto)
    - Create findings file after 2 research operations
    - Mark subtasks [x] when complete
@@ -151,7 +137,7 @@ Logs research operations and triggers 2-Action Rule reminder:
 📊 Operations count: 2
 📋 Task: TASK-004
 
-✅ Create/update: tasks/findings/TASK-004.md
+✅ Create/update: planning/notes/TASK-004.md
 
 💡 Preserve: observations, decisions, issues, resources
 ======================================================================
@@ -170,7 +156,7 @@ Mark completed items [x]:
    - [ ] Run a WebSearch
    - [ ] Verify log appears in Notes
 
-📝 Edit: tasks/kanban.md
+📝 Edit: planning/tasks.md
 ──────────────────────────────────────────────────
 ```
 
@@ -217,24 +203,50 @@ Exits with code 1 to block stopping if subtasks incomplete.
 
 ## Configuration
 
-The hook reads configuration from `.task-memory.json` in the project root:
+Hooks auto-detect the planning directory using this priority:
+
+### 1. Explicit Config (`.task-memory.json`)
 
 ```json
 {
-  "tasks_dir": "tasks"
+  "planning_dir": "docs/planning"
 }
 ```
 
-Default: `tasks/` directory containing `kanban.md`, `archive.md`, and `findings/`.
+### 2. Nearest Planning Directory (Monorepo)
+
+Hooks walk up from current working directory to find the nearest `planning/tasks.md`. This enables per-package planning in monorepos:
+
+```
+monorepo/
+├── packages/
+│   ├── api/
+│   │   └── planning/tasks.md    ← Found when working in api/
+│   └── web/
+│       └── planning/tasks.md    ← Found when working in web/
+└── planning/tasks.md            ← Fallback
+```
+
+### 3. Project Root Default
+
+If no config or nearest planning found, uses `$CLAUDE_PROJECT_DIR/planning/`.
+
+### Monorepo Patterns
+
+See `skills/task-memory/SKILL.md` for detailed monorepo patterns:
+- **Option A**: Per-package planning (auto-detected)
+- **Option B**: Centralized domains (CLAUDE.md guidance)
+- **Option C**: Config mapping (`.task-memory.json`)
 
 ## Design Principles
 
 Based on [Manus Context Engineering](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus):
 
-1. **File System as Context** - kanban.md and findings/ externalize memory
+1. **File System as Context** - tasks.md and notes/ externalize memory
 2. **Recitation Pattern** - PreToolUse refreshes goals before implementation
 3. **Keep Errors In** - Errors Log preserves failures for learning
 4. **2-Action Rule** - Reminds to save research every 2 visual operations
+5. **Never Repeat Failures** - 3-Strike Protocol: diagnose → alternative → rethink → escalate
 
 ## Counter Files
 

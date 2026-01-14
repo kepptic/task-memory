@@ -1,379 +1,522 @@
 ---
 name: task-memory
-description: Log WebFetch and WebSearch operations to your kanban tasks. Use when researching, browsing docs, or searching - automatically preserves context using the Manus 2-Action Rule.
+version: "2.3.0"
+description: Task planning and context preservation. Create tasks, update status, and save task documentation using Manus principles.
+user-invocable: true
 allowed-tools:
   - Read
   - Write
   - Edit
+  - Glob
   - WebFetch
   - WebSearch
 ---
 
-# task-memory
+# /task-memory - Task Planning & Context Preservation
 
-Automatically logs research operations to your in-progress task in kanban.md.
+Persistent task tracking with documentation. Work survives context resets.
 
 ---
 
-## The 2-Action Rule
+## Critical Rules
 
-**After every 2 visual/browser/search operations, IMMEDIATELY save findings to markdown:**
+### Rule 1: NO WORK WITHOUT TASK
+
+Before writing code, editing files, or implementing anything:
+
+**STOP. Create task in tasks.md FIRST.**
+
+### Rule 2: NEVER MOVE TASK BLOCKS
+
+Task sections are rendered by the viewer based on `Status:` field.
+
+**To change status:**
+- ✅ ONLY change `**Status**: todo` → `**Status**: in-progress` → `**Status**: done`
+- ✅ Add `**Started**: YYYY-MM-DD` when starting
+- ✅ Add `**Finished**: YYYY-MM-DD` when completing
+- ❌ NEVER cut/paste task blocks between sections
+- ❌ NEVER move the `### TASK-XXX` block
+
+### Rule 3: PRESERVE RESEARCH (2-Action Rule)
+
+After every 2 visual operations (screenshots, PDFs, web searches):
+
+**STOP. Create/update notes file NOW.**
+
+### Rule 4: NEVER REPEAT FAILURES
 
 ```
-Action 1: View screenshot of admin dashboard
-Action 2: Read PDF specification document
-→ STOP: Create/update findings/TASK-XXX.md NOW
-
-Result: Visual insights preserved as text before context reset
+if action_failed:
+    next_action != same_action
 ```
 
-**Why critical:** Multimodal content (screenshots, PDFs, browser results) doesn't persist in context. Text in markdown persists forever.
-
-**Automated Tracking:**
-- WebFetch and WebSearch operations are automatically logged inline to task's **Notes** section in kanban.md
-- Counter tracks operations in `/tmp/claude-visual-ops-session.txt`
-- After every 2 operations, you'll receive a reminder to create findings file
-- Logs include timestamp, tool name, and URL/query for audit trail
-- Logs survive task archiving (moved with task to archive.md)
+Track what you tried. Mutate the approach. Log errors.
 
 ---
 
-## When to Preserve Research
+## Workflow
 
-**Trigger after 2 of these actions:**
-- Viewing screenshots (Claude in Chrome, browser automation)
-- Reading PDFs or images
-- Analyzing search results
-- Browsing documentation
-- Watching GIF recordings
-- Any multimodal content consumption
+### Step 1: Create Task
 
----
+**Location:** `planning/tasks.md`
 
-## Where to Save
-
-**Create findings files linked from kanban tasks:**
-
+**Get next ID:**
 ```markdown
-# In kanban task (kanban.md)
-### TASK-280 | Form Builder
-**Status**: in-progress
+<!-- Config: Last Task ID: XXX -->
+```
+Read current ID, increment by 1.
+
+**Task Template:**
+```markdown
+### TASK-XXX | [Brief Title]
+
+**Priority**: [Critical|High|Medium|Low] | **Category**: [Feature|Bug|Docs|Research] | **Status**: todo
+**Assigned**: @user
+**Created**: YYYY-MM-DD
+**Tags**: #tag1 #tag2
+
+[Description of what needs to be done]
+
+**Subtasks**:
+- [ ] First subtask
+- [ ] Second subtask
+- [ ] Third subtask
+
 **Notes**:
-Research findings documented in findings/TASK-280.md
 
-**Visual Operations Log**:
-- 2026-01-11 10:30:45 - WebFetch: https://docs.example.com
-- 2026-01-11 10:31:22 - WebSearch: "design patterns"
+**Errors Log**:
 
-# Create corresponding findings file
-findings/TASK-280.md
+---
+```
+
+**Update config after creating:**
+```markdown
+<!-- Config: Last Task ID: XXX -->  ← Increment this
+```
+
+### Step 2: Start Work (Change Status)
+
+**Before starting**, edit the Status field:
+
+```markdown
+# BEFORE:
+**Priority**: High | **Category**: Feature | **Status**: todo
+
+# AFTER (only edit Status, add Started):
+**Priority**: High | **Category**: Feature | **Status**: in-progress
+**Created**: 2026-01-13 | **Started**: 2026-01-13
+```
+
+**DO NOT move the task block.**
+
+### Step 3: Work and Update
+
+Mark subtasks as completed:
+```markdown
+**Subtasks**:
+- [x] Completed subtask
+- [x] Another completed
+- [ ] Still pending
+```
+
+Add progress to Notes:
+```markdown
+**Notes**:
+- Investigated issue
+- Found root cause in file.ts:42
+- Implemented fix
+```
+
+Log errors as they occur:
+```markdown
+**Errors Log**:
+| Error | Attempt | Resolution |
+|-------|---------|------------|
+| Module not found | 1 | Installed missing dep |
+| Type mismatch | 2 | Fixed interface |
+```
+
+### Step 4: Complete Task (Change Status)
+
+**When ALL subtasks done**, edit the Status field:
+
+```markdown
+# BEFORE:
+**Priority**: High | **Category**: Feature | **Status**: in-progress
+**Created**: 2026-01-13 | **Started**: 2026-01-13
+
+# AFTER (only edit Status, add Finished):
+**Priority**: High | **Category**: Feature | **Status**: done
+**Created**: 2026-01-13 | **Started**: 2026-01-13 | **Finished**: 2026-01-13
+```
+
+**DO NOT move the task block.**
+
+### Step 5: Commit with Task Reference
+
+```bash
+git commit -m "feat: description (TASK-XXX)"
 ```
 
 ---
 
-## Findings File Template
+## The 3-Strike Error Protocol
+
+When errors occur, follow this escalation:
+
+```
+ATTEMPT 1: Diagnose & Fix
+  → Read error carefully
+  → Identify root cause
+  → Apply targeted fix
+  → Log to Errors Log
+
+ATTEMPT 2: Alternative Approach
+  → Same error? Try different method
+  → Different tool? Different library?
+  → NEVER repeat exact same failing action
+  → Log attempt to Errors Log
+
+ATTEMPT 3: Broader Rethink
+  → Question assumptions
+  → Search for solutions
+  → Consider updating the plan
+  → Log attempt to Errors Log
+
+AFTER 3 FAILURES: Escalate to User
+  → Explain what you tried
+  → Share the specific error
+  → Ask for guidance
+```
+
+**Key principle:** Error recovery is a signal of true agentic behavior. Leave wrong turns in context - they inform better decisions.
+
+---
+
+## Read vs Write Decision Matrix
+
+| Situation | Action | Reason |
+|-----------|--------|--------|
+| Just wrote a file | DON'T read | Content still in context |
+| Viewed image/PDF | Write notes NOW | Multimodal → text before lost |
+| Browser returned data | Write to notes | Screenshots don't persist |
+| Starting new phase | Read plan/notes | Re-orient if context stale |
+| Error occurred | Read relevant file | Need current state to fix |
+| Resuming after gap | Read tasks.md + notes/ | Recover full state |
+
+---
+
+## Task Documentation (notes/)
+
+The `planning/notes/` folder stores task-related documentation that persists across sessions:
+
+- **Research findings** - Visual analysis, web research, documentation review
+- **Audit results** - Security audits, performance audits, accessibility checks
+- **Code review notes** - Review feedback, suggested changes, approval notes
+- **Meeting notes** - Decisions made, action items, stakeholder input
+- **Decision logs** - Architecture decisions, trade-off analysis, rationale
+- **Test results** - Test analysis, failure investigation, coverage reports
+
+### The 2-Action Rule
+
+After every 2 visual operations, save to notes immediately:
+
+```
+Action 1: View screenshot
+Action 2: Read PDF
+→ STOP: Create planning/notes/TASK-XXX.md NOW
+```
+
+**Why:** Screenshots, PDFs, browser results don't persist in context. Text in markdown persists forever.
+
+### When to Create Notes
+
+**Trigger after 2 of:**
+- Screenshots (Claude in Chrome, browser automation)
+- PDFs or images
+- Search results
+- Documentation pages
+- Code reviews
+- Any content worth preserving
+
+### Notes File Template
+
+**Location:** `planning/notes/TASK-XXX.md`
 
 ```markdown
-# Findings: TASK-XXX | [Task Title]
+# Notes: TASK-XXX | [Task Title]
 
-## Visual Analysis
+## Summary
 
-### Screenshot 1: [Description] (YYYY-MM-DD HH:MM)
+[Brief overview of what this document covers]
+
+## Analysis
+
+### [Source/Topic]: [Description] (YYYY-MM-DD HH:MM)
 - Observation 1
 - Observation 2
 - Key insight
 
-### PDF Analysis: [Document Name] (YYYY-MM-DD HH:MM)
-- Finding 1
-- Finding 2
-- Important requirement
-
-## Technical Decisions
+## Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| Use Component X | Matches existing patterns |
-| Library Y | Production-tested, accessible |
+| [Choice] | [Why] |
 
-## Issues Discovered
+## Issues
 
 | Issue | Impact | Resolution |
 |-------|--------|------------|
-| Legacy uses jQuery | Migration required | Rewrite in modern framework |
+| [Problem] | [Effect] | [Fix] |
 
 ## Resources
 
-- Design spec: `/path/to/spec.pdf`
-- Screenshot: `/path/to/screenshot.png`
-- Reference: https://example.com/demo
-- API docs: https://docs.example.com
+- [Link or path to source]
 
-## Notes
+## Action Items
 
-- Accessibility: WCAG 2.1 AA compliance required
-- Must support keyboard navigation
-- Follow project design system
+- [ ] Follow-up task 1
+- [ ] Follow-up task 2
+```
+
+### Link Notes to Task
+
+Add to task in tasks.md:
+```markdown
+**Notes**:
+Documentation in notes/TASK-XXX.md
 ```
 
 ---
 
-## Integration with Kanban
+## Status Values
 
-### Step 1: Link Research Log in Task
+| Status | Description | Required Fields |
+|--------|-------------|-----------------|
+| `todo` | Not started | Created |
+| `in-progress` | Active work | Created, Started |
+| `done` | Completed | Created, Started, Finished |
 
-When creating kanban task, logs appear automatically:
-
-```markdown
-### TASK-280 | Form Builder UI Implementation
-**Priority**: High | **Category**: Frontend | **Status**: in-progress
-**Created**: 2026-01-10 | **Started**: 2026-01-10
-**Tags**: #forms #ui #research
-
-Build form builder UI based on design specs.
-
-**Subtasks**:
-- [x] Review legacy screenshots
-- [x] Analyze specification docs
-- [ ] Design 3-panel layout mockup
-- [ ] Implement drag-drop canvas
-
-**Notes**:
-Initial research complete. Findings documented in findings/TASK-280.md
-
-**Visual Operations Log**:
-- 2026-01-10 14:30:45 - WebFetch: https://legacy-app.com/screenshots
-- 2026-01-10 14:31:22 - WebSearch: "form builder UI patterns"
+**Valid transitions:**
 ```
-
-### Step 2: Create Findings File
-
-After 2 visual operations, create `findings/TASK-XXX.md` using the template above.
+todo → in-progress → done
+```
 
 ---
 
-## Workflow Example: Implementing Form Builder
+## Visual Operations Log
 
-**10:00 - Action 1:** View screenshot of legacy form builder
-```
-Claude in Chrome screenshot shows:
-- 3-panel layout (palette, canvas, properties)
-- Drag-drop field placement
-- Visual inheritance indicators
-```
-
-**10:05 - Action 2:** Read PDF specification
-```
-PDF requirements:
-- Inheritance: base → org-specific → role-specific
-- Visual distinction for overridden fields
-- Compliance: WCAG 2.1 AA
-```
-
-**10:06 - STOP: Create findings/TASK-280.md**
-```markdown
-# Findings: TASK-280 | Form Builder
-
-## Visual Analysis
-
-### Screenshot: Legacy Form Builder (2026-01-10 10:00)
-- 3-panel layout: Left (field palette), Center (canvas), Right (properties)
-- Fields have drag handles for reordering
-- Inheritance shown with colored badges (blue=base, green=org, purple=role)
-- Canvas uses grid snapping for alignment
-
-### PDF Specification (2026-01-10 10:05)
-- Inheritance model: base template → org override → role override
-- Visual indicators: Badge color coding + tooltip on hover
-- Required: Keyboard navigation (Tab, Arrow keys, Enter, Escape)
-- Compliance: WCAG 2.1 AA (4.5:1 contrast, focus states)
-
-## Technical Decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| Modal for properties panel | Consistent with app patterns |
-| react-dnd library | Accessible drag-drop, keyboard support |
-| Badge variants | Match existing design system |
-
-## Resources
-
-- Legacy screenshot: `/tmp/screenshots/legacy-builder.png`
-- PDF spec: `docs/design/form-builder-spec.pdf`
-- React DnD: https://react-dnd.github.io/react-dnd/
-```
-
-**Result:** Even if context resets, findings preserved as text.
-
----
-
-## Automated Logging System
-
-**Since:** Version 3.0.0 | **Date:** 2026-01-11
-
-### What's Logged
-
-Every WebFetch and WebSearch operation is automatically appended to the task's **Notes** section in kanban.md:
+WebFetch and WebSearch are auto-logged by hooks:
 
 ```markdown
-**Notes**:
-Current implementation progress documented.
-
 **Visual Operations Log**:
-- 2026-01-11 10:30:45 - WebFetch: https://nextjs.org/docs
-- 2026-01-11 10:31:22 - WebSearch: "Claude Code best practices"
-- 2026-01-11 10:35:10 - WebFetch: https://anthropic.com/claude-code
+- 2026-01-13 10:30:45 - WebFetch: https://docs.example.com
+- 2026-01-13 10:31:22 - WebSearch: "query"
 ```
 
-**Log Location:** Inline in `kanban.md` → task's **Notes** section
-
-### How It Works
-
-1. **PreToolUse Hook Triggers** - When you use WebFetch or WebSearch
-2. **Operation Logged** - Formatted line appended to task's **Notes** section in kanban.md
-3. **Counter Incremented** - Stored in `/tmp/claude-visual-ops-session.txt`
-4. **Reminder After 2** - You'll see this message:
-
-```
-======================================================================
-🔔 MANUS 2-ACTION RULE: TIME TO PRESERVE RESEARCH
-======================================================================
-
-📊 Visual operations count: 2
-📋 Current task: TASK-280
-📝 Logs appended to: kanban.md → TASK-280 Notes
-
-✅ NEXT STEP: Create or update findings file
-   Location: findings/TASK-280.md
-...
-======================================================================
-```
-
-### Viewing Logs
-
-**Logs are stored inline in kanban tasks:**
-
-1. **Open kanban file:** `kanban.md`
-2. **Navigate to task:** Find `### TASK-XXX` heading
-3. **Scroll to Notes:** Look for `**Notes**:` section
-4. **Find log header:** `**Visual Operations Log**:`
-
-**Example:**
-```markdown
-### TASK-280 | Implement Feature
-**Priority**: High | **Category**: Dev | **Status**: in-progress
-...
-
-**Notes**:
-Implementation complete, logs appended inline.
-
-**Visual Operations Log**:
-- 2026-01-11 10:30:45 - WebFetch: https://docs.example.com
-- 2026-01-11 10:31:22 - WebSearch: "best practices"
-```
-
-### Resetting Counter
-
-After creating findings file, optionally reset counter:
-
-```bash
-rm /tmp/claude-visual-ops-session.txt
-```
-
-### Benefits
-
-- **Single Source of Truth:** Logs live with task, not in separate files
-- **Survives Archiving:** Logs move with task to archive.md when archived
-- **No File Management:** No separate log files to maintain or clean up
-- **Human Readable:** Markdown format, easy to scan and understand
-- **Audit Trail:** Complete history of visual research operations per task
-- **Task Context:** Logs always linked to specific work being done
+This is separate from notes - logs capture WHAT you did, notes capture WHAT YOU LEARNED.
 
 ---
 
 ## Directory Structure
 
 ```
-project/
-├── kanban.md                 ← Main task board
-├── archive.md               ← Archived tasks (with logs preserved)
-├── findings/                ← Research logs (on-demand creation)
-│   ├── TASK-280.md         ← Form builder research
-│   ├── TASK-199.md         ← Calculated fields research
-│   └── TASK-198.md         ← Skip logic research
-└── integrations/
-    └── claude-code/         ← Claude Code integration
-        ├── hooks/           ← PreToolUse hook for logging
-        └── skills/          ← This skill file
+planning/
+├── tasks.md            ← Active tasks
+├── archive.md          ← Completed tasks (preserved)
+└── notes/              ← Task documentation
+    ├── TASK-001.md
+    ├── TASK-002.md
+    └── ...
 ```
-
-**Key principle:** Findings files created on-demand, not upfront. Only create when you have visual research to preserve.
 
 ---
 
-## Anti-Patterns
+## Monorepo Support
 
-### ❌ Wrong: Skip logging because "I remember"
+task-memory supports three flexible patterns for monorepos. Choose the pattern that fits your project structure.
 
-```
-10:00 - View screenshot
-10:05 - Read PDF
-10:10 - Start coding
-[Context reset]
-Result: Lost all visual insights
-```
+### Option A: Per-Package Planning (Auto-Detected)
 
-### ✅ Correct: Log immediately after 2 actions
+Each package/workspace gets its own planning folder. Hooks automatically find the nearest `planning/tasks.md` walking up from the current directory.
 
 ```
-10:00 - View screenshot
-10:05 - Read PDF
-10:06 - Create findings/TASK-XXX.md
-10:10 - Start coding
-[Context reset]
-Result: Findings preserved, can resume work
+monorepo/
+├── packages/
+│   ├── api/
+│   │   └── planning/
+│   │       ├── tasks.md
+│   │       └── notes/
+│   ├── admin/
+│   │   └── planning/
+│   │       ├── tasks.md
+│   │       └── notes/
+│   └── web/
+│       └── planning/
+│           ├── tasks.md
+│           └── notes/
+└── planning/              ← Root fallback
+    └── tasks.md
 ```
 
-### ❌ Wrong: Vague descriptions
+**How it works:** When working in `packages/api/src/`, hooks detect `packages/api/planning/tasks.md`.
+
+### Option B: Centralized with Domain Subdirs
+
+Single `planning/` folder with domain-based subdirectories. Requires skill/CLAUDE.md guidance for file selection.
+
+```
+monorepo/
+└── planning/
+    ├── api/
+    │   └── tasks.md
+    ├── admin/
+    │   └── tasks.md
+    ├── web/
+    │   └── tasks.md
+    └── notes/             ← Shared notes
+```
+
+**Add to CLAUDE.md:**
+```markdown
+### Task Management
+
+**Domain-based planning files:**
+| Work Type | Planning File |
+|-----------|---------------|
+| API/Backend | `planning/api/tasks.md` |
+| Admin Portal | `planning/admin/tasks.md` |
+| Public Web | `planning/web/tasks.md` |
+
+Cross-domain work: Create tasks in ALL relevant files.
+```
+
+### Option C: Configuration-Based
+
+Explicit mapping in `.task-memory.json` for complete control.
+
+```json
+{
+  "planning_dir": "docs/todo",
+  "planning_dirs": {
+    "api": "packages/api/planning",
+    "admin": "packages/admin/planning",
+    "default": "planning"
+  }
+}
+```
+
+**Single directory override:**
+```json
+{
+  "planning_dir": "docs/planning"
+}
+```
+
+### CLAUDE.md Fallback
+
+When hooks can't auto-detect the correct planning file (Option B or complex setups), add explicit guidance to your project's `CLAUDE.md`:
 
 ```markdown
-## Visual Analysis
-- Looked at screenshot, it has some panels
-- PDF said something about requirements
+## Task Management (task-memory)
+
+**Planning file:** `planning/tasks.md`
+
+Before ANY work:
+1. Create task in planning/tasks.md
+2. Set Status: in-progress
+3. Do the work
+4. Set Status: done
+5. Commit with (TASK-XXX) reference
 ```
 
-### ✅ Correct: Detailed observations
+This ensures Claude knows where to find/create tasks even without hooks.
 
+---
+
+## Common Mistakes
+
+### ❌ Moving task blocks
+```
+*Cuts TASK-001 from "To Do"*
+*Pastes into "In Progress"*  ← WRONG
+```
+**Fix:** Only change `Status: todo` → `Status: in-progress`
+
+### ❌ Working without task
+```
+User: "Fix the bug"
+Assistant: *immediately writes code*  ← WRONG
+```
+**Fix:** Create TASK-XXX first, then code
+
+### ❌ Skipping research preservation
+```
+View screenshot → Read PDF → Code → [context reset] → Lost insights  ← WRONG
+```
+**Fix:** Create notes file after 2 visual operations
+
+### ❌ Vague notes
 ```markdown
-## Visual Analysis
+- Looked at screenshot, has panels  ← WRONG
+```
+**Fix:**
+```markdown
+- 3-panel layout: 250px left, fluid center, 300px right  ← CORRECT
+```
 
-### Screenshot: Form Builder (2026-01-10 10:00)
-- 3-panel layout: 250px left palette, fluid center canvas, 300px right properties
-- Fields: 12 default types (text, email, phone, date, select, checkbox, etc.)
-- Drag handles: 6-dot vertical icon, appears on hover
-- Grid: 8px snap-to-grid for alignment
+### ❌ Repeating failed actions
+```
+npm install fails → npm install again → npm install again  ← WRONG
+```
+**Fix:** Log error, try alternative (yarn, pnpm, check network)
+
+---
+
+## Verification Checklist
+
+Before ANY work:
+```
+☐ Created TASK-XXX in tasks.md
+☐ Used proper format (Status field, subtasks, Errors Log)
+☐ Incremented Last Task ID in config
+☐ Changed Status: todo → in-progress (NOT moved block)
+☐ Added Started: date
+```
+
+During work:
+```
+☐ Updating subtasks as completed [x]
+☐ Documenting in Notes section
+☐ Logging errors to Errors Log
+☐ Creating notes file after 2 visual ops
+☐ Following 3-Strike Protocol on failures
+```
+
+After work:
+```
+☐ Changed Status: in-progress → done (NOT moved block)
+☐ Added Finished: date
+☐ All subtasks checked [x]
+☐ Committed with (TASK-XXX) reference
 ```
 
 ---
 
-## When NOT to Use
+## Git Integration
 
-**Skip research preservation for:**
-- Reading code files (already persisted)
-- Viewing git diffs (available via git)
-- Checking logs (ephemeral, not research)
-- Quick lookups (no insights to preserve)
+Every commit references task:
 
-**Use research preservation for:**
-- Screenshots of UIs, designs, wireframes
-- PDFs, images, diagrams
-- Browser results with visual content
-- Documentation with code examples
-- Competitive analysis (visual comparisons)
+```bash
+git commit -m "type: description (TASK-XXX)"
+
+# Examples
+git commit -m "feat: add login form (TASK-042)"
+git commit -m "fix: null check in parser (TASK-043)"
+git commit -m "docs: API reference (TASK-044)"
+```
 
 ---
 
-**Skill Version:** 3.0.0
-**Created:** 2026-01-10 | **Updated:** 2026-01-11 (Inline logging, portable version)
-**Status:** Production | Optional enhancement to task-memory workflow
+**Version:** 2.3.0
 **License:** MIT
-**Portability:** Can be used in any project with task-memory

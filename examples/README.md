@@ -1,23 +1,25 @@
 # Examples
 
-This folder contains example files demonstrating the task-memory kanban format.
+This folder contains example files demonstrating the task-memory planning format.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| [kanban.md](kanban.md) | Active kanban board with tasks in various states |
+| [tasks.md](tasks.md) | Active task board with tasks in various states |
 | [archive.md](archive.md) | Archived completed tasks with preserved context |
-| [findings/](findings/) | Research findings linked from tasks |
+| [notes/](notes/) | Task documentation (research, audits, reviews, etc.) |
 
 ---
 
 ## Quick Start
 
-Copy `kanban.md` to your project root and start adding tasks:
+Copy the planning folder to your project and start adding tasks:
 
 ```bash
-cp examples/kanban.md ./kanban.md
+mkdir -p planning/notes
+cp examples/tasks.md ./planning/
+cp examples/archive.md ./planning/
 ```
 
 ---
@@ -83,25 +85,30 @@ This creates an audit trail of research that survives context resets.
 
 ---
 
-## Findings Files
+## Notes (Task Documentation)
 
-After 2+ visual operations, create a findings file to preserve insights:
+After 2+ visual operations, create a notes file to preserve insights:
 
 ```markdown
 **Notes**:
-Research findings documented in findings/TASK-001.md
+Documentation in notes/TASK-001.md
 ```
 
-Store detailed research in `findings/TASK-XXX.md` and reference it from the task.
+Store task-related documentation in `notes/TASK-XXX.md`:
+- Research findings and analysis
+- Audit results (security, performance, accessibility)
+- Code review notes and feedback
+- Meeting notes and decisions
+- Architecture decision records
 
 ---
 
 ## Configuration Section
 
-The top of `kanban.md` contains configuration:
+The top of `tasks.md` contains configuration:
 
 ```markdown
-# Kanban Board
+# Task Board
 
 <!-- Config: Last Task ID: 005 -->
 
@@ -138,7 +145,7 @@ todo → in-progress → done → (archive)
 - **Always update the Last Task ID** when creating new tasks
 - **Check off subtasks** as you complete them
 - **Add notes** to document decisions and results
-- **Reference findings files** for research tasks
+- **Reference notes files** for documentation
 - **Archive regularly** to keep the board focused
 
 ---

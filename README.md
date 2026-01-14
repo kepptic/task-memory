@@ -1,6 +1,6 @@
 # task-memory
 
-Privacy-first Kanban task manager with Manus-style memory. Tasks remember your research across sessions.
+Privacy-first task manager with Manus-style memory. Tasks remember your research across sessions.
 
 ## Install
 
@@ -28,8 +28,8 @@ Download `task-memory.html` and open in Chrome/Edge/Opera.
 ## What It Does
 
 **Task Manager:**
-- Drag-and-drop Kanban board in a single HTML file
-- Uses local markdown files in `tasks/` folder
+- Drag-and-drop task board in a single HTML file
+- Uses local markdown files in `planning/` folder
 - No cloud, no tracking, no accounts
 - Git-native workflow
 
@@ -41,7 +41,7 @@ Download `task-memory.html` and open in Chrome/Edge/Opera.
 ## Quick Start
 
 1. Install the plugin
-2. Create a task in `tasks/kanban.md` with `**Status**: in-progress`
+2. Create a task in `planning/tasks.md` with `**Status**: in-progress`
 3. Use Claude Code - your research gets logged automatically
 
 ### Example Task with Memory
@@ -63,14 +63,14 @@ Initial research notes.
 
 ## File Structure
 
-The plugin creates a `tasks/` folder in your project:
+The plugin creates a `planning/` folder in your project:
 
 ```
 your-project/
-├── tasks/
-│   ├── kanban.md       # Active tasks
+├── planning/
+│   ├── tasks.md        # Active tasks
 │   ├── archive.md      # Completed tasks
-│   └── findings/       # Research files
+│   └── notes/          # Task documentation
 └── .task-memory.json   # Optional: custom config
 ```
 
@@ -80,26 +80,41 @@ To change where tasks are stored, create `.task-memory.json` in your project roo
 
 ```json
 {
-  "tasks_dir": "docs/tasks"
+  "planning_dir": "docs/planning"
 }
 ```
 
-This moves the kanban files to `docs/tasks/kanban.md`, etc.
+This moves the planning files to `docs/planning/tasks.md`, etc.
+
+### Monorepo Support
+
+Hooks auto-detect the nearest `planning/tasks.md` walking up from current directory:
+
+```
+monorepo/
+├── packages/
+│   ├── api/planning/tasks.md      ← Used when in api/
+│   └── web/planning/tasks.md      ← Used when in web/
+└── planning/tasks.md              ← Root fallback
+```
+
+See `skills/task-memory/SKILL.md` for detailed monorepo patterns.
 
 ## Features
 
-- **Auto-creates structure** - `tasks/` folder created on first use
+- **Auto-creates structure** - `planning/` folder created on first use
 - **Markdown-native** - Plain text files, git-friendly
 - **Auto-logging** - Research operations logged to current task
-- **2-Action Rule** - Reminded to preserve findings every 2 operations
-- **Configurable** - Move tasks anywhere via `.task-memory.json`
+- **2-Action Rule** - Reminded to preserve notes every 2 operations
+- **Monorepo support** - Auto-detects nearest planning/ per package
+- **Configurable** - Move planning anywhere via `.task-memory.json`
 - **Archive system** - Completed tasks preserved with full history
 
 ## Requirements
 
 **Plugin:**
 - Claude Code CLI or VS Code extension
-- Python 3.6+
+- Bash (standard on macOS and Linux)
 
 **Standalone App:**
 - Chrome 86+, Edge 86+, Opera 72+
@@ -113,15 +128,17 @@ task-memory/
 │   └── marketplace.json   # Marketplace registry
 ├── hooks/
 │   ├── hooks.json         # Hook configuration
-│   └── task-memory.py     # PreToolUse hook
+│   ├── task-memory-hook.sh # Main hook handler
+│   └── skill-eval.sh      # Context provider
 ├── skills/
-│   └── task-memory/
-│       └── SKILL.md       # Skill definition
-├── tasks/                  # Your kanban (created on use)
-│   ├── kanban.md
+│   ├── task-memory/
+│   │   └── SKILL.md       # Task planning skill
+│   └── task-status/
+│       └── SKILL.md       # Status check skill
+├── planning/               # Your tasks (created on use)
+│   ├── tasks.md
 │   ├── archive.md
-│   └── findings/
-├── templates/              # Kanban templates
+│   └── notes/
 ├── examples/               # Example files
 └── rules/                  # Workflow rules
 ```

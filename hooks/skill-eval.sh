@@ -1,8 +1,8 @@
 #!/bin/bash
-# skill-eval.sh - Lightweight skill evaluation for task-memory
+# skill-eval.sh - Provides task context for Claude to make decisions
 #
-# Detects if prompt is a TASK (activate task context) or QUESTION (pass through).
-# Outputs context to stdout for Claude to see.
+# This hook provides current task state on every prompt.
+# Claude decides what to do with this context - the script doesn't classify prompts.
 #
 # https://github.com/kepptic/task-memory | MIT License
 
@@ -13,20 +13,56 @@ set -e
 # =============================================================================
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-TASKS_DIR="$PROJECT_DIR/tasks"
-KANBAN_FILE="$TASKS_DIR/kanban.md"
+
+# Find planning directory with priority:
+# 1. .task-memory.json config (explicit mapping)
+# 2. Nearest planning/ directory walking up from cwd
+# 3. Project root planning/ directory
+find_planning_dir() {
+    local config_file="$PROJECT_DIR/.task-memory.json"
+
+    # Option C: Check for explicit config
+    if [ -f "$config_file" ]; then
+        local config_dir
+        config_dir=$(grep -o '"planning_dir"[[:space:]]*:[[:space:]]*"[^"]*"' "$config_file" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/' | head -1)
+        if [ -n "$config_dir" ]; then
+            if [[ "$config_dir" = /* ]]; then
+                echo "$config_dir"
+            else
+                echo "$PROJECT_DIR/$config_dir"
+            fi
+            return
+        fi
+    fi
+
+    # Option A: Walk up from current directory to find nearest planning/
+    local search_dir="${PWD:-$PROJECT_DIR}"
+    while [ "$search_dir" != "/" ] && [[ "$search_dir" == "$PROJECT_DIR"* ]]; do
+        if [ -d "$search_dir/planning" ] && [ -f "$search_dir/planning/tasks.md" ]; then
+            echo "$search_dir/planning"
+            return
+        fi
+        search_dir=$(dirname "$search_dir")
+    done
+
+    # Default: Project root planning/
+    echo "$PROJECT_DIR/planning"
+}
+
+PLANNING_DIR=$(find_planning_dir)
+TASKS_FILE="$PLANNING_DIR/tasks.md"
 
 # =============================================================================
 # Utilities
 # =============================================================================
 
 get_current_task() {
-    if [ ! -f "$KANBAN_FILE" ]; then
+    if [ ! -f "$TASKS_FILE" ]; then
         return
     fi
 
     local task_line
-    task_line=$(grep -B 20 '\*\*Status\*\*: in-progress' "$KANBAN_FILE" 2>/dev/null | grep '^### TASK-' | tail -1)
+    task_line=$(grep -B 20 '\*\*Status\*\*: in-progress' "$TASKS_FILE" 2>/dev/null | grep '^### TASK-' | tail -1)
 
     if [ -z "$task_line" ]; then
         return
@@ -36,55 +72,25 @@ get_current_task() {
     task_id=$(echo "$task_line" | sed 's/### \(TASK-[0-9]*\).*/\1/')
     title=$(echo "$task_line" | sed 's/.*| //')
 
-    echo "$task_id|$title"
+    # Count subtasks
+    local task_block completed total
+    task_block=$(sed -n "/^### $task_id/,/^---$/p" "$TASKS_FILE" 2>/dev/null | head -n -1)
+    completed=$(echo "$task_block" | grep -c '\- \[x\]' 2>/dev/null) || completed=0
+    total=$(echo "$task_block" | grep -c '\- \[.\]' 2>/dev/null) || total=0
+
+    echo "$task_id|$title|$completed|$total"
 }
 
-is_question() {
-    local prompt="$1"
-    local prompt_lower
-    prompt_lower=$(echo "$prompt" | tr '[:upper:]' '[:lower:]')
-
-    # Check for question indicators
-    # Starts with question words
-    if echo "$prompt_lower" | grep -qE '^(what|how|why|when|where|who|which|can|could|would|should|is|are|do|does|explain|describe|tell me|show me|help me understand)\b'; then
-        return 0
+get_incomplete_subtasks() {
+    local task_id="$1"
+    if [ ! -f "$TASKS_FILE" ]; then
+        return
     fi
 
-    # Ends with question mark
-    if echo "$prompt" | grep -qE '\?[[:space:]]*$'; then
-        return 0
-    fi
-
-    return 1
-}
-
-is_task() {
-    local prompt="$1"
-    local prompt_lower
-    prompt_lower=$(echo "$prompt" | tr '[:upper:]' '[:lower:]')
-
-    # Check for task indicators
-    # Action verbs at start
-    if echo "$prompt_lower" | grep -qE '^(implement|build|create|fix|add|update|modify|change|remove|develop|design|write|make|setup|configure|install|deploy|migrate|upgrade|debug|investigate|resolve|refactor|optimize)\b'; then
-        return 0
-    fi
-
-    # Task-related keywords anywhere
-    if echo "$prompt_lower" | grep -qE '\b(feature|bug|issue|task|ticket|todo|subtask)\b'; then
-        return 0
-    fi
-
-    # References to files/code
-    if echo "$prompt" | grep -qE '\.(ts|tsx|js|jsx|py|md|json|yaml|yml|css|scss|html)\b'; then
-        return 0
-    fi
-
-    # References to tasks directory
-    if echo "$prompt" | grep -qE '\btasks/'; then
-        return 0
-    fi
-
-    return 1
+    sed -n "/^### $task_id/,/^---$/p" "$TASKS_FILE" 2>/dev/null | \
+        grep '\- \[ \]' | \
+        sed 's/- \[ \] //' | \
+        head -3
 }
 
 # =============================================================================
@@ -96,64 +102,52 @@ main() {
     local input
     input=$(cat)
 
-    # Extract hook event and prompt
-    local hook_event prompt
+    # Extract hook event
+    local hook_event
     hook_event=$(echo "$input" | grep -o '"hook_event_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
-    prompt=$(echo "$input" | grep -o '"prompt"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | head -1)
 
     # Only process UserPromptSubmit
     if [ "$hook_event" != "UserPromptSubmit" ]; then
         exit 0
     fi
 
-    # Skip empty or slash commands
-    if [ -z "$prompt" ] || echo "$prompt" | grep -qE '^/'; then
+    # Skip slash commands
+    local prompt
+    prompt=$(echo "$input" | grep -o '"prompt"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | head -1)
+
+    if echo "$prompt" | grep -qE '^/'; then
         exit 0
     fi
 
-    # Classify prompt
-    local prompt_type="UNKNOWN"
+    # Always provide context - let Claude decide what to do with it
+    local task_info task_id title completed total
 
-    if is_question "$prompt"; then
-        prompt_type="QUESTION"
-    elif is_task "$prompt"; then
-        prompt_type="TASK"
-    fi
+    task_info=$(get_current_task)
 
-    # Output context for tasks (stdout goes to Claude)
-    if [ "$prompt_type" = "TASK" ]; then
-        local task_info task_id title
+    if [ -n "$task_info" ]; then
+        IFS='|' read -r task_id title completed total <<< "$task_info"
 
-        echo "============================================================"
-        echo "TASK DETECTED - task-memory activated"
-        echo "============================================================"
+        echo "────────────────────────────────────────────────────────────"
+        echo "📋 TASK CONTEXT"
+        echo "────────────────────────────────────────────────────────────"
+        echo ""
+        echo "🎯 Current: $task_id | $title"
 
-        task_info=$(get_current_task)
-
-        if [ -n "$task_info" ]; then
-            IFS='|' read -r task_id title <<< "$task_info"
+        if [ "$total" -gt 0 ]; then
+            echo "📊 Progress: $completed/$total subtasks"
             echo ""
-            echo "Current task: $task_id | $title"
-            echo ""
-            echo "Instructions:"
-            echo "   - Track progress via subtasks in kanban.md"
-            echo "   - Log research to Visual Operations Log (auto)"
-            echo "   - Create findings file after 2 research operations"
-            echo "   - Mark subtasks [x] when complete"
-            echo "   - When ALL subtasks done: move task to Done, set Status: done"
-        else
-            echo ""
-            echo "No in-progress task found"
-            echo ""
-            echo "Consider creating a task in tasks/kanban.md:"
-            echo "   ### TASK-XXX | Your task title"
-            echo "   **Status**: in-progress"
+            echo "Remaining:"
+            get_incomplete_subtasks "$task_id" | while read -r subtask; do
+                echo "   - [ ] $subtask"
+            done
         fi
 
-        echo "============================================================"
+        echo ""
+        echo "📁 Planning: $TASKS_FILE"
+        echo "────────────────────────────────────────────────────────────"
     fi
 
-    # Questions pass through silently
+    # No output if no task in progress - that's fine, Claude will work without it
 
     exit 0
 }

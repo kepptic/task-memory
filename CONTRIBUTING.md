@@ -44,8 +44,8 @@ Title: Tasks not updating when markdown file changes
 
 Steps to reproduce:
 1. Open task-memory.html
-2. Select a kanban.md file from disk
-3. Edit kanban.md in another editor (add a new task)
+2. Select a tasks.md file from disk
+3. Edit tasks.md in another editor (add a new task)
 4. Return to the browser without refreshing
 
 Expected: New task appears in the board
@@ -115,7 +115,7 @@ without repeatedly reloading the entire file.
 - Reset when loading a new file
 
 ## Testing
-1. Open task-memory.html with a multi-status kanban.md
+1. Open task-memory.html with a multi-status tasks.md
 2. Click filter buttons (To Do, In Progress, Done)
 3. Verify only matching tasks appear
 4. Load a different file and verify filters reset
@@ -463,7 +463,7 @@ Since this is a single-file HTML app, manual testing is essential:
    ```
 
 2. **Test with sample markdown:**
-   - Use `examples/` folder or create a test kanban.md
+   - Use `examples/` folder or create a test tasks.md
    - Test with real project kanbans from `/docs/todo/`
 
 3. **Browser developer tools (F12):**

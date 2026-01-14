@@ -1,6 +1,8 @@
 ---
 name: task-status
-description: Quick context check using the 5-Question Reboot Test. Shows where you are, where you're going, your goal, what you've learned, and what you've done.
+version: "1.1.0"
+description: Quick context check using the 5-Question Reboot Test. Verifies your working context is solid before continuing.
+user-invocable: true
 allowed-tools:
   - Read
   - Glob
@@ -8,53 +10,45 @@ allowed-tools:
 
 # /task-status - 5-Question Reboot Test
 
-Quickly verify your context is solid by answering 5 key questions from your task files.
+Quickly verify your context is solid by answering 5 key questions.
 
----
+## Quick Start
 
-## Usage
+When invoked, perform these steps:
 
-```
-/task-status
-```
-
----
-
-## The 5 Questions
-
-| Question | Answer Source | What to Check |
-|----------|---------------|---------------|
-| **Where am I?** | Current subtask in kanban.md | Which subtask is in progress? |
-| **Where am I going?** | Remaining subtasks | What's left to complete? |
-| **What's the goal?** | Task description | Why are we doing this? |
-| **What have I learned?** | Notes + findings/ | Research discoveries |
-| **What have I done?** | Visual Operations Log | Actions taken this session |
-
----
-
-## Instructions
-
-When the user runs `/task-status`, perform these steps:
-
-### Step 1: Read the kanban file
+### Step 1: Read Tasks
 
 ```bash
-Read tasks/kanban.md
+Read planning/tasks.md
 ```
 
 Find the task with `**Status**: in-progress`
 
-### Step 2: Extract and display the 5 answers
+### Step 2: Extract the 5 Answers
 
-Format your response as:
+| Question | Source | Extract |
+|----------|--------|---------|
+| Where am I? | First unchecked subtask | Current phase |
+| Where am I going? | Remaining subtasks | What's left |
+| What's the goal? | Task description | Why we're doing this |
+| What have I learned? | Notes + notes/ | Research insights |
+| What have I done? | Visual Operations Log | Recent actions |
+
+### Step 3: Check for Notes File
+
+```bash
+Read planning/notes/TASK-XXX.md (if exists)
+```
+
+### Step 4: Display Status
 
 ```
 ═══════════════════════════════════════════════════════════════
-📋 TASK STATUS: [TASK-XXX] | [Title]
+📋 TASK STATUS: TASK-XXX | [Title]
 ═══════════════════════════════════════════════════════════════
 
 1️⃣  WHERE AM I?
-    Current phase: [First unchecked subtask or "Implementation"]
+    Current phase: [First unchecked subtask]
     Progress: [X/Y] subtasks complete
 
 2️⃣  WHERE AM I GOING?
@@ -64,11 +58,11 @@ Format your response as:
     - [ ] [Subtask 3]
 
 3️⃣  WHAT'S THE GOAL?
-    [Task description from kanban.md]
+    [Task description from tasks.md]
 
 4️⃣  WHAT HAVE I LEARNED?
     [Summary from Notes section]
-    [If findings/TASK-XXX.md exists, mention key points]
+    [Key points from notes file if exists]
 
 5️⃣  WHAT HAVE I DONE?
     Recent operations:
@@ -79,54 +73,11 @@ Format your response as:
 ═══════════════════════════════════════════════════════════════
 ```
 
-### Step 3: Check for findings file
-
-```bash
-Read tasks/findings/TASK-XXX.md (if exists)
-```
-
-Include key discoveries in "What have I learned?"
-
----
-
-## Example Output
-
-```
-═══════════════════════════════════════════════════════════════
-📋 TASK STATUS: TASK-004 | Test hook functionality
-═══════════════════════════════════════════════════════════════
-
-1️⃣  WHERE AM I?
-    Current phase: Run a WebSearch
-    Progress: 0/2 subtasks complete
-
-2️⃣  WHERE AM I GOING?
-    Remaining:
-    - [ ] Run a WebSearch
-    - [ ] Verify log appears in Notes
-
-3️⃣  WHAT'S THE GOAL?
-    Testing that the PreToolUse hook logs WebFetch/WebSearch
-    operations correctly.
-
-4️⃣  WHAT HAVE I LEARNED?
-    No findings file yet (tasks/findings/TASK-004.md)
-    Notes: Empty
-
-5️⃣  WHAT HAVE I DONE?
-    Recent operations:
-    - 2026-01-12 01:34:37 - WebSearch: "Claude Code plugin development"
-
-═══════════════════════════════════════════════════════════════
-✅ Context verified | Ready to continue
-═══════════════════════════════════════════════════════════════
-```
-
 ---
 
 ## When Context is Broken
 
-If you can't answer these questions, context needs repair:
+If you can't answer these questions, display:
 
 ```
 ═══════════════════════════════════════════════════════════════
@@ -139,7 +90,7 @@ Missing information:
 - [ ] No Visual Operations Log
 
 Recommended actions:
-1. Review tasks/kanban.md for task status
+1. Review planning/tasks.md for task status
 2. Add subtasks to break down the work
 3. Continue research to populate logs
 
@@ -148,16 +99,61 @@ Recommended actions:
 
 ---
 
-## Integration
+## When to Use
 
-This skill works with:
-- **kanban.md** - Task board with subtasks and status
-- **archive.md** - Completed tasks with preserved logs
-- **findings/** - Research documentation per task
-- **Visual Operations Log** - Auto-logged WebFetch/WebSearch
+Run `/task-status` when:
+- Starting a new session
+- Resuming after a break
+- Context feels uncertain
+- Before making major decisions
 
 ---
 
-**Skill Version:** 1.0.0
-**Created:** 2026-01-12
+## Example Output
+
+```
+═══════════════════════════════════════════════════════════════
+📋 TASK STATUS: TASK-004 | Fix hook functionality
+═══════════════════════════════════════════════════════════════
+
+1️⃣  WHERE AM I?
+    Current phase: Test WebSearch logging
+    Progress: 1/3 subtasks complete
+
+2️⃣  WHERE AM I GOING?
+    Remaining:
+    - [ ] Test WebSearch logging
+    - [ ] Verify 2-Action Rule reminder
+
+3️⃣  WHAT'S THE GOAL?
+    Ensure PreToolUse hook correctly logs research operations
+    to the Visual Operations Log in tasks.md
+
+4️⃣  WHAT HAVE I LEARNED?
+    Notes: Hook triggers on WebFetch/WebSearch
+    Documentation: None yet (planning/notes/TASK-004.md not created)
+
+5️⃣  WHAT HAVE I DONE?
+    Recent operations:
+    - 2026-01-12 10:30:45 - WebFetch: https://docs.example.com
+    - 2026-01-12 10:31:22 - WebSearch: "Claude Code hooks"
+
+═══════════════════════════════════════════════════════════════
+✅ Context verified | Ready to continue
+═══════════════════════════════════════════════════════════════
+```
+
+---
+
+## Integration
+
+This skill reads from:
+- **planning/tasks.md** - Task status, subtasks, notes, operations log
+- **planning/notes/** - Task documentation (research, audits, reviews)
+
+Use with `/task-memory` to preserve research before checking status.
+
+---
+
+**Version:** 1.1.0
 **License:** MIT
