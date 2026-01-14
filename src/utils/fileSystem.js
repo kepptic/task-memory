@@ -3,10 +3,14 @@
 
 // IndexedDB configuration for storing recent projects
 const DB_NAME = "TaskManagerDB";
-const DB_VERSION = 2;
+const DB_VERSION = 3; // Bumped for taskFileName support
 const STORE_NAME = "settings";
 const PROJECTS_KEY = "recentProjects";
 const MAX_RECENT_PROJECTS = 10;
+
+// Supported task file names in priority order
+const TASK_FILE_NAMES = ['tasks.md', 'kanban.md'];
+const DEFAULT_TASK_FILE = 'tasks.md';
 
 // File handles
 let directoryHandle = null;
@@ -29,7 +33,7 @@ async function openDB() {
 }
 
 // Save directory handle to IndexedDB
-async function saveDirectoryHandle(handle, customName = null) {
+async function saveDirectoryHandle(handle, customName = null, taskFileName = null) {
   try {
     const db = await openDB();
     const transaction = db.transaction(STORE_NAME, "readwrite");
@@ -56,6 +60,10 @@ async function saveDirectoryHandle(handle, customName = null) {
       const project = projects.splice(existingIndex, 1)[0];
       project.handle = handle;
       project.lastAccessed = Date.now();
+      // Update taskFileName if provided
+      if (taskFileName) {
+        project.taskFileName = taskFileName;
+      }
       projects.unshift(project);
     } else {
       // Add new project at the beginning
@@ -63,6 +71,7 @@ async function saveDirectoryHandle(handle, customName = null) {
         name: projectName,
         displayName: projectDisplayName,
         handle: handle,
+        taskFileName: taskFileName || DEFAULT_TASK_FILE,
         lastAccessed: Date.now(),
       });
     }
@@ -146,20 +155,9 @@ async function requestDirectoryAccess(startInHandle = null) {
   }
 }
 
-// Load kanban.md file
-async function loadKanbanFile(dirHandle) {
-  try {
-    kanbanFileHandle = await dirHandle.getFileHandle("kanban.md");
-    const file = await kanbanFileHandle.getFile();
-    const content = await file.text();
-
-    console.log("Kanban file loaded, size:", content.length);
-    return { fileHandle: kanbanFileHandle, content };
-  } catch (error) {
-    if (error.name === "NotFoundError") {
-      console.log("kanban.md not found, will create it");
-      // Create initial kanban.md
-      const initialContent = `# Kanban Board
+// Generate initial task file content
+function generateInitialTaskFile() {
+  return `# Task Board
 
 <!-- Config: Last Task ID: 0 -->
 
@@ -181,13 +179,154 @@ async function loadKanbanFile(dirHandle) {
 
 ## ✅ Done
 `;
-      kanbanFileHandle = await dirHandle.getFileHandle("kanban.md", {
-        create: true,
-      });
-      await saveToFile(kanbanFileHandle, initialContent);
-      return { fileHandle: kanbanFileHandle, content: initialContent };
+}
+
+// Detect which task files exist in the directory
+async function detectTaskFile(dirHandle) {
+  const result = {
+    found: null,
+    legacy: null,
+    available: []
+  };
+
+  for (const fileName of TASK_FILE_NAMES) {
+    try {
+      await dirHandle.getFileHandle(fileName);
+      result.available.push(fileName);
+      if (!result.found) {
+        result.found = fileName;
+      }
+      if (fileName === 'kanban.md') {
+        result.legacy = fileName;
+      }
+    } catch (e) {
+      // File doesn't exist, continue
     }
-    throw error;
+  }
+
+  return result;
+}
+
+// Load task file (supports both tasks.md and kanban.md)
+async function loadTaskFile(dirHandle, preferredFileName = null) {
+  // If a preferred file is specified, try it first
+  if (preferredFileName) {
+    try {
+      kanbanFileHandle = await dirHandle.getFileHandle(preferredFileName);
+      const file = await kanbanFileHandle.getFile();
+      const content = await file.text();
+      console.log(`Task file "${preferredFileName}" loaded, size:`, content.length);
+      return {
+        fileHandle: kanbanFileHandle,
+        content,
+        fileName: preferredFileName,
+        isLegacy: preferredFileName === 'kanban.md'
+      };
+    } catch (error) {
+      if (error.name !== 'NotFoundError') {
+        throw error;
+      }
+      // Preferred file not found, fall through to detection
+      console.log(`Preferred file "${preferredFileName}" not found, detecting...`);
+    }
+  }
+
+  // Detect existing files
+  const detection = await detectTaskFile(dirHandle);
+
+  if (detection.found) {
+    kanbanFileHandle = await dirHandle.getFileHandle(detection.found);
+    const file = await kanbanFileHandle.getFile();
+    const content = await file.text();
+    console.log(`Task file "${detection.found}" loaded, size:`, content.length);
+    return {
+      fileHandle: kanbanFileHandle,
+      content,
+      fileName: detection.found,
+      isLegacy: detection.found === 'kanban.md',
+      hasLegacy: detection.legacy !== null,
+      available: detection.available
+    };
+  }
+
+  // No file found, create new tasks.md
+  console.log('No task file found, creating tasks.md');
+  const initialContent = generateInitialTaskFile();
+  kanbanFileHandle = await dirHandle.getFileHandle(DEFAULT_TASK_FILE, { create: true });
+  await saveToFile(kanbanFileHandle, initialContent);
+  return {
+    fileHandle: kanbanFileHandle,
+    content: initialContent,
+    fileName: DEFAULT_TASK_FILE,
+    isLegacy: false,
+    isNew: true,
+    available: [DEFAULT_TASK_FILE]
+  };
+}
+
+// Legacy wrapper for backwards compatibility
+async function loadKanbanFile(dirHandle) {
+  const result = await loadTaskFile(dirHandle);
+  return { fileHandle: result.fileHandle, content: result.content };
+}
+
+// Migrate kanban.md to tasks.md
+async function migrateKanbanToTasks(dirHandle) {
+  try {
+    // Read content from kanban.md
+    const oldHandle = await dirHandle.getFileHandle('kanban.md');
+    const file = await oldHandle.getFile();
+    const content = await file.text();
+
+    // Create tasks.md with same content
+    const newHandle = await dirHandle.getFileHandle('tasks.md', { create: true });
+    await saveToFile(newHandle, content);
+
+    // Delete kanban.md
+    await dirHandle.removeEntry('kanban.md');
+
+    // Update the module-level handle
+    kanbanFileHandle = newHandle;
+
+    console.log('Successfully migrated kanban.md to tasks.md');
+    return { success: true, newHandle };
+  } catch (error) {
+    console.error('Migration failed:', error);
+    return { success: false, error };
+  }
+}
+
+// Update project's task file preference
+async function updateProjectTaskFile(projectName, taskFileName) {
+  try {
+    const db = await openDB();
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+
+    const getRequest = store.get(PROJECTS_KEY);
+    const projects = await new Promise((resolve, reject) => {
+      getRequest.onsuccess = () => resolve(getRequest.result || []);
+      getRequest.onerror = () => reject(getRequest.error);
+    });
+
+    const projectIndex = projects.findIndex(p => p.name === projectName);
+
+    if (projectIndex >= 0) {
+      projects[projectIndex].taskFileName = taskFileName;
+
+      const putRequest = store.put(projects, PROJECTS_KEY);
+      await new Promise((resolve, reject) => {
+        putRequest.onsuccess = resolve;
+        putRequest.onerror = () => reject(putRequest.error);
+      });
+
+      console.log(`Updated task file for "${projectName}" to "${taskFileName}"`);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Failed to update project task file:', error);
+    return false;
   }
 }
 
@@ -394,6 +533,10 @@ export const fileSystem = {
   loadDirectoryHandle,
   loadRecentProjects,
   loadKanbanFile,
+  loadTaskFile,
+  detectTaskFile,
+  migrateKanbanToTasks,
+  updateProjectTaskFile,
   loadArchiveFile,
   saveKanbanFile,
   saveArchiveFile,
@@ -411,6 +554,10 @@ export {
   loadDirectoryHandle,
   loadRecentProjects,
   loadKanbanFile,
+  loadTaskFile,
+  detectTaskFile,
+  migrateKanbanToTasks,
+  updateProjectTaskFile,
   loadArchiveFile,
   saveKanbanFile,
   saveArchiveFile,

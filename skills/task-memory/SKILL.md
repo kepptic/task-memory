@@ -1,6 +1,6 @@
 ---
 name: task-memory
-version: "2.3.0"
+version: "2.4.0"
 description: Task planning and context preservation. Create tasks, update status, and save task documentation using Manus principles.
 user-invocable: true
 allowed-tools:
@@ -332,6 +332,94 @@ planning/
 
 ---
 
+## File Format for UI Compatibility
+
+The task-memory UI (`task-memory.html`) requires a specific format. Tasks MUST be nested under column sections.
+
+### Required Structure
+
+```markdown
+# Kanban Board
+
+<!-- Config: Last Task ID: XXX -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+
+**Categories**: Feature, Bug, Docs, Research
+
+**Users**: @alice, @bob
+
+**Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
+
+**Tags**: #tag1 #tag2 #tag3
+
+---
+
+## 📝 To Do
+
+### TASK-001 | Task Title
+**Priority**: High | **Category**: Feature | **Status**: todo
+...
+
+## 🚧 In Progress
+
+### TASK-002 | Another Task
+**Priority**: Medium | **Category**: Bug | **Status**: in-progress
+...
+
+## ✅ Done
+
+### TASK-003 | Completed Task
+**Priority**: Low | **Category**: Docs | **Status**: done
+...
+```
+
+### Critical Requirements
+
+1. **Configuration section**: Must use `## ⚙️ Configuration` header (with emoji)
+2. **Columns format**: `**Columns**: Name (id) | Name (id) | Name (id)`
+3. **Column sections**: Tasks must be under column headers like `## 📝 To Do`
+4. **Task headers**: Use `### TASK-XXX` (h3 level), NOT `## TASK-XXX` (h2 level)
+5. **Separator**: Use `---` after the configuration section
+
+### Column ID Mapping
+
+The `(id)` in the Columns definition maps to the `**Status**:` field:
+
+| Column Definition | Status Value |
+|-------------------|--------------|
+| `To Do (todo)` | `**Status**: todo` |
+| `In Progress (in-progress)` | `**Status**: in-progress` |
+| `Done (done)` | `**Status**: done` |
+
+### ❌ Invalid Format (Won't Parse)
+
+```markdown
+## TASK-001 | Task Title       ← WRONG: h2 level, not under column
+**Status**: done
+
+## TASK-002 | Another Task     ← WRONG: standalone sections
+**Status**: todo
+```
+
+### ✅ Valid Format (Will Parse)
+
+```markdown
+## 📝 To Do
+
+### TASK-002 | Another Task    ← CORRECT: h3 level, under column
+**Status**: todo
+
+## ✅ Done
+
+### TASK-001 | Task Title      ← CORRECT: h3 level, under column
+**Status**: done
+```
+
+---
+
 ## Monorepo Support
 
 task-memory supports three flexible patterns for monorepos. Choose the pattern that fits your project structure.
@@ -518,5 +606,5 @@ git commit -m "docs: API reference (TASK-044)"
 
 ---
 
-**Version:** 2.3.0
+**Version:** 2.4.0
 **License:** MIT

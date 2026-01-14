@@ -2,15 +2,21 @@
 
 <!-- Config: Last Task ID: 005 -->
 
-## Configuration
-**Columns**: To Do | In Progress | Done
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+
 **Categories**: Feature, Bug, Docs, Research
+
 **Users**: @alice, @bob
+
+**Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
+
 **Tags**: #api #frontend #backend #research #urgent
 
 ---
 
-## To Do
+## 📝 To Do
 
 ### TASK-005 | Add user authentication
 
@@ -30,7 +36,7 @@ Implement JWT-based user authentication for the API.
 
 ---
 
-## In Progress
+## 🚧 In Progress
 
 ### TASK-003 | Implement dashboard UI
 
@@ -87,7 +93,7 @@ Reproduced: When sorting by date DESC, offset calculation is wrong.
 
 ---
 
-## Done
+## ✅ Done
 
 ### TASK-001 | Project setup and configuration
 

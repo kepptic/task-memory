@@ -15,6 +15,9 @@ import {
   ArrowUpDown,
   FileText,
   AlertTriangle,
+  ArrowRight,
+  MoreHorizontal,
+  LayoutGrid,
 } from 'lucide-react';
 
 import KanbanBoard from './components/kanban/KanbanBoard';
@@ -25,6 +28,8 @@ import { ColumnManagerModal } from './components/settings/ColumnManager';
 import ProjectSelector from './components/common/ProjectSelector';
 import ArchiveModal from './components/archive/ArchiveModal';
 import Toast from './components/common/Toast';
+import TaskSummaryBadge from './components/common/TaskSummaryBadge';
+import OverflowMenu from './components/common/OverflowMenu';
 
 import { markdownParser } from './utils/markdown';
 import { fileSystem } from './utils/fileSystem';
@@ -216,6 +221,11 @@ function App() {
   const [directoryHandle, setDirectoryHandle] = useState(null);
   const [fileHandle, setFileHandle] = useState(null);
   const [archiveHandle, setArchiveHandle] = useState(null);
+
+  // Task file state (for kanban.md/tasks.md compatibility)
+  const [currentTaskFileName, setCurrentTaskFileName] = useState(null);
+  const [showLegacyBanner, setShowLegacyBanner] = useState(false);
+  const [availableTaskFiles, setAvailableTaskFiles] = useState([]);
 
   // Data state
   const [tasks, setTasks] = useState([]);
@@ -468,12 +478,30 @@ function App() {
       setDirectoryHandle(dirHandle);
       fileSystem.setDirectoryHandle(dirHandle);
 
-      // Load kanban.md from directory
-      const kanbanResult = await fileSystem.loadKanbanFile(dirHandle);
-      setFileHandle(kanbanResult.fileHandle);
+      // Load task file with detection (supports tasks.md and kanban.md)
+      const preferredFile = projectInfo?.taskFileName || null;
+      const taskResult = await fileSystem.loadTaskFile(dirHandle, preferredFile);
+      setFileHandle(taskResult.fileHandle);
+      setCurrentTaskFileName(taskResult.fileName);
+
+      // Show migration banner if using legacy kanban.md
+      if (taskResult.isLegacy) {
+        setShowLegacyBanner(true);
+      } else {
+        setShowLegacyBanner(false);
+      }
+
+      // Store available task files
+      if (taskResult.available) {
+        setAvailableTaskFiles(taskResult.available);
+      } else {
+        // Detect available files if not returned
+        const detection = await fileSystem.detectTaskFile(dirHandle);
+        setAvailableTaskFiles(detection.available);
+      }
 
       // Parse content
-      const parsed = markdownParser.parseMarkdown(kanbanResult.content);
+      const parsed = markdownParser.parseMarkdown(taskResult.content);
 
       if (parsed.config?.columns?.length > 0) {
         setColumns(parsed.config.columns.map(col => ({
@@ -505,8 +533,8 @@ function App() {
         setArchivedTasks([]);
       }
 
-      // Save to recent projects
-      await fileSystem.saveDirectoryHandle(dirHandle);
+      // Save to recent projects with task file name
+      await fileSystem.saveDirectoryHandle(dirHandle, null, taskResult.fileName);
 
       // Update recent projects list
       const projects = await fileSystem.loadRecentProjects();
@@ -517,13 +545,14 @@ function App() {
         name: dirHandle.name,
         displayName: dirHandle.name,
         handle: dirHandle,
+        taskFileName: taskResult.fileName,
         lastAccessed: Date.now(),
       });
 
       // Start file watcher
-      if (!fileWatcherStartedRef.current && kanbanResult.fileHandle) {
-        fileWatcher.setCurrentContent(kanbanResult.content);
-        fileWatcher.startFileWatcher(kanbanResult.fileHandle, {
+      if (!fileWatcherStartedRef.current && taskResult.fileHandle) {
+        fileWatcher.setCurrentContent(taskResult.content);
+        fileWatcher.startFileWatcher(taskResult.fileHandle, {
           onExternalChange: (newContent) => {
             const newParsed = markdownParser.parseMarkdown(newContent);
             if (newParsed.config?.columns?.length > 0) {
@@ -609,6 +638,100 @@ function App() {
       setRecentProjects(projects);
     } catch (error) {
       console.error('Failed to delete project:', error);
+    }
+  };
+
+  // Migrate kanban.md to tasks.md
+  const handleMigrateToTasks = async () => {
+    if (!directoryHandle) return;
+
+    try {
+      setIsLoading(true);
+      setLoadingMessage('Migrating to tasks.md...');
+
+      const result = await fileSystem.migrateKanbanToTasks(directoryHandle);
+
+      if (result.success) {
+        setFileHandle(result.newHandle);
+        setCurrentTaskFileName('tasks.md');
+        setShowLegacyBanner(false);
+        setAvailableTaskFiles(['tasks.md']);
+
+        // Update project in IndexedDB
+        if (currentProject) {
+          await fileSystem.updateProjectTaskFile(currentProject.name, 'tasks.md');
+          setCurrentProject({ ...currentProject, taskFileName: 'tasks.md' });
+        }
+
+        showNotification('Migrated to tasks.md successfully');
+      } else {
+        showNotification('Migration failed: ' + (result.error?.message || 'Unknown error'), 'error');
+      }
+    } catch (error) {
+      console.error('Migration error:', error);
+      showNotification('Migration failed: ' + error.message, 'error');
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  };
+
+  // Dismiss legacy banner and keep using kanban.md
+  const handleKeepLegacy = () => {
+    setShowLegacyBanner(false);
+  };
+
+  // Switch to a different task file
+  const handleSwitchTaskFile = async (fileName) => {
+    if (!directoryHandle || fileName === currentTaskFileName) return;
+
+    try {
+      setIsLoading(true);
+      setLoadingMessage(`Loading ${fileName}...`);
+
+      const result = await fileSystem.loadTaskFile(directoryHandle, fileName);
+
+      setFileHandle(result.fileHandle);
+      setCurrentTaskFileName(fileName);
+
+      // Update legacy banner state
+      if (fileName === 'kanban.md') {
+        setShowLegacyBanner(true);
+      } else {
+        setShowLegacyBanner(false);
+      }
+
+      // Parse and update state
+      const parsed = markdownParser.parseMarkdown(result.content);
+      if (parsed.config?.columns?.length > 0) {
+        setColumns(parsed.config.columns.map(col => ({
+          id: col.id || col.name,
+          name: col.name,
+        })));
+      }
+
+      const mappedTasks = (parsed.tasks || []).map(task => ({
+        ...task,
+        column: task.status || 'To Do',
+      }));
+      setTasks(mappedTasks);
+
+      // Update project preference
+      if (currentProject) {
+        await fileSystem.updateProjectTaskFile(currentProject.name, fileName);
+        setCurrentProject({ ...currentProject, taskFileName: fileName });
+      }
+
+      // Update file watcher
+      fileWatcher.setCurrentContent(result.content);
+
+      showNotification(`Switched to ${fileName}`);
+    } catch (error) {
+      console.error('Failed to switch file:', error);
+      showNotification('Failed to switch file: ' + error.message, 'error');
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -997,12 +1120,15 @@ function App() {
     return (
       <div className="min-h-screen">
         <nav className="navbar">
-          <div className="navbar-brand">
+          <div className="navbar-identity">
             <div className="navbar-logo">
-              <Archive className="w-5 h-5" />
+              <LayoutGrid className="w-5 h-5" />
             </div>
-            <h1 className="navbar-title">Task Memory</h1>
           </div>
+          <div className="navbar-context">
+            <span className="navbar-context-empty">Loading...</span>
+          </div>
+          <div className="navbar-actions" />
         </nav>
         <div className="welcome-screen">
           <div className="loading-spinner" />
@@ -1015,300 +1141,203 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen">
-      {/* Navbar */}
-      <nav className="navbar">
-        <div className="navbar-brand">
-          <div className="navbar-logo">
-            <Archive className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="navbar-title">Task Memory</h1>
-            {hasProject && (
-              <ProjectSelector
-                currentProject={currentProject}
-                recentProjects={recentProjects}
-                onSelectProject={handleSelectProject}
-                onRenameProject={handleRenameProject}
-                onDeleteProject={handleDeleteProject}
-                onOpenNew={handleOpenProject}
-              />
-            )}
-          </div>
-        </div>
-
-        {hasProject && tasks.length > 0 && (
-          <div className="navbar-stats">
-            {columns.slice(0, 4).map(col => (
-              <div key={col.id} className="navbar-stat">
-                <span>{col.name}</span>
-                <span className="badge badge-count">{stats.byColumn[col.id] || 0}</span>
-              </div>
-            ))}
-            {/* File size indicator */}
-            <div
-              className="navbar-stat"
-              title={`File size: ~${Math.round(fileStats.totalChars / 1000)}k chars (${fileStats.percentage}% of safe limit)`}
-              style={{
-                color: fileStats.isCritical ? 'var(--status-error)' :
-                       fileStats.isWarning ? 'var(--status-warning)' : 'var(--text-muted)',
-              }}
-            >
-              {fileStats.isCritical ? (
-                <AlertTriangle className="w-4 h-4" />
-              ) : (
-                <FileText className="w-4 h-4" />
-              )}
-              <span className={`badge ${fileStats.isCritical ? 'badge-priority-critical' : fileStats.isWarning ? 'badge-priority-high' : 'badge-count'}`}>
-                {fileStats.percentage}%
-              </span>
+    <div className="app-canvas">
+      {/* 2026 UI: Floating Context Pill - replaces navbar */}
+      {hasProject && (
+        <div className="context-pill-container">
+          <div className="context-pill">
+            {/* Progress Ring - Visual stats */}
+            <div className="progress-ring" title={`${Math.round((stats.byColumn['done'] || 0) / Math.max(stats.total, 1) * 100)}% complete`}>
+              <svg viewBox="0 0 36 36" className="progress-ring-svg">
+                <circle cx="18" cy="18" r="15.5" className="progress-ring-bg" />
+                <circle
+                  cx="18" cy="18" r="15.5"
+                  className="progress-ring-fill"
+                  style={{
+                    strokeDasharray: `${((stats.byColumn['done'] || 0) / Math.max(stats.total, 1)) * 97.5} 97.5`
+                  }}
+                />
+              </svg>
+              <span className="progress-ring-text">{stats.total}</span>
             </div>
-          </div>
-        )}
 
-        <div className="navbar-actions">
-          {hasProject && (
-            <>
+            {/* Project Name */}
+            <ProjectSelector
+              currentProject={currentProject}
+              recentProjects={recentProjects}
+              onSelectProject={handleSelectProject}
+              onRenameProject={handleRenameProject}
+              onDeleteProject={handleDeleteProject}
+              onOpenNew={handleOpenProject}
+            />
+
+            {/* Quick Actions - appear on hover */}
+            <div className="context-pill-actions">
               <button
-                className="btn btn-ghost btn-icon"
+                className="pill-action"
                 onClick={handleRefresh}
                 title="Refresh"
-                aria-label="Refresh tasks"
               >
-                <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
               </button>
-
               <button
-                className="btn btn-ghost btn-icon"
-                onClick={() => setShowColumnModal(true)}
-                title="Manage Columns"
-                aria-label="Manage columns"
+                className="pill-action"
+                onClick={() => setShowSettingsModal(true)}
+                title="Settings"
               >
-                <Columns className="w-5 h-5" />
+                <Settings className="w-4 h-4" />
               </button>
-
-              <button
-                className="btn btn-ghost btn-icon"
-                onClick={() => setShowArchiveModal(true)}
-                title="Archives"
-                aria-label="View archived tasks"
-                style={{ position: 'relative' }}
-              >
-                <Archive className="w-5 h-5" />
-                {archivedTasks.length > 0 && (
-                  <span style={{
-                    position: 'absolute',
-                    top: '0',
-                    right: '0',
-                    background: 'var(--accent-primary)',
-                    color: 'var(--text-inverse)',
-                    fontSize: '0.625rem',
-                    fontWeight: 600,
-                    minWidth: '1rem',
-                    height: '1rem',
-                    borderRadius: '0.5rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '0 0.25rem',
-                  }}>
-                    {archivedTasks.length}
-                  </span>
-                )}
-              </button>
-            </>
-          )}
-
-          <button
-            className="btn btn-ghost btn-icon"
-            onClick={() => setShowSettingsModal(true)}
-            title="Settings"
-            aria-label="Open settings"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
-
-          {hasProject && (
-            <button
-              className="btn btn-primary"
-              onClick={() => handleAddTask()}
-            >
-              <Plus className="w-4 h-4" />
-              New Task
-            </button>
-          )}
-        </div>
-      </nav>
-
-      {/* Filter Bar - only show when project loaded */}
-      {hasProject && (
-        <div className="filter-bar">
-          <div className="filter-bar-content">
-            {/* Search */}
-            <div className="input-with-icon" style={{ flex: '1', maxWidth: '20rem' }}>
-              <Search className="input-icon w-5 h-5" />
-              <input
-                type="text"
-                className="input"
-                placeholder="Search tasks..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              {searchQuery && (
-                <button
-                  className="btn btn-ghost btn-sm btn-icon"
-                  style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)' }}
-                  onClick={() => setSearchQuery('')}
-                  aria-label="Clear search"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
             </div>
-
-            {/* Filter Toggle */}
-            <button
-              className={`btn ${showFilters ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setShowFilters(!showFilters)}
-            >
-              <Filter className="w-4 h-4" />
-              Filters
-            </button>
-
-            {/* Sort Dropdown */}
-            <div className="filter-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <ArrowUpDown className="w-4 h-4 text-muted" />
-              <select
-                className="input select"
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                style={{ width: 'auto', minWidth: '10rem' }}
-              >
-                <option value="manual">Manual</option>
-                <option value="created-desc">Newest First</option>
-                <option value="created-asc">Oldest First</option>
-                <option value="priority">Priority</option>
-                <option value="title">Title (A-Z)</option>
-              </select>
-            </div>
-
-            {hasActiveFilters && (
-              <button className="btn btn-ghost btn-sm" onClick={clearFilters}>
-                Clear all
-              </button>
-            )}
           </div>
 
-          {/* Filter Dropdowns */}
-          {showFilters && (
-            <div className="filter-bar-expanded">
+          {/* Floating Search - Cmd+K style */}
+          <div className="floating-search">
+            <Search className="w-4 h-4" />
+            <input
+              type="text"
+              placeholder="Search tasks..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <kbd className="search-kbd">⌘K</kbd>
+          </div>
+        </div>
+      )}
+
+      {/* Smart FAB - Contextual action */}
+      {hasProject && (
+        <button
+          className="smart-fab"
+          onClick={() => handleAddTask()}
+          aria-label="Create new task"
+        >
+          <Plus className="w-6 h-6" />
+          <span className="smart-fab-label">New Task</span>
+        </button>
+      )}
+
+      {/* Secondary Actions - Edge triggered */}
+      {hasProject && (
+        <div className="edge-actions">
+          <button onClick={() => setShowColumnModal(true)} title="Columns">
+            <Columns className="w-5 h-5" />
+          </button>
+          <button onClick={() => setShowArchiveModal(true)} title="Archive" className="edge-action-badge">
+            <Archive className="w-5 h-5" />
+            {archivedTasks.length > 0 && <span>{archivedTasks.length}</span>}
+          </button>
+        </div>
+      )}
+
+      {/* Floating Filter Panel */}
+      {hasProject && showFilters && (
+        <div className="filter-panel">
+          <div className="filter-panel-header">
+            <span>Filters</span>
+            <button className="pill-action" onClick={() => setShowFilters(false)}>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="filter-panel-content">
+            <div className="filter-group">
+              <label className="filter-label">Priority</label>
+              <select className="input select" value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)}>
+                <option value="">All</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+            {categories.length > 0 && (
               <div className="filter-group">
-                <label className="filter-label">Priority</label>
-                <select
-                  className="input select"
-                  value={filterPriority}
-                  onChange={(e) => setFilterPriority(e.target.value)}
-                  style={{ width: '10rem' }}
-                >
+                <label className="filter-label">Category</label>
+                <select className="input select" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
                   <option value="">All</option>
-                  <option value="critical">Critical</option>
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
+                  {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                 </select>
               </div>
-
-              {categories.length > 0 && (
-                <div className="filter-group">
-                  <label className="filter-label">Category</label>
-                  <select
-                    className="input select"
-                    value={filterCategory}
-                    onChange={(e) => setFilterCategory(e.target.value)}
-                    style={{ width: '10rem' }}
-                  >
-                    <option value="">All</option>
-                    {categories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
+            )}
+            {assignees.length > 0 && (
+              <div className="filter-group">
+                <label className="filter-label">Assignee</label>
+                <select className="input select" value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)}>
+                  <option value="">All</option>
+                  {assignees.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+            )}
+            {allTags.length > 0 && (
+              <div className="filter-group">
+                <label className="filter-label">Tags</label>
+                <div className="filter-tags">
+                  {allTags.map(tag => (
+                    <button
+                      key={tag}
+                      className={`filter-tag ${filterTags.includes(tag) ? 'active' : ''}`}
+                      onClick={() => toggleTagFilter(tag)}
+                    >
+                      {tag}
+                    </button>
+                  ))}
                 </div>
-              )}
+              </div>
+            )}
+            {hasActiveFilters && (
+              <button className="btn btn-ghost btn-sm" onClick={clearFilters}>Clear all filters</button>
+            )}
+          </div>
+        </div>
+      )}
 
-              {assignees.length > 0 && (
-                <div className="filter-group">
-                  <label className="filter-label">Assignee</label>
-                  <select
-                    className="input select"
-                    value={filterAssignee}
-                    onChange={(e) => setFilterAssignee(e.target.value)}
-                    style={{ width: '10rem' }}
-                  >
-                    <option value="">All</option>
-                    {assignees.map(a => (
-                      <option key={a} value={a}>{a}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+      {/* Filter Toggle Button */}
+      {hasProject && (
+        <button
+          className={`filter-toggle ${showFilters ? 'active' : ''} ${hasActiveFilters ? 'has-filters' : ''}`}
+          onClick={() => setShowFilters(!showFilters)}
+          title="Toggle filters"
+        >
+          <Filter className="w-4 h-4" />
+          {hasActiveFilters && <span className="filter-toggle-badge" />}
+        </button>
+      )}
 
-              {allTags.length > 0 && (
-                <div className="filter-group" style={{ flex: 1 }}>
-                  <label className="filter-label">Tags</label>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
-                    {allTags.map(tag => (
-                      <button
-                        key={tag}
-                        className={`badge ${filterTags.includes(tag) ? 'badge-priority-medium' : 'badge-tag'}`}
-                        onClick={() => toggleTagFilter(tag)}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        {tag}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+      {/* Sort Toggle */}
+      {hasProject && (
+        <div className="sort-toggle">
+          <ArrowUpDown className="w-4 h-4" />
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <option value="manual">Manual</option>
+            <option value="created-desc">Newest</option>
+            <option value="created-asc">Oldest</option>
+            <option value="priority">Priority</option>
+            <option value="title">Title</option>
+          </select>
+        </div>
+      )}
 
-          {/* Active Filter Chips */}
-          {hasActiveFilters && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', paddingTop: 'var(--space-3)' }}>
-              {filterPriority && (
-                <span className="badge badge-tag" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-                  Priority: {filterPriority}
-                  <button onClick={() => setFilterPriority('')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              )}
-              {filterCategory && (
-                <span className="badge badge-tag" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-                  Category: {filterCategory}
-                  <button onClick={() => setFilterCategory('')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              )}
-              {filterAssignee && (
-                <span className="badge badge-tag" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-                  Assignee: {filterAssignee}
-                  <button onClick={() => setFilterAssignee('')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              )}
-              {filterTags.map(tag => (
-                <span key={tag} className="badge badge-tag" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-                  #{tag}
-                  <button onClick={() => toggleTagFilter(tag)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
+      {/* Migration Banner for legacy kanban.md */}
+      {showLegacyBanner && hasProject && (
+        <div className="migration-banner">
+          <div className="migration-banner-icon">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <div className="migration-banner-content">
+            <strong>Legacy file detected</strong>
+            <p>
+              You're using <code>kanban.md</code>. Consider renaming to <code>tasks.md</code> for consistency.
+            </p>
+          </div>
+          <div className="migration-banner-actions">
+            <button className="btn btn-primary btn-sm" onClick={handleMigrateToTasks}>
+              <ArrowRight className="w-4 h-4" />
+              Rename to tasks.md
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={handleKeepLegacy}>
+              <X className="w-4 h-4" />
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -1457,6 +1486,29 @@ function App() {
             </div>
           </div>
 
+          {/* Task File Selection */}
+          {hasProject && availableTaskFiles.length > 0 && (
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="label">Task File</label>
+              <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                <select
+                  className="input select"
+                  value={currentTaskFileName || ''}
+                  onChange={(e) => handleSwitchTaskFile(e.target.value)}
+                  style={{ flex: 1 }}
+                >
+                  {availableTaskFiles.map(file => (
+                    <option key={file} value={file}>{file}</option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-muted" style={{ fontSize: '0.75rem', marginTop: 'var(--space-1)' }}>
+                Current: {currentTaskFileName || 'None'}
+                {currentTaskFileName === 'kanban.md' && ' (legacy)'}
+              </p>
+            </div>
+          )}
+
           <button
             className="btn btn-secondary"
             onClick={handleOpenProject}
@@ -1512,6 +1564,17 @@ function App() {
         onRestore={handleRestoreTask}
         onDelete={handleDeleteArchivedTask}
       />
+
+      {/* Mobile FAB - Floating Action Button for New Task */}
+      {hasProject && (
+        <button
+          className="mobile-fab"
+          onClick={() => handleAddTask()}
+          aria-label="Create new task"
+        >
+          <Plus className="w-6 h-6" />
+        </button>
+      )}
 
       {/* Toast Notifications */}
       {notification && (
