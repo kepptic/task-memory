@@ -1,9 +1,0 @@
-{
-  "plugins": [
-    {
-      "name": "task-memory",
-      "marketplace": "task-memory",
-      "version": "1.0.1"
-    }
-  ]
-}

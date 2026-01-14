@@ -6,7 +6,7 @@
 	},
 	"metadata": {
 		"description": "Privacy-first Kanban task manager with Manus-style memory",
-		"version": "1.0.1"
+		"version": "1.0.2"
 	},
 	"plugins": [
 		{
