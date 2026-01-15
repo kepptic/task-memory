@@ -1,14 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Modal from '../common/Modal';
+import ChecklistSection from './ChecklistSection';
 import { markdownToHtml } from '../../utils/markdown';
 import {
-  CheckCircle2,
-  Circle,
   Clock,
   User,
   Tag,
   FolderOpen,
   AlertTriangle,
+  AlertCircle,
   FileText,
   List,
   Calendar,
@@ -17,11 +17,9 @@ import {
   CheckSquare,
   Activity,
   Archive,
-  Plus,
-  Trash2,
   GitBranch,
   Layers,
-  ClipboardCheck,
+  Shield,
 } from 'lucide-react';
 
 const priorityConfig = {
@@ -45,9 +43,25 @@ const complexityConfig = {
   complex: { className: 'badge-complexity-complex', label: 'Complex', description: '10+ files' },
 };
 
-export function TaskModal({ task, isOpen, onClose, onEdit, onSubtaskToggle, onArchive, onAddSubtask, onDeleteSubtask }) {
-  const [newSubtask, setNewSubtask] = useState('');
-
+export function TaskModal({
+  task,
+  isOpen,
+  onClose,
+  onEdit,
+  onArchive,
+  // Subtask handlers
+  onSubtaskToggle,
+  onAddSubtask,
+  onDeleteSubtask,
+  onUpdateSubtask,
+  onReorderSubtask,
+  // Pre-work checklist handlers
+  onPreWorkToggle,
+  onAddPreWork,
+  onDeletePreWork,
+  onUpdatePreWork,
+  onReorderPreWork,
+}) {
   if (!task) return null;
 
   const priority = task.priority?.toLowerCase() || 'medium';
@@ -55,27 +69,7 @@ export function TaskModal({ task, isOpen, onClose, onEdit, onSubtaskToggle, onAr
   const PriorityIcon = priorityInfo.icon;
 
   const subtasks = task.subtasks || [];
-  const completedSubtasks = subtasks.filter(st => st.completed).length;
-  const progress = subtasks.length > 0 ? (completedSubtasks / subtasks.length) * 100 : 0;
-
-  const handleSubtaskClick = (subtaskIndex) => {
-    onSubtaskToggle?.(task.id, subtaskIndex);
-  };
-
-  const handleAddSubtask = () => {
-    const text = newSubtask.trim();
-    if (text) {
-      onAddSubtask?.(task.id, text);
-      setNewSubtask('');
-    }
-  };
-
-  const handleDeleteSubtask = (e, index) => {
-    e.stopPropagation();
-    if (window.confirm('Delete this subtask?')) {
-      onDeleteSubtask?.(task.id, index);
-    }
-  };
+  const preWorkChecklist = task.preWorkChecklist || [];
 
   return (
     <Modal
@@ -200,141 +194,41 @@ export function TaskModal({ task, isOpen, onClose, onEdit, onSubtaskToggle, onAr
         )}
 
         {/* Pre-Work Checklist */}
-        {task.preWorkChecklist?.length > 0 && (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
-              <div className="text-secondary" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: '0.8125rem', fontWeight: 500 }}>
-                <ClipboardCheck className="w-4 h-4" />
-                Pre-Work Checklist
-              </div>
-              <span className="text-muted" style={{ fontSize: '0.75rem' }}>
-                {task.preWorkChecklist.filter(item => item.completed).length} / {task.preWorkChecklist.length} completed
-              </span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              {task.preWorkChecklist.map((item, index) => (
-                <div
-                  key={index}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 'var(--space-3)',
-                    padding: 'var(--space-2) var(--space-3)',
-                    background: 'var(--surface-elevated)',
-                    borderRadius: 'var(--radius-md)',
-                    borderLeft: `3px solid ${item.completed ? 'var(--status-complete)' : 'var(--border-subtle)'}`,
-                  }}
-                >
-                  {item.completed ? (
-                    <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--status-complete)', flexShrink: 0 }} />
-                  ) : (
-                    <Circle className="w-4 h-4 text-muted" style={{ flexShrink: 0 }} />
-                  )}
-                  <span style={{
-                    flex: 1,
-                    fontSize: '0.8125rem',
-                    color: item.completed ? 'var(--text-muted)' : 'var(--text-secondary)',
-                  }}>
-                    {item.text}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <ChecklistSection
+          title="Pre-Work Checklist"
+          icon={Shield}
+          iconColor="var(--status-pending)"
+          borderColor="var(--status-pending)"
+          itemBorderColor={(completed) => completed ? 'var(--status-complete)' : 'var(--status-pending)'}
+          items={preWorkChecklist}
+          onToggle={(index) => onPreWorkToggle?.(task.id, index)}
+          onAdd={onAddPreWork ? (text, position, completed) => onAddPreWork(task.id, text, position, completed) : null}
+          onDelete={onDeletePreWork ? (index) => onDeletePreWork(task.id, index) : null}
+          onUpdate={onUpdatePreWork ? (index, text) => onUpdatePreWork(task.id, index, text) : null}
+          onReorder={onReorderPreWork ? (from, to) => onReorderPreWork(task.id, from, to) : null}
+          placeholder="Add checklist item... (Enter to add)"
+          emptyMessage="Add items to verify before starting"
+          badge="Required"
+          showProgress={false}
+        />
 
         {/* Subtasks */}
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
-            <div className="text-secondary" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: '0.8125rem', fontWeight: 500 }}>
-              <List className="w-4 h-4" />
-              Subtasks
-            </div>
-            {subtasks.length > 0 && (
-              <span className="text-muted" style={{ fontSize: '0.75rem' }}>
-                {completedSubtasks} / {subtasks.length} completed
-              </span>
-            )}
-          </div>
-
-          {/* Progress Bar */}
-          {subtasks.length > 0 && (
-            <div className="task-card-progress-bar" style={{ marginBottom: 'var(--space-3)', height: '6px' }}>
-              <div className="task-card-progress-fill" style={{ width: `${progress}%` }} />
-            </div>
-          )}
-
-          {/* Add Subtask Input */}
-          <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-            <input
-              type="text"
-              className="input"
-              placeholder="Add a subtask..."
-              value={newSubtask}
-              onChange={(e) => setNewSubtask(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleAddSubtask();
-                }
-              }}
-              style={{ flex: 1 }}
-            />
-            <button
-              className="btn btn-primary btn-icon"
-              onClick={handleAddSubtask}
-              disabled={!newSubtask.trim()}
-              aria-label="Add subtask"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Subtask List */}
-          {subtasks.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              {subtasks.map((subtask, index) => (
-                <div
-                  key={index}
-                  onClick={() => handleSubtaskClick(index)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 'var(--space-3)',
-                    padding: 'var(--space-3)',
-                    background: 'var(--surface-elevated)',
-                    borderRadius: 'var(--radius-md)',
-                    cursor: 'pointer',
-                    transition: 'background var(--duration-fast) var(--ease-in-out)',
-                  }}
-                  className="subtask-item"
-                >
-                  {subtask.completed ? (
-                    <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--status-complete)', flexShrink: 0 }} />
-                  ) : (
-                    <Circle className="w-5 h-5 text-muted" style={{ flexShrink: 0 }} />
-                  )}
-                  <span style={{
-                    flex: 1,
-                    fontSize: '0.875rem',
-                    color: subtask.completed ? 'var(--text-muted)' : 'var(--text-primary)',
-                    textDecoration: subtask.completed ? 'line-through' : 'none',
-                  }}>
-                    {subtask.text}
-                  </span>
-                  <button
-                    className="btn btn-ghost btn-icon btn-sm subtask-delete-btn"
-                    onClick={(e) => handleDeleteSubtask(e, index)}
-                    title="Delete subtask"
-                    aria-label={`Delete subtask: ${subtask.text}`}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <ChecklistSection
+          title="Subtasks"
+          icon={List}
+          iconColor="var(--accent-primary)"
+          borderColor="var(--accent-primary)"
+          itemBorderColor={(completed) => completed ? 'var(--status-complete)' : 'var(--accent-primary)'}
+          items={subtasks}
+          onToggle={(index) => onSubtaskToggle?.(task.id, index)}
+          onAdd={onAddSubtask ? (text, position, completed) => onAddSubtask(task.id, text, position, completed) : null}
+          onDelete={onDeleteSubtask ? (index) => onDeleteSubtask(task.id, index) : null}
+          onUpdate={onUpdateSubtask ? (index, text) => onUpdateSubtask(task.id, index, text) : null}
+          onReorder={onReorderSubtask ? (from, to) => onReorderSubtask(task.id, from, to) : null}
+          placeholder="Add a subtask... (Enter to add)"
+          emptyMessage="Break this task into smaller steps"
+          showProgress={true}
+        />
 
         {/* Visual Operations Log */}
         {task.visualOpsLog?.length > 0 && (
@@ -358,6 +252,35 @@ export function TaskModal({ task, isOpen, onClose, onEdit, onSubtaskToggle, onAr
                   color: entry.includes('WebFetch') ? 'var(--accent-primary)' :
                          entry.includes('WebSearch') ? 'var(--priority-medium)' :
                          entry.includes('Error') ? 'var(--status-critical)' : 'var(--text-secondary)',
+                }}>
+                  {entry}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Errors Log */}
+        {task.errorsLog?.length > 0 && (
+          <div>
+            <div className="text-secondary" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)', fontSize: '0.8125rem', fontWeight: 500 }}>
+              <AlertCircle className="w-4 h-4" style={{ color: 'var(--status-critical)' }} />
+              Errors Log
+            </div>
+            <div className="font-mono" style={{
+              background: 'var(--surface-elevated)',
+              borderRadius: 'var(--radius-md)',
+              padding: 'var(--space-3)',
+              fontSize: '0.75rem',
+              maxHeight: '10rem',
+              overflowY: 'auto',
+              borderLeft: '3px solid var(--status-critical)',
+            }}>
+              {task.errorsLog.map((entry, index) => (
+                <div key={index} style={{
+                  padding: 'var(--space-1) 0',
+                  borderBottom: index < task.errorsLog.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                  color: 'var(--status-critical)',
                 }}>
                   {entry}
                 </div>

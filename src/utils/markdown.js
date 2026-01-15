@@ -178,6 +178,16 @@ function parseMarkdown(content) {
   return { tasks, config };
 }
 
+// Strip emojis and normalize text for comparison
+function normalizeForComparison(text) {
+  // Remove emojis, special symbols, and extra whitespace
+  return text
+    .replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F000}-\u{1F02F}]|[\u{1F0A0}-\u{1F0FF}]/gu, '')
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
 // Parse tasks from a markdown section (reusable for both kanban and archive)
 function parseTasksFromSection(content, sectionName, statusId) {
   const tasksFound = [];
@@ -185,11 +195,20 @@ function parseTasksFromSection(content, sectionName, statusId) {
   // Split by ## to get sections
   const sections = content.split(/\n##\s+/);
   let sectionContent = null;
+  const normalizedSectionName = normalizeForComparison(sectionName);
 
   for (let section of sections) {
-    if (section.startsWith(sectionName)) {
-      // Extract content after the section title
-      sectionContent = section.substring(sectionName.length).trim();
+    // Get the first line (section header)
+    const newlineIndex = section.indexOf('\n');
+    const headerLine = newlineIndex > 0 ? section.substring(0, newlineIndex) : section;
+    const normalizedHeader = normalizeForComparison(headerLine);
+
+    // Match if normalized versions are equal or one contains the other
+    if (normalizedHeader === normalizedSectionName ||
+        normalizedHeader.includes(normalizedSectionName) ||
+        normalizedSectionName.includes(normalizedHeader)) {
+      // Extract content after the section title (first line)
+      sectionContent = newlineIndex > 0 ? section.substring(newlineIndex).trim() : '';
       break;
     }
   }
@@ -251,6 +270,7 @@ function parseTask(id, title, content, status) {
     preWorkChecklist: [], // NEW: Pre-implementation checklist items
     notes: "",
     visualOpsLog: [],
+    errorsLog: [],
   };
 
   // Parse metadata line - now with Status field support
@@ -331,7 +351,7 @@ function parseTask(id, title, content, status) {
     // Skip metadata lines
     if (
       line.match(
-        /^\*\*(Priority|Category|Assigned|Created|Started|Due|Finished|Tags|Status)\*\*/,
+        /^\*\*(Priority|Category|Assigned|Created|Started|Due|Finished|Tags|Status|Workflow|Complexity)\*\*/,
       )
     ) {
       continue;
@@ -388,8 +408,8 @@ function parseTask(id, title, content, status) {
     }
   }
 
-  // Parse notes - everything after **Notes**: until Visual Operations Log or end
-  const notesMatch = content.match(/\*\*Notes\*\*:\s*\n([\s\S]*?)(?=\*\*Visual Operations Log\*\*:|$)/);
+  // Parse notes - everything after **Notes**: until Visual Operations Log, Errors Log, or end
+  const notesMatch = content.match(/\*\*Notes\*\*:\s*\n([\s\S]*?)(?=\*\*Visual Operations Log\*\*:|\*\*Errors Log\*\*:|$)/);
   if (notesMatch) {
     task.notes = notesMatch[1].trim();
   }
@@ -401,6 +421,15 @@ function parseTask(id, title, content, status) {
       .filter(line => line.trim().startsWith('-'))
       .map(line => line.replace(/^-\s*/, '').trim());
     task.visualOpsLog = logLines;
+  }
+
+  // Parse Errors Log
+  const errorsLogMatch = content.match(/\*\*Errors Log\*\*:\s*\n?([\s\S]*?)(?=###|---\s*$|$)/);
+  if (errorsLogMatch) {
+    const errorLines = errorsLogMatch[1].trim().split('\n')
+      .filter(line => line.trim().startsWith('-'))
+      .map(line => line.replace(/^-\s*/, '').trim());
+    task.errorsLog = errorLines;
   }
 
   return task;
@@ -573,6 +602,14 @@ function generateMarkdown(tasks, config) {
       if (task.visualOpsLog && task.visualOpsLog.length > 0) {
         md += `\n**Visual Operations Log**:\n`;
         task.visualOpsLog.forEach(entry => {
+          md += `- ${entry}\n`;
+        });
+      }
+
+      // Always include Errors Log section (even if empty, for manual editing)
+      md += `\n**Errors Log**:\n`;
+      if (task.errorsLog && task.errorsLog.length > 0) {
+        task.errorsLog.forEach(entry => {
           md += `- ${entry}\n`;
         });
       }

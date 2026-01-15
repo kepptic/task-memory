@@ -516,36 +516,16 @@ function App() {
       }));
 
       // Check for tasks that need reorganization (Status field doesn't match section)
+      // NOTE: On initial load, we just notify - don't auto-save to avoid overwriting external changes
       const tasksNeedingReorg = mappedTasks.filter(t => t._needsReorganization);
       if (tasksNeedingReorg.length > 0) {
-        console.log(`🔄 Auto-reorganizing ${tasksNeedingReorg.length} tasks to correct sections`);
-        // Clean up the internal flag before saving
+        console.log(`📋 Found ${tasksNeedingReorg.length} tasks with Status field mismatch`);
+        // Clean up the internal flag (tasks will display in their Status-based column)
         mappedTasks.forEach(t => delete t._needsReorganization);
-        // Trigger immediate save to fix file structure
-        setTimeout(async () => {
-          try {
-            const tasksForMarkdown = mappedTasks.map(task => ({
-              ...task,
-              status: task.column,
-            }));
-            const columnsToSave = parsed.config?.columns?.length > 0
-              ? parsed.config.columns.map(col => ({ id: col.id || col.name, name: col.name }))
-              : DEFAULT_COLUMNS;
-            const config = {
-              lastTaskId: Math.max(...mappedTasks.map(t => {
-                const match = t.id?.match(/TASK-(\d+)/);
-                return match ? parseInt(match[1], 10) : 0;
-              }), 0),
-              columns: columnsToSave,
-            };
-            const markdown = markdownParser.generateMarkdown(tasksForMarkdown, config);
-            await fileSystem.writeFile(taskResult.fileHandle, markdown);
-            fileWatcher.setCurrentContent(markdown);
-            showNotification(`${tasksNeedingReorg.length} task${tasksNeedingReorg.length > 1 ? 's' : ''} auto-moved to correct section`);
-          } catch (error) {
-            console.error('Failed to auto-reorganize:', error);
-          }
-        }, 100);
+        // Just notify user - don't auto-save on initial load
+        setTimeout(() => {
+          showNotification(`${tasksNeedingReorg.length} task${tasksNeedingReorg.length > 1 ? 's' : ''} displayed based on Status field`, 'info');
+        }, 500);
       }
 
       setTasks(mappedTasks);
@@ -585,19 +565,41 @@ function App() {
       // Start file watcher
       if (!fileWatcherStartedRef.current && taskResult.fileHandle) {
         fileWatcher.setCurrentContent(taskResult.content);
+
+        // Set up notification for external changes
+        fileWatcher.setNotificationCallbacks({
+          onExternalChangeDetected: () => {
+            showNotification('File updated by external editor', 'info');
+          },
+        });
+
         fileWatcher.startFileWatcher(taskResult.fileHandle, {
           onExternalChange: (newContent) => {
             const newParsed = markdownParser.parseMarkdown(newContent);
+
+            // Detect what changed for component-level updates
+            const oldTasksForComparison = tasks;
+            const newMappedTasks = (newParsed.tasks || []).map(task => ({
+              ...task,
+              column: task.status || 'To Do',
+            }));
+
+            // Use smart change detection
+            const changes = fileWatcher.detectChangedComponents(oldTasksForComparison, newMappedTasks);
+
+            if (changes.hasChanges) {
+              console.log(`📥 External changes: +${changes.addedTasks.length} -${changes.removedTasks.length} ~${changes.updatedTasks.length} moved:${changes.movedTasks.length}`);
+            }
+
+            // Update columns if changed
             if (newParsed.config?.columns?.length > 0) {
               setColumns(newParsed.config.columns.map(col => ({
                 id: col.id || col.name,
                 name: col.name,
               })));
             }
-            const newMappedTasks = (newParsed.tasks || []).map(task => ({
-              ...task,
-              column: task.status || 'To Do',
-            }));
+
+            // Update tasks
             setTasks(newMappedTasks);
             console.log('External changes loaded');
           },
@@ -774,6 +776,12 @@ function App() {
 
     if (!fileHandle) {
       console.warn('⚠️ No fileHandle - cannot save');
+      return;
+    }
+
+    // Don't save while applying external changes
+    if (fileWatcher.isApplyingChanges()) {
+      console.log('⏳ Skipping save - applying external changes');
       return;
     }
 
@@ -960,19 +968,31 @@ function App() {
     });
   }, []);
 
-  const handleAddSubtask = (taskId, text) => {
+  // Add subtask - supports position for undo functionality
+  const handleAddSubtask = (taskId, text, position = null, completed = false) => {
     setTasks(prev => prev.map(task => {
       if (task.id !== taskId) return task;
-      const subtasks = [...(task.subtasks || []), { text, completed: false }];
+      const subtasks = [...(task.subtasks || [])];
+      const newItem = { text, completed };
+      if (position !== null && position >= 0 && position <= subtasks.length) {
+        subtasks.splice(position, 0, newItem);
+      } else {
+        subtasks.push(newItem);
+      }
       return { ...task, subtasks };
     }));
     // Also update selectedTask if viewing
     setSelectedTask(prev => {
       if (prev?.id !== taskId) return prev;
-      const subtasks = [...(prev.subtasks || []), { text, completed: false }];
+      const subtasks = [...(prev.subtasks || [])];
+      const newItem = { text, completed };
+      if (position !== null && position >= 0 && position <= subtasks.length) {
+        subtasks.splice(position, 0, newItem);
+      } else {
+        subtasks.push(newItem);
+      }
       return { ...prev, subtasks };
     });
-    showNotification('Subtask added');
   };
 
   const handleDeleteSubtask = (taskId, subtaskIndex) => {
@@ -989,7 +1009,150 @@ function App() {
       subtasks.splice(subtaskIndex, 1);
       return { ...prev, subtasks };
     });
-    showNotification('Subtask deleted');
+  };
+
+  // Update subtask text (inline editing)
+  const handleUpdateSubtask = (taskId, subtaskIndex, newText) => {
+    setTasks(prev => prev.map(task => {
+      if (task.id !== taskId) return task;
+      const subtasks = [...(task.subtasks || [])];
+      if (subtasks[subtaskIndex]) {
+        subtasks[subtaskIndex] = { ...subtasks[subtaskIndex], text: newText };
+      }
+      return { ...task, subtasks };
+    }));
+    setSelectedTask(prev => {
+      if (prev?.id !== taskId) return prev;
+      const subtasks = [...(prev.subtasks || [])];
+      if (subtasks[subtaskIndex]) {
+        subtasks[subtaskIndex] = { ...subtasks[subtaskIndex], text: newText };
+      }
+      return { ...prev, subtasks };
+    });
+  };
+
+  // Reorder subtask (drag and drop / keyboard)
+  const handleReorderSubtask = (taskId, fromIndex, toIndex) => {
+    setTasks(prev => prev.map(task => {
+      if (task.id !== taskId) return task;
+      const subtasks = [...(task.subtasks || [])];
+      const [removed] = subtasks.splice(fromIndex, 1);
+      subtasks.splice(toIndex, 0, removed);
+      return { ...task, subtasks };
+    }));
+    setSelectedTask(prev => {
+      if (prev?.id !== taskId) return prev;
+      const subtasks = [...(prev.subtasks || [])];
+      const [removed] = subtasks.splice(fromIndex, 1);
+      subtasks.splice(toIndex, 0, removed);
+      return { ...prev, subtasks };
+    });
+  };
+
+  // Toggle pre-work checklist item
+  const handlePreWorkToggle = (taskId, itemIndex) => {
+    setTasks(prev => prev.map(task => {
+      if (task.id !== taskId) return task;
+      const preWorkChecklist = [...(task.preWorkChecklist || [])];
+      if (preWorkChecklist[itemIndex]) {
+        preWorkChecklist[itemIndex] = {
+          ...preWorkChecklist[itemIndex],
+          completed: !preWorkChecklist[itemIndex].completed
+        };
+      }
+      return { ...task, preWorkChecklist };
+    }));
+    setSelectedTask(prev => {
+      if (prev?.id !== taskId) return prev;
+      const preWorkChecklist = [...(prev.preWorkChecklist || [])];
+      if (preWorkChecklist[itemIndex]) {
+        preWorkChecklist[itemIndex] = {
+          ...preWorkChecklist[itemIndex],
+          completed: !preWorkChecklist[itemIndex].completed
+        };
+      }
+      return { ...prev, preWorkChecklist };
+    });
+  };
+
+  // Add pre-work checklist item
+  const handleAddPreWork = (taskId, text, position = null, completed = false) => {
+    setTasks(prev => prev.map(task => {
+      if (task.id !== taskId) return task;
+      const preWorkChecklist = [...(task.preWorkChecklist || [])];
+      const newItem = { text, completed };
+      if (position !== null && position >= 0 && position <= preWorkChecklist.length) {
+        preWorkChecklist.splice(position, 0, newItem);
+      } else {
+        preWorkChecklist.push(newItem);
+      }
+      return { ...task, preWorkChecklist };
+    }));
+    setSelectedTask(prev => {
+      if (prev?.id !== taskId) return prev;
+      const preWorkChecklist = [...(prev.preWorkChecklist || [])];
+      const newItem = { text, completed };
+      if (position !== null && position >= 0 && position <= preWorkChecklist.length) {
+        preWorkChecklist.splice(position, 0, newItem);
+      } else {
+        preWorkChecklist.push(newItem);
+      }
+      return { ...prev, preWorkChecklist };
+    });
+  };
+
+  // Delete pre-work checklist item
+  const handleDeletePreWork = (taskId, itemIndex) => {
+    setTasks(prev => prev.map(task => {
+      if (task.id !== taskId) return task;
+      const preWorkChecklist = [...(task.preWorkChecklist || [])];
+      preWorkChecklist.splice(itemIndex, 1);
+      return { ...task, preWorkChecklist };
+    }));
+    setSelectedTask(prev => {
+      if (prev?.id !== taskId) return prev;
+      const preWorkChecklist = [...(prev.preWorkChecklist || [])];
+      preWorkChecklist.splice(itemIndex, 1);
+      return { ...prev, preWorkChecklist };
+    });
+  };
+
+  // Update pre-work checklist item text
+  const handleUpdatePreWork = (taskId, itemIndex, newText) => {
+    setTasks(prev => prev.map(task => {
+      if (task.id !== taskId) return task;
+      const preWorkChecklist = [...(task.preWorkChecklist || [])];
+      if (preWorkChecklist[itemIndex]) {
+        preWorkChecklist[itemIndex] = { ...preWorkChecklist[itemIndex], text: newText };
+      }
+      return { ...task, preWorkChecklist };
+    }));
+    setSelectedTask(prev => {
+      if (prev?.id !== taskId) return prev;
+      const preWorkChecklist = [...(prev.preWorkChecklist || [])];
+      if (preWorkChecklist[itemIndex]) {
+        preWorkChecklist[itemIndex] = { ...preWorkChecklist[itemIndex], text: newText };
+      }
+      return { ...prev, preWorkChecklist };
+    });
+  };
+
+  // Reorder pre-work checklist item
+  const handleReorderPreWork = (taskId, fromIndex, toIndex) => {
+    setTasks(prev => prev.map(task => {
+      if (task.id !== taskId) return task;
+      const preWorkChecklist = [...(task.preWorkChecklist || [])];
+      const [removed] = preWorkChecklist.splice(fromIndex, 1);
+      preWorkChecklist.splice(toIndex, 0, removed);
+      return { ...task, preWorkChecklist };
+    }));
+    setSelectedTask(prev => {
+      if (prev?.id !== taskId) return prev;
+      const preWorkChecklist = [...(prev.preWorkChecklist || [])];
+      const [removed] = preWorkChecklist.splice(fromIndex, 1);
+      preWorkChecklist.splice(toIndex, 0, removed);
+      return { ...prev, preWorkChecklist };
+    });
   };
 
   // Archive operations
@@ -1117,12 +1280,20 @@ function App() {
     showNotification(`"${task.title}" deleted permanently`);
   };
 
-  // Auto-save
+  // Auto-save (respects external change flag)
   useEffect(() => {
     if (!fileHandle || tasks.length === 0) return;
 
+    // Don't auto-save while applying external changes
+    if (fileWatcher.isApplyingChanges()) {
+      return;
+    }
+
     const timer = setTimeout(() => {
-      handleSaveFile();
+      // Double-check before saving
+      if (!fileWatcher.isApplyingChanges()) {
+        handleSaveFile();
+      }
     }, 2000);
 
     return () => clearTimeout(timer);
@@ -1458,6 +1629,13 @@ function App() {
         onArchive={handleArchiveTask}
         onAddSubtask={handleAddSubtask}
         onDeleteSubtask={handleDeleteSubtask}
+        onUpdateSubtask={handleUpdateSubtask}
+        onReorderSubtask={handleReorderSubtask}
+        onPreWorkToggle={handlePreWorkToggle}
+        onAddPreWork={handleAddPreWork}
+        onDeletePreWork={handleDeletePreWork}
+        onUpdatePreWork={handleUpdatePreWork}
+        onReorderPreWork={handleReorderPreWork}
       />
 
       {/* Task Form Modal */}

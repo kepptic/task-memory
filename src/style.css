@@ -1893,24 +1893,137 @@ body {
 }
 
 /* ============================================
-   SUBTASKS
+   SUBTASKS & CHECKLISTS
    ============================================ */
+
+/* Subtask item base */
+.subtask-item {
+  position: relative;
+}
 
 .subtask-item:hover {
   background: var(--surface-overlay) !important;
 }
 
+/* Drag handle - visible on hover */
+.subtask-item .drag-handle {
+  opacity: 0;
+  cursor: grab;
+  color: var(--text-muted);
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.subtask-item:hover .drag-handle {
+  opacity: 0.5;
+}
+
+.subtask-item .drag-handle:hover {
+  opacity: 1;
+  cursor: grab;
+}
+
+.subtask-item .drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Delete button - visible on hover */
 .subtask-delete-btn {
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-out);
 }
 
 .subtask-item:hover .subtask-delete-btn {
-  opacity: 1;
+  opacity: 0.5;
 }
 
 .subtask-delete-btn:hover {
-  color: var(--status-error) !important;
+  opacity: 1 !important;
+  color: var(--status-critical) !important;
+}
+
+/* Drag states */
+.subtask-item.dragging {
+  opacity: 0.5;
+  transform: scale(1.02) rotate(1deg);
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+}
+
+.subtask-item.drag-over {
+  border-top: 2px dashed var(--accent-primary);
+  padding-top: calc(var(--space-2) - 2px);
+}
+
+/* Checklist sections */
+.checklist-section {
+  padding: var(--space-3);
+  background: var(--surface-base);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+.checklist-prework {
+  border-left: 3px solid var(--status-pending);
+}
+
+.checklist-subtasks {
+  border-left: 3px solid var(--accent-primary);
+}
+
+/* Checklist items */
+.checklist-item:hover {
+  background: var(--surface-overlay) !important;
+}
+
+.checklist-item-prework {
+  cursor: pointer;
+}
+
+/* Dropdown menu for bulk actions */
+.dropdown-menu {
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-1);
+  min-width: 160px;
+  box-shadow: var(--shadow-lg);
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-in-out);
+}
+
+.dropdown-item:hover {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+/* Undo toast */
+.undo-toast {
+  animation: slideIn var(--duration-base) var(--ease-out);
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ============================================
