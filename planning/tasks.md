@@ -1,6 +1,6 @@
 # Task Board
 
-<!-- Config: Last Task ID: 008 -->
+<!-- Config: Last Task ID: 009 -->
 
 ## ⚙️ Configuration
 
@@ -387,6 +387,53 @@ Comprehensive testing of the new navbar across all scenarios.
 **Errors Log**:
 
 ## 🚧 In Progress
+
+### TASK-009 | Auto-Claude Audit & Task-Memory Improvement Analysis
+
+**Priority**: High | **Category**: Research | **Status**: done
+**Assigned**: @user
+**Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
+**Tags**: #research #audit #improvement #auto-claude
+
+Full audit of the Auto-Claude repository to identify patterns and features that can improve task-memory and task-status skills.
+
+**Subtasks**:
+- [x] Fetch and analyze Auto-Claude repository structure
+- [x] Analyze spec_researcher.md methodology
+- [x] Analyze planner.md workflow and phase system
+- [x] Analyze coder.md session architecture
+- [x] Analyze insight_extractor.md for memory persistence
+- [x] Analyze qa_reviewer.md for validation patterns
+- [x] Analyze complexity_assessor.md for task classification
+- [x] Analyze spec_writer.md for specification format
+- [x] Analyze followup_planner.md for sequential planning
+- [x] Analyze spec_gatherer.md for requirements collection
+- [x] Document findings in notes/TASK-009.md
+- [x] Compare Auto-Claude patterns with task-memory
+- [x] Identify concrete improvement opportunities
+- [x] Create implementation recommendations
+
+**Notes**:
+Full documentation in notes/TASK-009.md
+
+Key findings:
+- Auto-Claude uses 5 workflow types vs our Category field
+- Structured insight extraction after each task (patterns, gotchas)
+- Pre-implementation checklists for bug prevention
+- Mandatory self-critique before marking done
+- 3-tier complexity assessment (Simple/Standard/Complex)
+- 10-phase QA validation framework
+- Explicit phase dependencies
+
+Top improvement opportunities for task-memory:
+1. Add Workflow type field (FEATURE/REFACTOR/INVESTIGATION/MIGRATION/SIMPLE)
+2. Structured insights section (patterns, gotchas, file changes)
+3. Pre-implementation checklist
+4. Self-critique phase before marking done
+5. Complexity field (Simple/Standard/Complex)
+6. Phase dependencies in subtasks
+
+**Errors Log**:
 
 ## ✅ Done
 
