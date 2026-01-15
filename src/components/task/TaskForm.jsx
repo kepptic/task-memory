@@ -3,6 +3,8 @@ import Modal from '../common/Modal';
 import { Plus, X, Trash2 } from 'lucide-react';
 
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
+const WORKFLOWS = ['Feature', 'Refactor', 'Investigation', 'Migration', 'Simple'];
+const COMPLEXITIES = ['Simple', 'Standard', 'Complex'];
 
 export function TaskForm({
   task,
@@ -19,11 +21,14 @@ export function TaskForm({
     title: '',
     description: '',
     priority: 'Medium',
+    workflow: '',
+    complexity: '',
     category: '',
     assignee: '',
     column: '',
     tags: [],
     subtasks: [],
+    preWorkChecklist: [],
     notes: '',
     created: '',
     started: '',
@@ -44,11 +49,14 @@ export function TaskForm({
         title: task.title || '',
         description: task.description || '',
         priority: task.priority || 'Medium',
+        workflow: task.workflow || '',
+        complexity: task.complexity || '',
         category: task.category || '',
         assignee: task.assignee || task.assignees?.[0] || '',
         column: task.column || columns[0]?.id || '',
         tags: task.tags || [],
         subtasks: task.subtasks || [],
+        preWorkChecklist: task.preWorkChecklist || [],
         notes: task.notes || '',
         created: task.created || '',
         started: task.started || '',
@@ -62,11 +70,14 @@ export function TaskForm({
         title: '',
         description: '',
         priority: 'Medium',
+        workflow: '',
+        complexity: '',
         category: '',
         assignee: '',
         column: columns[0]?.id || '',
         tags: [],
         subtasks: [],
+        preWorkChecklist: [],
         notes: '',
         created: today,
         started: '',
@@ -201,6 +212,43 @@ export function TaskForm({
                 <option key={col.id} value={col.id}>{col.name}</option>
               ))}
             </select>
+          </div>
+        </div>
+
+        {/* Workflow and Complexity */}
+        <div className="form-row">
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="label">Workflow</label>
+            <select
+              className="input select"
+              value={formData.workflow}
+              onChange={(e) => handleChange('workflow', e.target.value)}
+            >
+              <option value="">Select workflow...</option>
+              {WORKFLOWS.map(w => (
+                <option key={w} value={w}>{w}</option>
+              ))}
+            </select>
+            <span className="text-muted" style={{ fontSize: '0.6875rem', marginTop: 'var(--space-1)', display: 'block' }}>
+              Feature, Refactor, Investigation, Migration, or Simple
+            </span>
+          </div>
+
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="label">Complexity</label>
+            <select
+              className="input select"
+              value={formData.complexity}
+              onChange={(e) => handleChange('complexity', e.target.value)}
+            >
+              <option value="">Select complexity...</option>
+              {COMPLEXITIES.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <span className="text-muted" style={{ fontSize: '0.6875rem', marginTop: 'var(--space-1)', display: 'block' }}>
+              Simple (1-2 files), Standard (3-10), Complex (10+)
+            </span>
           </div>
         </div>
 

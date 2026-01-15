@@ -238,6 +238,8 @@ function parseTask(id, title, content, status) {
     status,
     priority: "",
     category: "",
+    workflow: "",      // NEW: Feature, Refactor, Investigation, Migration, Simple
+    complexity: "",    // NEW: Simple, Standard, Complex
     assignees: [],
     tags: [],
     created: "",
@@ -246,6 +248,7 @@ function parseTask(id, title, content, status) {
     completed: "",
     description: "",
     subtasks: [],
+    preWorkChecklist: [], // NEW: Pre-implementation checklist items
     notes: "",
     visualOpsLog: [],
   };
@@ -259,6 +262,18 @@ function parseTask(id, title, content, status) {
   const categoryMatch = content.match(/\*\*Category\*\*:\s*([^|]+)/);
   if (categoryMatch) {
     task.category = categoryMatch[1].trim();
+  }
+
+  // NEW: Parse Workflow type
+  const workflowMatch = content.match(/\*\*Workflow\*\*:\s*(\S+)/);
+  if (workflowMatch) {
+    task.workflow = workflowMatch[1].trim();
+  }
+
+  // NEW: Parse Complexity level
+  const complexityMatch = content.match(/\*\*Complexity\*\*:\s*(\S+)/);
+  if (complexityMatch) {
+    task.complexity = complexityMatch[1].trim();
   }
 
   const assignedMatch = content.match(/\*\*Assigned\*\*:\s*(.+?)(?:\s*\||$)/m);
@@ -336,13 +351,41 @@ function parseTask(id, title, content, status) {
   // Keep full description with line breaks preserved for markdown rendering
   task.description = descriptionLines.join("\n");
 
-  // Parse subtasks
-  const subtaskMatches = content.matchAll(/- \[(x| )\] (.+)/g);
-  for (const match of subtaskMatches) {
-    task.subtasks.push({
-      completed: match[1] === "x",
-      text: match[2].trim(),
-    });
+  // Parse Pre-Work Checklist (before Subtasks section)
+  const preWorkMatch = content.match(/\*\*Pre-Work Checklist\*\*:\s*\n([\s\S]*?)(?=\*\*Subtasks\*\*:|\*\*Notes\*\*:|$)/);
+  if (preWorkMatch) {
+    const preWorkItems = preWorkMatch[1].matchAll(/- \[(x| )\] (.+)/g);
+    for (const match of preWorkItems) {
+      task.preWorkChecklist.push({
+        completed: match[1] === "x",
+        text: match[2].trim(),
+      });
+    }
+  }
+
+  // Parse subtasks - only from Subtasks section to avoid mixing with Pre-Work Checklist
+  const subtasksMatch = content.match(/\*\*Subtasks\*\*:\s*\n([\s\S]*?)(?=\*\*Pre-Work Checklist\*\*:|\*\*Notes\*\*:|\*\*Visual Operations Log\*\*:|$)/);
+  if (subtasksMatch) {
+    const subtaskMatches = subtasksMatch[1].matchAll(/- \[(x| )\] (.+)/g);
+    for (const match of subtaskMatches) {
+      task.subtasks.push({
+        completed: match[1] === "x",
+        text: match[2].trim(),
+      });
+    }
+  } else {
+    // Fallback: parse all checklist items if no Subtasks section header
+    const subtaskMatches = content.matchAll(/- \[(x| )\] (.+)/g);
+    for (const match of subtaskMatches) {
+      // Skip if it looks like a pre-work item
+      const text = match[2].trim();
+      if (!text.match(/^(Read relevant|Searched for|Identified patterns|Reviewed known)/i)) {
+        task.subtasks.push({
+          completed: match[1] === "x",
+          text: text,
+        });
+      }
+    }
   }
 
   // Parse notes - everything after **Notes**: until Visual Operations Log or end
@@ -479,9 +522,16 @@ function generateMarkdown(tasks, config) {
       if (task.category)
         meta += (meta ? " | " : "") + `**Category**: ${task.category}`;
       meta += (meta ? " | " : "") + `**Status**: ${task.status}`;
-      if (task.assignees.length > 0)
+      if (task.assignees && task.assignees.length > 0)
         meta += ` | **Assigned**: ${task.assignees.join(", ")}`;
       if (meta) md += meta + "\n";
+
+      // NEW: Workflow and Complexity on separate line
+      let workflowLine = "";
+      if (task.workflow) workflowLine += `**Workflow**: ${task.workflow}`;
+      if (task.complexity)
+        workflowLine += (workflowLine ? " | " : "") + `**Complexity**: ${task.complexity}`;
+      if (workflowLine) md += workflowLine + "\n";
 
       // Write dates line
       let dates = "";
@@ -505,6 +555,14 @@ function generateMarkdown(tasks, config) {
         md += `\n**Subtasks**:\n`;
         task.subtasks.forEach((st) => {
           md += `- [${st.completed ? "x" : " "}] ${st.text}\n`;
+        });
+      }
+
+      // NEW: Pre-Work Checklist
+      if (task.preWorkChecklist && task.preWorkChecklist.length > 0) {
+        md += `\n**Pre-Work Checklist**:\n`;
+        task.preWorkChecklist.forEach((item) => {
+          md += `- [${item.completed ? "x" : " "}] ${item.text}\n`;
         });
       }
 

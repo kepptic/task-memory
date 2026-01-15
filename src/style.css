@@ -102,54 +102,97 @@ body {
 }
 
 /* ============================================
-   2026 UI: AMBIENT INTERFACE
-   No chrome. Pure content. Intelligence everywhere.
+   2026 UI: CLEAN AURORA INTERFACE
+   Beautiful + Usable. Glassmorphism done right.
+   Based on 2026 UI/UX best practices.
    ============================================ */
 
-/* App Canvas - Full bleed */
+/* Subtle animations */
+@keyframes aurora {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* App Canvas - Subtle ambient background */
 .app-canvas {
   min-height: 100vh;
   position: relative;
-  padding-top: 5rem;
+  padding-top: 80px; /* Space for command bar */
+  overflow-x: hidden;
 }
 
-/* Context Pill Container - Floating header zone */
-.context-pill-container {
+/* Aurora background - subtle, not distracting */
+.app-canvas::before {
+  content: '';
   position: fixed;
-  top: var(--space-4);
-  left: 50%;
-  transform: translateX(-50%);
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(ellipse at 0% 0%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 100% 100%, rgba(34, 197, 94, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 100% 0%, rgba(168, 85, 247, 0.05) 0%, transparent 40%);
+  animation: aurora 30s ease-in-out infinite;
+  background-size: 200% 200%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ============================================
+   COMMAND BAR - Unified top navigation
+   Everything in one place, clearly organized
+   ============================================ */
+
+.command-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-5);
+  gap: var(--space-4);
+  background: color-mix(in oklch, var(--surface-base) 95%, transparent);
+  border-bottom: 1px solid var(--border-subtle);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   z-index: 100;
+}
+
+/* Left Section: Project Identity */
+.command-bar-left {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-shrink: 0;
 }
 
-/* Context Pill - The new "navbar" */
-.context-pill {
+/* Center Section: Search */
+.command-bar-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* Right Section: Controls */
+.command-bar-right {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface-base);
-  border: 1px solid var(--border-subtle);
-  border-radius: 100px;
-  backdrop-filter: blur(20px);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  gap: var(--space-2);
+  flex-shrink: 0;
 }
 
-.context-pill:hover {
-  border-color: var(--border-default);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.context-pill:hover .context-pill-actions {
-  opacity: 1;
-  transform: translateX(0);
-}
-
-/* Progress Ring - Visual stats */
+/* Progress Ring - Compact stats indicator */
 .progress-ring {
   position: relative;
   width: 36px;
@@ -165,16 +208,15 @@ body {
 
 .progress-ring-bg {
   fill: none;
-  stroke: var(--surface-elevated);
+  stroke: var(--border-default);
   stroke-width: 3;
 }
 
 .progress-ring-fill {
   fill: none;
-  stroke: var(--status-success);
   stroke-width: 3;
   stroke-linecap: round;
-  transition: stroke-dasharray 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: stroke-dasharray 0.6s ease-out;
 }
 
 .progress-ring-text {
@@ -188,55 +230,31 @@ body {
   color: var(--text-primary);
 }
 
-/* Pill Actions - Reveal on hover */
-.context-pill-actions {
-  display: flex;
-  gap: var(--space-1);
-  opacity: 0;
-  transform: translateX(-8px);
-  transition: all 0.2s ease-out;
-}
-
-.pill-action {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  border-radius: 50%;
-  cursor: pointer;
-  transition: all 0.15s ease-out;
-}
-
-.pill-action:hover {
-  background: var(--surface-elevated);
-  color: var(--text-primary);
-}
-
-/* Floating Search */
-.floating-search {
+/* Search Box */
+.search-box {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  width: 100%;
   padding: var(--space-2) var(--space-3);
-  background: var(--surface-base);
+  background: var(--surface-elevated);
   border: 1px solid var(--border-subtle);
-  border-radius: 100px;
-  backdrop-filter: blur(20px);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
-  min-width: 200px;
+  border-radius: var(--radius-lg);
   transition: all 0.2s ease-out;
 }
 
-.floating-search:focus-within {
+.search-box:focus-within {
+  background: var(--surface-overlay);
   border-color: var(--accent-primary);
-  box-shadow: 0 4px 24px rgba(0, 112, 243, 0.15);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-primary) 20%, transparent);
 }
 
-.floating-search input {
+.search-box svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.search-box input {
   flex: 1;
   border: none;
   background: transparent;
@@ -245,7 +263,7 @@ body {
   outline: none;
 }
 
-.floating-search input::placeholder {
+.search-box input::placeholder {
   color: var(--text-muted);
 }
 
@@ -253,90 +271,64 @@ body {
   font-size: 0.625rem;
   padding: 2px 6px;
   background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-family: ui-monospace, monospace;
+  font-weight: 500;
 }
 
-/* Smart FAB - Contextual action */
-.smart-fab {
-  position: fixed;
-  bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
-  right: var(--space-6);
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-primary-hover) 100%);
-  color: white;
-  border: none;
-  border-radius: 100px;
-  cursor: pointer;
-  box-shadow: 0 8px 32px rgba(0, 112, 243, 0.4), 0 2px 8px rgba(0, 0, 0, 0.1);
-  z-index: 90;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  font-weight: 600;
-  font-size: 0.875rem;
-}
-
-.smart-fab:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 40px rgba(0, 112, 243, 0.5), 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.smart-fab:active {
-  transform: scale(0.98);
-}
-
-.smart-fab-label {
-  white-space: nowrap;
-}
-
-/* Edge Actions - Side panel triggers */
-.edge-actions {
-  position: fixed;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2);
-  background: var(--surface-base);
-  border: 1px solid var(--border-subtle);
-  border-right: none;
-  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.1);
-  z-index: 80;
-  opacity: 0.4;
-  transition: all 0.2s ease-out;
-}
-
-.edge-actions:hover {
-  opacity: 1;
-}
-
-.edge-actions button {
+/* Toolbar Buttons */
+.toolbar-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: none;
+  gap: var(--space-1);
+  height: 36px;
+  padding: 0 var(--space-3);
   background: transparent;
-  color: var(--text-secondary);
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 500;
   cursor: pointer;
-  position: relative;
   transition: all 0.15s ease-out;
+  position: relative;
 }
 
-.edge-actions button:hover {
+.toolbar-btn:hover {
   background: var(--surface-elevated);
   color: var(--text-primary);
 }
 
-.edge-action-badge span {
+.toolbar-btn.active {
+  background: color-mix(in oklch, var(--accent-primary) 15%, transparent);
+  color: var(--accent-primary);
+  border-color: color-mix(in oklch, var(--accent-primary) 40%, transparent);
+}
+
+.toolbar-btn-label {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .toolbar-btn-label {
+    display: inline;
+  }
+}
+
+.toolbar-indicator {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  background: var(--accent-primary);
+  border-radius: 50%;
+}
+
+.toolbar-badge {
   position: absolute;
   top: 4px;
   right: 4px;
@@ -353,32 +345,98 @@ body {
   justify-content: center;
 }
 
-/* Filter Panel - Floating */
-.filter-panel {
-  position: fixed;
-  top: 5rem;
-  left: var(--space-4);
-  width: 280px;
-  background: var(--surface-base);
+/* Toolbar Select */
+.toolbar-select {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 36px;
+  padding: 0 var(--space-3);
+  background: var(--surface-elevated);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  z-index: 85;
-  animation: slideInLeft 0.2s ease-out;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
 }
 
-@keyframes slideInLeft {
+.toolbar-select select {
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+}
+
+.toolbar-select select option {
+  background: var(--surface-overlay);
+}
+
+/* Toolbar Divider */
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border-subtle);
+  margin: 0 var(--space-1);
+}
+
+/* Primary Action Button */
+.primary-action-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0 var(--space-4);
+  background: var(--accent-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-inverse);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease-out;
+}
+
+.primary-action-btn:hover {
+  background: var(--accent-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px color-mix(in oklch, var(--accent-primary) 40%, transparent);
+}
+
+.primary-action-btn:active {
+  transform: scale(0.98);
+}
+
+/* Dropdown Container */
+.dropdown-container {
+  position: relative;
+}
+
+.dropdown-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 280px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  z-index: 110;
+  animation: dropdownIn 0.15s ease-out;
+}
+
+@keyframes dropdownIn {
   from {
     opacity: 0;
-    transform: translateX(-16px);
+    transform: translateY(-8px);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 }
 
-.filter-panel-header {
+.dropdown-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -388,11 +446,59 @@ body {
   font-size: 0.875rem;
 }
 
-.filter-panel-content {
+.dropdown-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.dropdown-close:hover {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.dropdown-content {
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/* Filter Controls inside dropdown */
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.filter-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.filter-select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.filter-select:focus {
+  border-color: var(--accent-primary);
 }
 
 .filter-tags {
@@ -423,72 +529,22 @@ body {
   color: white;
 }
 
-/* Filter Toggle Button */
-.filter-toggle {
-  position: fixed;
-  top: 5rem;
-  left: var(--space-4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  background: var(--surface-base);
-  border: 1px solid var(--border-subtle);
-  border-radius: 50%;
-  color: var(--text-secondary);
-  cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-  z-index: 80;
-  transition: all 0.2s ease-out;
-}
-
-.filter-toggle:hover {
-  border-color: var(--border-default);
-  color: var(--text-primary);
-}
-
-.filter-toggle.active {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
-  color: white;
-}
-
-.filter-toggle-badge {
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  width: 8px;
-  height: 8px;
-  background: var(--status-warning);
-  border-radius: 50%;
-}
-
-/* Sort Toggle */
-.sort-toggle {
-  position: fixed;
-  top: 5rem;
-  left: calc(var(--space-4) + 48px);
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface-base);
-  border: 1px solid var(--border-subtle);
-  border-radius: 100px;
-  color: var(--text-secondary);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-  z-index: 80;
-}
-
-.sort-toggle select {
-  border: none;
+.clear-filters-btn {
+  padding: var(--space-2);
   background: transparent;
-  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
   font-size: 0.8125rem;
-  outline: none;
   cursor: pointer;
+  transition: all 0.15s ease-out;
 }
+
+.clear-filters-btn:hover {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
 
 /* Hide old navbar */
 .navbar {
@@ -1106,6 +1162,51 @@ body {
 .badge-tag {
   background: var(--surface-elevated);
   color: var(--text-secondary);
+}
+
+/* Workflow type badges */
+.badge-workflow-feature {
+  background: rgba(0, 112, 243, 0.15);
+  color: #3b82f6;
+}
+
+.badge-workflow-refactor {
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+}
+
+.badge-workflow-investigation {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.badge-workflow-migration {
+  background: rgba(236, 72, 153, 0.15);
+  color: #ec4899;
+}
+
+.badge-workflow-simple {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+/* Complexity badges */
+.badge-complexity-simple {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.badge-complexity-standard {
+  background: rgba(0, 112, 243, 0.1);
+  color: #3b82f6;
+  border: 1px solid rgba(0, 112, 243, 0.3);
+}
+
+.badge-complexity-complex {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .badge-count {

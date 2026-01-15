@@ -10,6 +10,20 @@ const priorityConfig = {
   low: { className: 'badge-priority-low', label: 'Low' },
 };
 
+const workflowConfig = {
+  feature: { className: 'badge-workflow-feature', label: 'Feature' },
+  refactor: { className: 'badge-workflow-refactor', label: 'Refactor' },
+  investigation: { className: 'badge-workflow-investigation', label: 'Invest.' },
+  migration: { className: 'badge-workflow-migration', label: 'Migrate' },
+  simple: { className: 'badge-workflow-simple', label: 'Simple' },
+};
+
+const complexityConfig = {
+  simple: { className: 'badge-complexity-simple', label: 'Simple' },
+  standard: { className: 'badge-complexity-standard', label: 'Std' },
+  complex: { className: 'badge-complexity-complex', label: 'Complex' },
+};
+
 // Presentational component - no hooks, used in DragOverlay
 // Memoized to prevent unnecessary re-renders
 export const TaskCardContent = memo(function TaskCardContent({ task, onEdit, onClick, isDragging = false }) {
@@ -55,6 +69,18 @@ export const TaskCardContent = memo(function TaskCardContent({ task, onEdit, onC
         <span className={`badge ${priorityInfo.className}`}>
           {priorityInfo.label}
         </span>
+
+        {task.workflow && workflowConfig[task.workflow.toLowerCase()] && (
+          <span className={`badge ${workflowConfig[task.workflow.toLowerCase()].className}`}>
+            {workflowConfig[task.workflow.toLowerCase()].label}
+          </span>
+        )}
+
+        {task.complexity && complexityConfig[task.complexity.toLowerCase()] && (
+          <span className={`badge ${complexityConfig[task.complexity.toLowerCase()].className}`}>
+            {complexityConfig[task.complexity.toLowerCase()].label}
+          </span>
+        )}
 
         {task.category && (
           <span className="badge badge-category">{task.category}</span>

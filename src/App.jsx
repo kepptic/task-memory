@@ -1142,17 +1142,25 @@ function App() {
 
   return (
     <div className="app-canvas">
-      {/* 2026 UI: Floating Context Pill - replaces navbar */}
+      {/* 2026 UI: Unified Command Bar - Clean, organized, usable */}
       {hasProject && (
-        <div className="context-pill-container">
-          <div className="context-pill">
-            {/* Progress Ring - Visual stats */}
+        <header className="command-bar">
+          {/* Left Section: Project Identity */}
+          <div className="command-bar-left">
             <div className="progress-ring" title={`${Math.round((stats.byColumn['done'] || 0) / Math.max(stats.total, 1) * 100)}% complete`}>
               <svg viewBox="0 0 36 36" className="progress-ring-svg">
+                <defs>
+                  <linearGradient id="progress-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#22c55e" />
+                    <stop offset="50%" stopColor="#0070f3" />
+                    <stop offset="100%" stopColor="#a855f7" />
+                  </linearGradient>
+                </defs>
                 <circle cx="18" cy="18" r="15.5" className="progress-ring-bg" />
                 <circle
                   cx="18" cy="18" r="15.5"
                   className="progress-ring-fill"
+                  stroke="url(#progress-gradient)"
                   style={{
                     strokeDasharray: `${((stats.byColumn['done'] || 0) / Math.max(stats.total, 1)) * 97.5} 97.5`
                   }}
@@ -1160,8 +1168,6 @@ function App() {
               </svg>
               <span className="progress-ring-text">{stats.total}</span>
             </div>
-
-            {/* Project Name */}
             <ProjectSelector
               currentProject={currentProject}
               recentProjects={recentProjects}
@@ -1170,153 +1176,137 @@ function App() {
               onDeleteProject={handleDeleteProject}
               onOpenNew={handleOpenProject}
             />
+          </div>
 
-            {/* Quick Actions - appear on hover */}
-            <div className="context-pill-actions">
-              <button
-                className="pill-action"
-                onClick={handleRefresh}
-                title="Refresh"
-              >
-                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-              </button>
-              <button
-                className="pill-action"
-                onClick={() => setShowSettingsModal(true)}
-                title="Settings"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
+          {/* Center Section: Search */}
+          <div className="command-bar-center">
+            <div className="search-box">
+              <Search className="w-4 h-4" />
+              <input
+                type="text"
+                placeholder="Search tasks..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              <kbd className="search-kbd">⌘K</kbd>
             </div>
           </div>
 
-          {/* Floating Search - Cmd+K style */}
-          <div className="floating-search">
-            <Search className="w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Search tasks..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <kbd className="search-kbd">⌘K</kbd>
-          </div>
-        </div>
-      )}
+          {/* Right Section: Controls & Actions */}
+          <div className="command-bar-right">
+            {/* Filter Dropdown */}
+            <div className="dropdown-container">
+              <button
+                className={`toolbar-btn ${showFilters ? 'active' : ''} ${hasActiveFilters ? 'has-indicator' : ''}`}
+                onClick={() => setShowFilters(!showFilters)}
+                title="Filters"
+              >
+                <Filter className="w-4 h-4" />
+                <span className="toolbar-btn-label">Filter</span>
+                {hasActiveFilters && <span className="toolbar-indicator" />}
+              </button>
+              {showFilters && (
+                <div className="dropdown-panel">
+                  <div className="dropdown-header">
+                    <span>Filters</span>
+                    <button className="dropdown-close" onClick={() => setShowFilters(false)}>
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="dropdown-content">
+                    <div className="filter-group">
+                      <label className="filter-label">Priority</label>
+                      <select className="filter-select" value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)}>
+                        <option value="">All</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                      </select>
+                    </div>
+                    {categories.length > 0 && (
+                      <div className="filter-group">
+                        <label className="filter-label">Category</label>
+                        <select className="filter-select" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+                          <option value="">All</option>
+                          {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    {assignees.length > 0 && (
+                      <div className="filter-group">
+                        <label className="filter-label">Assignee</label>
+                        <select className="filter-select" value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)}>
+                          <option value="">All</option>
+                          {assignees.map(a => <option key={a} value={a}>{a}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    {allTags.length > 0 && (
+                      <div className="filter-group">
+                        <label className="filter-label">Tags</label>
+                        <div className="filter-tags">
+                          {allTags.map(tag => (
+                            <button
+                              key={tag}
+                              className={`filter-tag ${filterTags.includes(tag) ? 'active' : ''}`}
+                              onClick={() => toggleTagFilter(tag)}
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {hasActiveFilters && (
+                      <button className="clear-filters-btn" onClick={clearFilters}>Clear all</button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
-      {/* Smart FAB - Contextual action */}
-      {hasProject && (
-        <button
-          className="smart-fab"
-          onClick={() => handleAddTask()}
-          aria-label="Create new task"
-        >
-          <Plus className="w-6 h-6" />
-          <span className="smart-fab-label">New Task</span>
-        </button>
-      )}
-
-      {/* Secondary Actions - Edge triggered */}
-      {hasProject && (
-        <div className="edge-actions">
-          <button onClick={() => setShowColumnModal(true)} title="Columns">
-            <Columns className="w-5 h-5" />
-          </button>
-          <button onClick={() => setShowArchiveModal(true)} title="Archive" className="edge-action-badge">
-            <Archive className="w-5 h-5" />
-            {archivedTasks.length > 0 && <span>{archivedTasks.length}</span>}
-          </button>
-        </div>
-      )}
-
-      {/* Floating Filter Panel */}
-      {hasProject && showFilters && (
-        <div className="filter-panel">
-          <div className="filter-panel-header">
-            <span>Filters</span>
-            <button className="pill-action" onClick={() => setShowFilters(false)}>
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="filter-panel-content">
-            <div className="filter-group">
-              <label className="filter-label">Priority</label>
-              <select className="input select" value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)}>
-                <option value="">All</option>
-                <option value="critical">Critical</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
+            {/* Sort Dropdown */}
+            <div className="toolbar-select">
+              <ArrowUpDown className="w-4 h-4" />
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                <option value="manual">Manual</option>
+                <option value="created-desc">Newest</option>
+                <option value="created-asc">Oldest</option>
+                <option value="priority">Priority</option>
+                <option value="title">Title</option>
               </select>
             </div>
-            {categories.length > 0 && (
-              <div className="filter-group">
-                <label className="filter-label">Category</label>
-                <select className="input select" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
-                  <option value="">All</option>
-                  {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                </select>
-              </div>
-            )}
-            {assignees.length > 0 && (
-              <div className="filter-group">
-                <label className="filter-label">Assignee</label>
-                <select className="input select" value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)}>
-                  <option value="">All</option>
-                  {assignees.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </div>
-            )}
-            {allTags.length > 0 && (
-              <div className="filter-group">
-                <label className="filter-label">Tags</label>
-                <div className="filter-tags">
-                  {allTags.map(tag => (
-                    <button
-                      key={tag}
-                      className={`filter-tag ${filterTags.includes(tag) ? 'active' : ''}`}
-                      onClick={() => toggleTagFilter(tag)}
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {hasActiveFilters && (
-              <button className="btn btn-ghost btn-sm" onClick={clearFilters}>Clear all filters</button>
-            )}
+
+            <div className="toolbar-divider" />
+
+            {/* Utility Actions */}
+            <button className="toolbar-btn" onClick={handleRefresh} title="Refresh (⌘R)">
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
+            <button className="toolbar-btn" onClick={() => setShowColumnModal(true)} title="Manage Columns">
+              <Columns className="w-4 h-4" />
+            </button>
+            <button className="toolbar-btn" onClick={() => setShowArchiveModal(true)} title="Archive">
+              <Archive className="w-4 h-4" />
+              {archivedTasks.length > 0 && <span className="toolbar-badge">{archivedTasks.length}</span>}
+            </button>
+            <button className="toolbar-btn" onClick={() => setShowSettingsModal(true)} title="Settings">
+              <Settings className="w-4 h-4" />
+            </button>
+
+            <div className="toolbar-divider" />
+
+            {/* Primary Action */}
+            <button className="primary-action-btn" onClick={() => handleAddTask()}>
+              <Plus className="w-4 h-4" />
+              <span>New Task</span>
+            </button>
           </div>
-        </div>
+        </header>
       )}
 
-      {/* Filter Toggle Button */}
-      {hasProject && (
-        <button
-          className={`filter-toggle ${showFilters ? 'active' : ''} ${hasActiveFilters ? 'has-filters' : ''}`}
-          onClick={() => setShowFilters(!showFilters)}
-          title="Toggle filters"
-        >
-          <Filter className="w-4 h-4" />
-          {hasActiveFilters && <span className="filter-toggle-badge" />}
-        </button>
-      )}
-
-      {/* Sort Toggle */}
-      {hasProject && (
-        <div className="sort-toggle">
-          <ArrowUpDown className="w-4 h-4" />
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-            <option value="manual">Manual</option>
-            <option value="created-desc">Newest</option>
-            <option value="created-asc">Oldest</option>
-            <option value="priority">Priority</option>
-            <option value="title">Title</option>
-          </select>
-        </div>
-      )}
-
-      {/* Migration Banner for legacy kanban.md */}
+      {/* Migration Banner - Below command bar, not overlapping */}
       {showLegacyBanner && hasProject && (
         <div className="migration-banner">
           <div className="migration-banner-icon">

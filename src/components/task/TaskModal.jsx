@@ -19,6 +19,9 @@ import {
   Archive,
   Plus,
   Trash2,
+  GitBranch,
+  Layers,
+  ClipboardCheck,
 } from 'lucide-react';
 
 const priorityConfig = {
@@ -26,6 +29,20 @@ const priorityConfig = {
   high: { className: 'badge-priority-high', label: 'High', icon: AlertTriangle },
   medium: { className: 'badge-priority-medium', label: 'Medium', icon: Clock },
   low: { className: 'badge-priority-low', label: 'Low', icon: Clock },
+};
+
+const workflowConfig = {
+  feature: { className: 'badge-workflow-feature', label: 'Feature' },
+  refactor: { className: 'badge-workflow-refactor', label: 'Refactor' },
+  investigation: { className: 'badge-workflow-investigation', label: 'Investigation' },
+  migration: { className: 'badge-workflow-migration', label: 'Migration' },
+  simple: { className: 'badge-workflow-simple', label: 'Simple' },
+};
+
+const complexityConfig = {
+  simple: { className: 'badge-complexity-simple', label: 'Simple', description: '1-2 files' },
+  standard: { className: 'badge-complexity-standard', label: 'Standard', description: '3-10 files' },
+  complex: { className: 'badge-complexity-complex', label: 'Complex', description: '10+ files' },
 };
 
 export function TaskModal({ task, isOpen, onClose, onEdit, onSubtaskToggle, onArchive, onAddSubtask, onDeleteSubtask }) {
@@ -68,13 +85,25 @@ export function TaskModal({ task, isOpen, onClose, onEdit, onSubtaskToggle, onAr
       size="large"
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-        {/* Task ID and Priority */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+        {/* Task ID, Priority, Workflow, Complexity */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
           <span className="task-card-id" style={{ fontSize: '0.8125rem' }}>{task.id}</span>
           <span className={`badge ${priorityInfo.className}`} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <PriorityIcon className="w-3 h-3" />
             {priorityInfo.label}
           </span>
+          {task.workflow && (
+            <span className={`badge ${workflowConfig[task.workflow.toLowerCase()]?.className || 'badge-tag'}`} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <GitBranch className="w-3 h-3" />
+              {workflowConfig[task.workflow.toLowerCase()]?.label || task.workflow}
+            </span>
+          )}
+          {task.complexity && (
+            <span className={`badge ${complexityConfig[task.complexity.toLowerCase()]?.className || 'badge-tag'}`} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }} title={complexityConfig[task.complexity.toLowerCase()]?.description}>
+              <Layers className="w-3 h-3" />
+              {complexityConfig[task.complexity.toLowerCase()]?.label || task.complexity}
+            </span>
+          )}
         </div>
 
         {/* Description */}
@@ -167,6 +196,50 @@ export function TaskModal({ task, isOpen, onClose, onEdit, onSubtaskToggle, onAr
                 <span style={{ fontSize: '0.8125rem', color: 'var(--status-complete)' }}>{task.finished}</span>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Pre-Work Checklist */}
+        {task.preWorkChecklist?.length > 0 && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
+              <div className="text-secondary" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: '0.8125rem', fontWeight: 500 }}>
+                <ClipboardCheck className="w-4 h-4" />
+                Pre-Work Checklist
+              </div>
+              <span className="text-muted" style={{ fontSize: '0.75rem' }}>
+                {task.preWorkChecklist.filter(item => item.completed).length} / {task.preWorkChecklist.length} completed
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              {task.preWorkChecklist.map((item, index) => (
+                <div
+                  key={index}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-3)',
+                    padding: 'var(--space-2) var(--space-3)',
+                    background: 'var(--surface-elevated)',
+                    borderRadius: 'var(--radius-md)',
+                    borderLeft: `3px solid ${item.completed ? 'var(--status-complete)' : 'var(--border-subtle)'}`,
+                  }}
+                >
+                  {item.completed ? (
+                    <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--status-complete)', flexShrink: 0 }} />
+                  ) : (
+                    <Circle className="w-4 h-4 text-muted" style={{ flexShrink: 0 }} />
+                  )}
+                  <span style={{
+                    flex: 1,
+                    fontSize: '0.8125rem',
+                    color: item.completed ? 'var(--text-muted)' : 'var(--text-secondary)',
+                  }}>
+                    {item.text}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
