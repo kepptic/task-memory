@@ -23,28 +23,35 @@ This project uses the **task-memory** plugin for task tracking.
 
 ---
 
-## Critical: Task Creation Verification
+## Task Placement: Auto-Fix Enabled
 
-**Root Cause of Past Failures:** Tasks written with correct Status field but placed under WRONG section header. The UI parses by markdown structure, not by field values.
+The UI now **automatically fixes** tasks that are in the wrong section:
 
-### MANDATORY: Verify Section Placement
+1. **Status field is authoritative** - The UI reads the `**Status**:` field value
+2. **Auto-reorganization** - On load, if a task's Status doesn't match its section, it's automatically moved
+3. **Notification** - You'll see "X tasks auto-moved to correct section"
 
-After writing ANY task to `planning/tasks.md`:
+### How It Works
 
 ```
-Status: todo        → Task MUST be under ## 📝 To Do (or ## To Do)
-Status: in-progress → Task MUST be under ## 🚧 In Progress (or ## In Progress)
-Status: done        → Task MUST be under ## ✅ Done (or ## Done)
+Status: done → Task displays in Done column, regardless of markdown section
+            → File is automatically rewritten with task in correct section
 ```
 
-**Verification Command:**
+### Best Practice (Still Recommended)
+
+When creating tasks, place them under the matching section to avoid churn:
+
+```
+Status: todo        → Place under ## 📝 To Do (or ## To Do)
+Status: in-progress → Place under ## 🚧 In Progress (or ## In Progress)
+Status: done        → Place under ## ✅ Done (or ## Done)
+```
+
+**Verification (optional):**
 ```bash
-# After creating TASK-XXX, verify it's under the right section:
 grep -B 3 "^### TASK-XXX" planning/tasks.md | head -4
-# Should show the correct ## section header above the task
 ```
-
-**If misplaced:** Cut the entire task block and paste under the correct section header BEFORE proceeding.
 
 ---
 

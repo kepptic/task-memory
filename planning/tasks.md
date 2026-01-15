@@ -1,18 +1,18 @@
 # Kanban Board
 
-<!-- Config: Last Task ID: 009 -->
+<!-- Config: Last Task ID: 9 -->
 
 ## ⚙️ Configuration
 
 **Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
 
-**Categories**: UI/UX, Feature, Testing
+**Categories**: UI/UX, Feature, Testing, Research
 
 **Users**: @user
 
 **Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
 
-**Tags**: #navbar #ui #ux #architecture #component #mobile #responsive #css #fab #design-system #testing #integration #qa
+**Tags**: #navbar #ui #ux #architecture #component #mobile #responsive #css #fab #design-system #testing #integration #qa #research #audit #improvement #auto-claude
 
 ---
 
@@ -326,13 +326,12 @@ Comprehensive testing of the new navbar across all scenarios.
 ## Done
 
 ### TASK-009 | Auto-Claude Audit & Task-Memory Improvement Analysis
-
-**Priority**: High | **Category**: Research | **Status**: done
+**Priority**: High | **Category**: Research | **Status**: done | **Assigned**: @user
 **Workflow**: Investigation | **Complexity**: Standard
-**Assigned**: @user
 **Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
 **Tags**: #research #audit #improvement #auto-claude
 
+**Workflow**: Investigation | **Complexity**: Standard
 Full audit of the Auto-Claude repository to identify patterns and features that can improve task-memory and task-status skills.
 
 **Subtasks**:

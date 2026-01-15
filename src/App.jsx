@@ -515,6 +515,39 @@ function App() {
         column: task.status || 'To Do',
       }));
 
+      // Check for tasks that need reorganization (Status field doesn't match section)
+      const tasksNeedingReorg = mappedTasks.filter(t => t._needsReorganization);
+      if (tasksNeedingReorg.length > 0) {
+        console.log(`🔄 Auto-reorganizing ${tasksNeedingReorg.length} tasks to correct sections`);
+        // Clean up the internal flag before saving
+        mappedTasks.forEach(t => delete t._needsReorganization);
+        // Trigger immediate save to fix file structure
+        setTimeout(async () => {
+          try {
+            const tasksForMarkdown = mappedTasks.map(task => ({
+              ...task,
+              status: task.column,
+            }));
+            const columnsToSave = parsed.config?.columns?.length > 0
+              ? parsed.config.columns.map(col => ({ id: col.id || col.name, name: col.name }))
+              : DEFAULT_COLUMNS;
+            const config = {
+              lastTaskId: Math.max(...mappedTasks.map(t => {
+                const match = t.id?.match(/TASK-(\d+)/);
+                return match ? parseInt(match[1], 10) : 0;
+              }), 0),
+              columns: columnsToSave,
+            };
+            const markdown = markdownParser.generateMarkdown(tasksForMarkdown, config);
+            await fileSystem.writeFile(taskResult.fileHandle, markdown);
+            fileWatcher.setCurrentContent(markdown);
+            showNotification(`${tasksNeedingReorg.length} task${tasksNeedingReorg.length > 1 ? 's' : ''} auto-moved to correct section`);
+          } catch (error) {
+            console.error('Failed to auto-reorganize:', error);
+          }
+        }, 100);
+      }
+
       setTasks(mappedTasks);
       setLastSaved(new Date());
 
