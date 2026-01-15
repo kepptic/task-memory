@@ -1,4 +1,4 @@
-# Task Board
+# Kanban Board
 
 <!-- Config: Last Task ID: 009 -->
 
@@ -6,38 +6,34 @@
 
 **Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
 
-**Categories**: Feature, Bug, Docs, Research, UI/UX, Testing
+**Categories**: UI/UX, Feature, Testing
 
 **Users**: @user
 
 **Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
 
-**Tags**: #feature #bug #docs #research #testing #navbar #ui #ux #component #mobile #responsive
+**Tags**: #navbar #ui #ux #architecture #component #mobile #responsive #css #fab #design-system #testing #integration #qa
 
 ---
 
-## 📝 To Do
+## To Do
 
 ### TASK-002 | Navbar Architecture Redesign
-
-**Priority**: High | **Category**: UI/UX | **Status**: done
-**Assigned**: @user
+**Priority**: High | **Category**: UI/UX | **Status**: todo | **Assigned**: @user
 **Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
 **Tags**: #navbar #ui #ux #architecture
 
 Restructure the navbar into three clear zones with improved information hierarchy.
-
 **Current Problems:**
 - Logo, title, and project selector are nested incorrectly
 - Stats are visually disconnected from actions
 - Action buttons lack logical grouping
 - Asymmetric visual weight across the navbar
 - Stats disappear entirely on tablet breakpoint
-
 **Proposed Structure:**
 ```
 [Identity Zone] | [Context Zone] | [Actions Zone]
-   Logo only     Project + Stats   New Task + Utilities
+Logo only     Project + Stats   New Task + Utilities
 ```
 
 **Subtasks**:
@@ -48,14 +44,10 @@ Restructure the navbar into three clear zones with improved information hierarch
 - [x] Add visual dividers between zones
 - [x] Update navbar to use CSS Grid (3-column layout)
 - [x] Move primary "New Task" button to prominent position
-
-**Tests - Component Render:**
 - [x] Navbar renders with all three zones
 - [x] Logo displays without title text
 - [x] Dividers appear between zones
 - [x] All action buttons remain functional
-
-**Tests - State:**
 - [x] `hasProject=false` hides context and utility zones
 - [x] `hasProject=true` shows all zones
 - [x] Loading state disables action buttons
@@ -70,20 +62,16 @@ Restructure the navbar into three clear zones with improved information hierarch
 **Errors Log**:
 
 ### TASK-003 | Create TaskSummaryBadge Component
-
-**Priority**: High | **Category**: Feature | **Status**: done
-**Assigned**: @user
+**Priority**: High | **Category**: Feature | **Status**: todo | **Assigned**: @user
 **Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
 **Tags**: #navbar #component #ui
 
 Create a progressive disclosure component that shows compact stats by default and expands on interaction.
-
 **Design:**
 ```
 Compact (default): [•••• 20 | 2%]
 Expanded (hover):  To Do: 20 | In Progress: 0 | Done: 0 | File: 2%
 ```
-
 **Location**: `src/components/common/TaskSummaryBadge.jsx`
 
 **Subtasks**:
@@ -95,19 +83,13 @@ Expanded (hover):  To Do: 20 | In Progress: 0 | Done: 0 | File: 2%
 - [x] Add file size warning indicator (amber at 50%, red at 80%)
 - [ ] Export from components/common/index.js (direct import used)
 - [x] Integrate into navbar-context zone
-
-**Tests - Component Render:**
 - [x] Compact view shows total count and percentage
 - [x] Expanded view shows all column counts
 - [x] Warning colors appear at correct thresholds
-
-**Tests - Interactions:**
 - [x] Hover expands the badge
 - [x] Click on badge expands/collapses
 - [x] Mouse leave collapses after delay
 - [x] Keyboard focus triggers expand (accessibility)
-
-**Tests - Props:**
 - [x] `stats` prop updates display correctly
 - [x] `fileStats` prop shows percentage
 - [x] Missing props render gracefully (no crash)
@@ -121,14 +103,11 @@ Expanded (hover):  To Do: 20 | In Progress: 0 | Done: 0 | File: 2%
 **Errors Log**:
 
 ### TASK-004 | Create OverflowMenu Component
-
-**Priority**: High | **Category**: Feature | **Status**: done
-**Assigned**: @user
+**Priority**: High | **Category**: Feature | **Status**: todo | **Assigned**: @user
 **Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
 **Tags**: #navbar #component #ui #mobile
 
 Create a dropdown menu to group secondary actions and reduce navbar clutter.
-
 **Menu Items:**
 ```
 - Refresh (Cmd+R)
@@ -139,7 +118,6 @@ Create a dropdown menu to group secondary actions and reduce navbar clutter.
 ---
 - Open Different Project
 ```
-
 **Location**: `src/components/common/OverflowMenu.jsx`
 
 **Subtasks**:
@@ -152,22 +130,16 @@ Create a dropdown menu to group secondary actions and reduce navbar clutter.
 - [x] Add keyboard navigation (arrow keys)
 - [x] Style consistent with ProjectSelector dropdown
 - [ ] Export from components/common/index.js (direct import used)
-
-**Tests - Component Render:**
 - [x] Menu button shows MoreHorizontal icon
 - [x] Dropdown shows all menu items
 - [x] Keyboard shortcuts display correctly
 - [x] Archive badge shows correct count
-
-**Tests - Interactions:**
 - [x] Click opens dropdown
 - [x] Click outside closes dropdown
 - [x] Escape key closes dropdown
 - [x] Arrow keys navigate items
 - [x] Enter/Space activates item
 - [x] Menu item click triggers callback and closes
-
-**Tests - Callbacks:**
 - [x] onRefresh triggers handleRefresh
 - [x] onColumns triggers setShowColumnModal
 - [x] onArchive triggers setShowArchiveModal
@@ -183,14 +155,11 @@ Create a dropdown menu to group secondary actions and reduce navbar clutter.
 **Errors Log**:
 
 ### TASK-005 | Implement Responsive Navbar Layout
-
-**Priority**: High | **Category**: Feature | **Status**: done
-**Assigned**: @user
+**Priority**: High | **Category**: Feature | **Status**: todo | **Assigned**: @user
 **Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
 **Tags**: #navbar #responsive #mobile #css
 
 Implement responsive breakpoints for navbar with mobile-first design.
-
 **Breakpoints:**
 - Desktop (>1024px): Full layout with all zones
 - Tablet (768-1024px): Summary badge replaces full stats
@@ -203,18 +172,12 @@ Implement responsive breakpoints for navbar with mobile-first design.
 - [x] Hide navbar-utilities on mobile (move to overflow)
 - [x] Adjust touch targets to 44px minimum
 - [ ] Test on actual mobile devices/simulators
-
-**Tests - Desktop (>1024px):**
 - [x] All three zones visible
 - [x] TaskSummaryBadge shows full stats
 - [x] All utility buttons visible
-
-**Tests - Tablet (768-1024px):**
 - [x] Context zone uses compact badge
 - [x] Utilities remain visible
 - [x] No horizontal overflow
-
-**Tests - Mobile (<768px):**
 - [x] Only logo, project selector, overflow menu visible
 - [x] Utility buttons hidden in overflow
 - [x] Touch targets meet 44px minimum
@@ -229,14 +192,11 @@ Implement responsive breakpoints for navbar with mobile-first design.
 **Errors Log**:
 
 ### TASK-006 | Add Mobile FAB for New Task
-
-**Priority**: Medium | **Category**: Feature | **Status**: done
-**Assigned**: @user
+**Priority**: Medium | **Category**: Feature | **Status**: todo | **Assigned**: @user
 **Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
 **Tags**: #mobile #ui #component #fab
 
 Add floating action button (FAB) for "New Task" on mobile devices.
-
 **Design:**
 - Position: fixed bottom-right with safe area inset
 - Size: 56px circular
@@ -253,18 +213,12 @@ Add floating action button (FAB) for "New Task" on mobile devices.
 - [x] Show only on mobile (<768px)
 - [x] Hide "New Task" button from navbar on mobile
 - [x] Add press feedback animation
-
-**Tests - Component Render:**
 - [x] FAB visible only on mobile viewport
 - [x] FAB hidden on tablet and desktop
 - [x] FAB positioned in bottom-right
-
-**Tests - Interactions:**
 - [x] Click opens task creation form
 - [x] Press shows feedback animation
 - [x] FAB doesn't overlap kanban content
-
-**Tests - Accessibility:**
 - [x] Has aria-label="Create new task"
 - [x] Focusable via keyboard
 - [x] Visible against all backgrounds
@@ -278,14 +232,11 @@ Add floating action button (FAB) for "New Task" on mobile devices.
 **Errors Log**:
 
 ### TASK-007 | Update Navbar CSS Styles
-
-**Priority**: High | **Category**: UI/UX | **Status**: done
-**Assigned**: @user
+**Priority**: High | **Category**: UI/UX | **Status**: todo | **Assigned**: @user
 **Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
 **Tags**: #navbar #css #design-system
 
 Refactor navbar CSS to match new architecture and design system.
-
 **Changes Required:**
 - CSS Grid layout instead of flexbox
 - Visual dividers between zones
@@ -303,21 +254,15 @@ Refactor navbar CSS to match new architecture and design system.
 - [x] Update .navbar-stats to .navbar-context
 - [x] Add transition animations for expand/collapse
 - [x] Verify design system compliance
-
-**Tests - Visual:**
 - [x] Grid layout aligns correctly
 - [x] Dividers visible between zones
 - [x] Utilities have elevated background
 - [x] Primary button uses amber color
 - [x] Spacing follows design system
-
-**Tests - Themes:**
 - [ ] Dark theme renders correctly
 - [ ] Light theme renders correctly
 - [ ] Midnight theme renders correctly
 - [ ] Forest theme renders correctly
-
-**Tests - Animations:**
 - [x] Hover transitions are smooth
 - [x] Expand/collapse animations work
 - [x] No jank or layout shift
@@ -332,9 +277,7 @@ Refactor navbar CSS to match new architecture and design system.
 **Errors Log**:
 
 ### TASK-008 | Integration Testing and Final Polish
-
-**Priority**: Medium | **Category**: Testing | **Status**: done
-**Assigned**: @user
+**Priority**: Medium | **Category**: Testing | **Status**: todo | **Assigned**: @user
 **Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
 **Tags**: #testing #integration #qa
 
@@ -352,26 +295,18 @@ Comprehensive testing of the new navbar across all scenarios.
 - [ ] Test on Android Chrome (manual)
 - [x] Build production bundle and verify
 - [x] Update task-memory.html output
-
-**Tests - CRUD Operations:**
 - [x] CREATE: New Task opens form correctly (code verified)
 - [x] READ: Stats display correct counts (code verified)
 - [x] UPDATE: Refresh reloads file correctly (code verified)
 - [x] DELETE: (via archive) Archive modal opens (code verified)
-
-**Tests - Project Operations:**
 - [x] Open new project via overflow menu (code verified)
 - [x] Switch between recent projects (code verified)
 - [x] Rename project updates display (code verified)
 - [x] Delete project from recents (code verified)
-
-**Tests - Edge Cases:**
 - [x] Empty project (no tasks) renders correctly (code verified)
 - [ ] Large task count (100+) doesn't break layout (needs manual test)
 - [x] Long project name truncates properly (CSS verified)
 - [ ] Network offline doesn't break UI (needs manual test)
-
-**Tests - Accessibility:**
 - [x] Keyboard navigation through all elements (code verified)
 - [ ] Screen reader announces elements correctly (needs manual test)
 - [x] Focus indicators visible (CSS verified)
@@ -386,11 +321,14 @@ Comprehensive testing of the new navbar across all scenarios.
 
 **Errors Log**:
 
-## 🚧 In Progress
+## In Progress
+
+## Done
 
 ### TASK-009 | Auto-Claude Audit & Task-Memory Improvement Analysis
 
 **Priority**: High | **Category**: Research | **Status**: done
+**Workflow**: Investigation | **Complexity**: Standard
 **Assigned**: @user
 **Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
 **Tags**: #research #audit #improvement #auto-claude
@@ -412,6 +350,15 @@ Full audit of the Auto-Claude repository to identify patterns and features that 
 - [x] Compare Auto-Claude patterns with task-memory
 - [x] Identify concrete improvement opportunities
 - [x] Create implementation recommendations
+- [x] Implement SKILL.md v2.5.0 updates
+- [x] Update task-status SKILL.md to v1.2.0
+- [x] Update UI to support new fields
+
+**Pre-Work Checklist**:
+- [x] Read relevant files
+- [x] Searched for similar implementations
+- [x] Identified patterns to follow
+- [x] Reviewed known gotchas
 
 **Notes**:
 Full documentation in notes/TASK-009.md
@@ -425,48 +372,14 @@ Key findings:
 - 10-phase QA validation framework
 - Explicit phase dependencies
 
-Top improvement opportunities for task-memory:
-1. Add Workflow type field (FEATURE/REFACTOR/INVESTIGATION/MIGRATION/SIMPLE)
-2. Structured insights section (patterns, gotchas, file changes)
-3. Pre-implementation checklist
-4. Self-critique phase before marking done
-5. Complexity field (Simple/Standard/Complex)
+Implemented improvements:
+1. Workflow type field (Feature/Refactor/Investigation/Migration/Simple)
+2. Complexity field (Simple/Standard/Complex)
+3. Pre-Implementation Checklist (Rule 5)
+4. Self-Critique phase before done (Rule 6)
+5. Structured insights in notes (Patterns/Gotchas tables)
 6. Phase dependencies in subtasks
+7. UI support for all new fields
 
 **Errors Log**:
 
-## ✅ Done
-
-### TASK-001 | Test task-memory hooks
-
-**Priority**: High | **Category**: Feature | **Status**: done
-**Assigned**: @user
-**Created**: 2026-01-13 | **Started**: 2026-01-13 | **Finished**: 2026-01-13
-**Tags**: #feature #testing
-
-Testing the task-memory plugin hooks for proper functionality.
-
-**Subtasks**:
-- [x] Test SessionStart hook
-- [x] Test PreToolUse context refresh
-- [x] Test WebSearch/WebFetch logging
-- [x] Test PostToolUse reminders
-- [x] Test Stop hook completion check
-
-**Notes**:
-All hooks tested and working correctly:
-- SessionStart shows current task + progress bar
-- skill-eval.sh provides task context on every prompt
-- PreToolUse refreshes context before Write/Edit/Bash
-- WebFetch/WebSearch logged to Visual Operations Log
-- 2-Action Rule reminder triggers after 2 research ops
-- PostToolUse subtask reminder every 3rd Write/Edit
-- Bash errors logged to Errors Log
-- Stop hook blocks if subtasks incomplete (exit 1)
-
-**Visual Operations Log**:
-- 2026-01-13 17:17:39 - WebFetch: https://react.dev/hooks
-- 2026-01-13 17:17:29 - WebSearch: "react hooks best practices"
-
-**Errors Log**:
-- 2026-01-13 17:18:08 - Error: Error: Module not found
