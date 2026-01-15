@@ -1,7 +1,7 @@
 ---
 name: task-memory
-version: "2.4.0"
-description: Task planning and context preservation. Create tasks, update status, and save task documentation using Manus principles.
+version: "2.5.0"
+description: Task planning and context preservation with workflow classification, complexity assessment, and structured insights. Inspired by Auto-Claude patterns.
 user-invocable: true
 allowed-tools:
   - Read
@@ -52,6 +52,33 @@ if action_failed:
 
 Track what you tried. Mutate the approach. Log errors.
 
+### Rule 5: PRE-IMPLEMENTATION CHECKLIST
+
+Before writing ANY code, complete this checklist:
+
+```
+☐ Read relevant files (identify them first)
+☐ Search for similar implementations in codebase
+☐ Identify existing patterns to follow
+☐ Review known gotchas for this area
+☐ Document findings in task Notes
+```
+
+**Why:** Skipping this causes pattern violations, duplicate code, and preventable bugs.
+
+### Rule 6: SELF-CRITIQUE BEFORE DONE
+
+Before marking a task done, verify:
+
+```
+☐ Code quality: No hardcoded values, proper error handling
+☐ Pattern compliance: Follows existing codebase conventions
+☐ Completeness: All subtasks genuinely finished
+☐ No regressions: Existing functionality preserved
+```
+
+**If any check fails:** Fix before marking done. Never defer issues to "later."
+
 ---
 
 ## Workflow
@@ -71,6 +98,8 @@ Read current ID, increment by 1.
 ### TASK-XXX | [Brief Title]
 
 **Priority**: [Critical|High|Medium|Low] | **Category**: [Feature|Bug|Docs|Research] | **Status**: todo
+**Workflow**: [Feature|Refactor|Investigation|Migration|Simple]
+**Complexity**: [Simple|Standard|Complex]
 **Assigned**: @user
 **Created**: YYYY-MM-DD
 **Tags**: #tag1 #tag2
@@ -78,9 +107,15 @@ Read current ID, increment by 1.
 [Description of what needs to be done]
 
 **Subtasks**:
-- [ ] First subtask
-- [ ] Second subtask
-- [ ] Third subtask
+- [ ] Phase 1: First subtask
+- [ ] Phase 2: Second subtask (depends: Phase 1)
+- [ ] Phase 3: Third subtask (depends: Phase 2)
+
+**Pre-Work Checklist**:
+- [ ] Read relevant files
+- [ ] Searched for similar implementations
+- [ ] Identified patterns to follow
+- [ ] Reviewed known gotchas
 
 **Notes**:
 
@@ -89,6 +124,24 @@ Read current ID, increment by 1.
 ---
 ```
 
+**Workflow Types:**
+
+| Type | When to Use | Pipeline Behavior |
+|------|-------------|-------------------|
+| **Feature** | New functionality, multi-step | Full planning, dependency tracking |
+| **Refactor** | Code restructuring | Add → Migrate → Remove stages |
+| **Investigation** | Debugging, root cause | Reproduce → Investigate → Fix |
+| **Migration** | Data/schema changes | Backup → Transform → Validate |
+| **Simple** | Quick fixes, single file | Minimal overhead |
+
+**Complexity Levels:**
+
+| Level | Scope | Planning Required |
+|-------|-------|-------------------|
+| **Simple** | 1-2 files, single concern | Minimal subtasks |
+| **Standard** | 3-10 files, 1-2 services | Detailed subtasks with phases |
+| **Complex** | 10+ files, multiple services | Notes file, extensive planning |
+
 **Update config after creating:**
 ```markdown
 <!-- Config: Last Task ID: XXX -->  ← Increment this
@@ -96,7 +149,7 @@ Read current ID, increment by 1.
 
 ### Step 2: Start Work (Change Status)
 
-**Before starting**, edit the Status field:
+**Before starting**, complete the Pre-Work Checklist in the task, then edit the Status field:
 
 ```markdown
 # BEFORE:
@@ -105,9 +158,17 @@ Read current ID, increment by 1.
 # AFTER (only edit Status, add Started):
 **Priority**: High | **Category**: Feature | **Status**: in-progress
 **Created**: 2026-01-13 | **Started**: 2026-01-13
+
+**Pre-Work Checklist**:
+- [x] Read relevant files
+- [x] Searched for similar implementations
+- [x] Identified patterns to follow
+- [x] Reviewed known gotchas
 ```
 
 **DO NOT move the task block.**
+
+**DO NOT skip the pre-work checklist.** This prevents pattern violations and duplicate code.
 
 ### Step 3: Work and Update
 
@@ -136,9 +197,21 @@ Log errors as they occur:
 | Type mismatch | 2 | Fixed interface |
 ```
 
-### Step 4: Complete Task (Change Status)
+### Step 4: Self-Critique & Complete Task
 
-**When ALL subtasks done**, edit the Status field:
+**Before marking done**, run this self-critique:
+
+```
+☐ Code quality: No hardcoded values, proper error handling?
+☐ Pattern compliance: Follows existing codebase conventions?
+☐ Completeness: All subtasks genuinely finished?
+☐ No regressions: Existing functionality preserved?
+☐ Insights documented: Patterns/gotchas recorded in Notes?
+```
+
+**If any check fails:** Fix before marking done. Never defer issues.
+
+**When ALL checks pass**, edit the Status field:
 
 ```markdown
 # BEFORE:
@@ -257,6 +330,22 @@ Action 2: Read PDF
 - Observation 2
 - Key insight
 
+## Patterns Discovered
+
+Reusable techniques that apply beyond this task:
+
+| Pattern | Context | Example |
+|---------|---------|---------|
+| [Technique] | [When to use] | [Code reference] |
+
+## Gotchas
+
+Pitfalls to avoid in future work:
+
+| Gotcha | Trigger | Prevention |
+|--------|---------|------------|
+| [Problem] | [What causes it] | [How to avoid] |
+
 ## Decisions
 
 | Decision | Rationale |
@@ -278,6 +367,10 @@ Action 2: Read PDF
 - [ ] Follow-up task 1
 - [ ] Follow-up task 2
 ```
+
+**Patterns vs Gotchas:**
+- **Patterns** = "Do this" - reusable solutions
+- **Gotchas** = "Don't do this" - mistakes to avoid
 
 ### Link Notes to Task
 
@@ -347,7 +440,7 @@ The task-memory UI (`task-memory.html`) requires a specific format. Tasks MUST b
 
 **Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
 
-**Categories**: Feature, Bug, Docs, Research
+**Categories**: Feature, Bug, Docs, Research, Refactor, Migration
 
 **Users**: @alice, @bob
 
@@ -566,8 +659,10 @@ npm install fails → npm install again → npm install again  ← WRONG
 Before ANY work:
 ```
 ☐ Created TASK-XXX in tasks.md
+☐ Set Workflow type and Complexity level
 ☐ Used proper format (Status field, subtasks, Errors Log)
 ☐ Incremented Last Task ID in config
+☐ Completed Pre-Work Checklist (read files, search similar, identify patterns)
 ☐ Changed Status: todo → in-progress (NOT moved block)
 ☐ Added Started: date
 ```
@@ -575,6 +670,7 @@ Before ANY work:
 During work:
 ```
 ☐ Updating subtasks as completed [x]
+☐ Respecting phase dependencies
 ☐ Documenting in Notes section
 ☐ Logging errors to Errors Log
 ☐ Creating notes file after 2 visual ops
@@ -583,6 +679,8 @@ During work:
 
 After work:
 ```
+☐ Ran Self-Critique checklist (quality, patterns, completeness)
+☐ Documented patterns and gotchas discovered
 ☐ Changed Status: in-progress → done (NOT moved block)
 ☐ Added Finished: date
 ☐ All subtasks checked [x]
@@ -606,5 +704,31 @@ git commit -m "docs: API reference (TASK-044)"
 
 ---
 
-**Version:** 2.4.0
+## Phase Dependencies
+
+For complex tasks, subtasks can declare dependencies:
+
+```markdown
+**Subtasks**:
+- [x] Phase 1: Setup database schema
+- [x] Phase 2: Create API endpoints (depends: Phase 1)
+- [ ] Phase 3: Build frontend forms (depends: Phase 2)
+- [ ] Phase 4: Integration tests (depends: Phase 2, Phase 3)
+```
+
+**Rules:**
+- Never start a phase until its dependencies are complete
+- Phases without dependencies can run in parallel
+- Use `(depends: Phase X)` or `(depends: Phase X, Phase Y)` syntax
+
+**Parallelism Analysis:**
+
+When planning, identify which phases can run concurrently:
+- Same dependencies = potentially parallel
+- No overlapping files = safe to parallelize
+- Different services/concerns = good candidates
+
+---
+
+**Version:** 2.5.0
 **License:** MIT
