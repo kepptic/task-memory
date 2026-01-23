@@ -9,6 +9,7 @@
 **No work without a task.**
 
 Before writing code, editing files, implementing features, or starting any work:
+
 1. Create a task in `planning/tasks.md`
 2. Set `**Status**: in-progress`
 3. Do the work
@@ -22,27 +23,31 @@ Before writing code, editing files, implementing features, or starting any work:
 ### Rule 1: Task First, Always
 
 Every piece of work must have a corresponding task. This ensures:
+
 - Complete audit trail
 - Git commits traceable to requests
 - Progress visible in real-time
 - Context preserved across sessions
 
-### Rule 2: Never Move Task Blocks
+### Rule 2: Status Field is Authoritative
 
-**The task system auto-reorganizes tasks based on the `Status:` field.**
+**The task system reads the `Status:` field to determine task state.**
 
 To change task status:
+
 - ✅ Change `**Status**: todo` → `**Status**: in-progress` → `**Status**: done`
 - ✅ Add `**Started**: YYYY-MM-DD` when starting
 - ✅ Add `**Finished**: YYYY-MM-DD` when completing
-- ❌ NEVER cut/paste task blocks between sections
-- ❌ NEVER manually move `### TASK-XXX` blocks
+- ✅ Optionally move task block to matching section for clarity
 
-The React app detects status changes and moves tasks automatically.
+**Auto-Reorganization:** The UI auto-fixes Status/section mismatches on load. If a task's Status field doesn't match its section, the UI moves it automatically.
+
+**Best Practice:** When editing files directly (not using UI), update the Status field AND move the task block to keep the file readable. When using the UI, Status field updates are sufficient.
 
 ### Rule 3: Increment Task Counter
 
 When creating new tasks:
+
 1. Check `<!-- Config: Last Task ID: XXX -->` in tasks.md
 2. Use next number: `TASK-XXX+1`
 3. Update the config comment
@@ -64,6 +69,7 @@ When creating new tasks:
 Description of what needs to be done.
 
 **Subtasks**:
+
 - [ ] First step
 - [ ] Second step
 - [ ] Third step
@@ -86,6 +92,7 @@ Description of what needs to be done.
 ### Archiving (Manual Only)
 
 Tasks stay in "Done" until explicitly archived:
+
 - User requests: "Archive completed tasks"
 - Move task content to `archive.md`
 - Never auto-archive
@@ -124,13 +131,13 @@ git commit -m "feat: Add API endpoint (TASK-042 - 3/5)"
 
 ## Why This Matters
 
-| Benefit | Description |
-|---------|-------------|
+| Benefit          | Description                          |
+| ---------------- | ------------------------------------ |
 | **Traceability** | Every commit links to a user request |
-| **Persistence** | Tasks survive session restarts |
-| **Visibility** | Progress tracked in real-time |
-| **Audit Trail** | Complete history of all work |
-| **Context** | No lost work across sessions |
+| **Persistence**  | Tasks survive session restarts       |
+| **Visibility**   | Progress tracked in real-time        |
+| **Audit Trail**  | Complete history of all work         |
+| **Context**      | No lost work across sessions         |
 
 ---
 

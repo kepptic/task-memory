@@ -1,5 +1,6 @@
 {
-  "description": "task-memory hooks - context management and research logging",
+  "description": "task-memory hooks - context management and research logging (plugin format)",
+  "note": "For project settings, use .claude/settings.json instead. This file is for plugin installations.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -48,6 +49,17 @@
       }
     ],
     "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/task-memory-hook.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
       {
         "hooks": [
           {

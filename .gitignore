@@ -11,6 +11,7 @@ dist/
 *.swp
 *.swo
 *~
+*.bak
 
 # IDE
 .vscode/
@@ -24,3 +25,20 @@ archive.md
 .env
 .env.local
 __pycache__/
+
+# Build artifacts
+task-memory.html
+
+# Claude Code local settings (user-specific, not shared)
+.claude/settings.local.json
+
+# Session files
+/tmp/task-memory-session-*.txt
+
+# Test output
+tests/output/
+*.test.log
+
+# OS files
+Thumbs.db
+Desktop.ini

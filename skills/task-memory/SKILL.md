@@ -1,7 +1,7 @@
 ---
 name: task-memory
-version: "2.5.0"
-description: Task planning and context preservation with workflow classification, complexity assessment, and structured insights. Inspired by Auto-Claude patterns.
+version: "2.7.0"
+description: Provides task planning and context preservation for development workflows. Creates structured tasks in planning/tasks.md with subtasks, dependencies, and progress tracking. Use when implementing features, fixing bugs, refactoring code, or any work requiring task tracking. Supports workflow classification (Feature, Refactor, Investigation, Migration, Simple) and complexity assessment. Inspired by Auto-Claude patterns.
 user-invocable: true
 allowed-tools:
   - Read
@@ -26,16 +26,18 @@ Before writing code, editing files, or implementing anything:
 
 **STOP. Create task in tasks.md FIRST.**
 
-### Rule 2: NEVER MOVE TASK BLOCKS
+### Rule 2: STATUS FIELD IS AUTHORITATIVE
 
-Task sections are rendered by the viewer based on `Status:` field.
+The `**Status**:` field determines task state. The UI reads this field and auto-reorganizes mismatches.
 
 **To change status:**
-- ✅ ONLY change `**Status**: todo` → `**Status**: in-progress` → `**Status**: done`
+
+- ✅ Change `**Status**: todo` → `**Status**: in-progress` → `**Status**: done`
 - ✅ Add `**Started**: YYYY-MM-DD` when starting
 - ✅ Add `**Finished**: YYYY-MM-DD` when completing
-- ❌ NEVER cut/paste task blocks between sections
-- ❌ NEVER move the `### TASK-XXX` block
+- ✅ Optionally move task block to matching section for file readability
+
+**Auto-Reorganization:** If Status doesn't match section, the UI auto-fixes on load. For file clarity when editing directly, move blocks to their matching sections.
 
 ### Rule 3: PRESERVE RESEARCH (2-Action Rule)
 
@@ -88,30 +90,33 @@ Before marking a task done, verify:
 **Location:** `planning/tasks.md`
 
 **Get next ID:**
+
 ```markdown
 <!-- Config: Last Task ID: XXX -->
 ```
+
 Read current ID, increment by 1.
 
 **Task Template:**
+
 ```markdown
 ### TASK-XXX | [Brief Title]
 
-**Priority**: [Critical|High|Medium|Low] | **Category**: [Feature|Bug|Docs|Research] | **Status**: todo
-**Workflow**: [Feature|Refactor|Investigation|Migration|Simple]
-**Complexity**: [Simple|Standard|Complex]
-**Assigned**: @user
-**Created**: YYYY-MM-DD
+**Priority**: [🔴 Critical|🟠 High|🟡 Medium|🟢 Low] | **Category**: [Feature|Bug|Docs|Research] | **Status**: todo | **Assigned**: @user
+**Workflow**: [Feature|Refactor|Investigation|Migration|Simple] | **Complexity**: [Simple|Standard|Complex]
+**Created**: YYYY-MM-DD | **Started**: | **Finished**:
 **Tags**: #tag1 #tag2
 
 [Description of what needs to be done]
 
 **Subtasks**:
+
 - [ ] Phase 1: First subtask
 - [ ] Phase 2: Second subtask (depends: Phase 1)
 - [ ] Phase 3: Third subtask (depends: Phase 2)
 
 **Pre-Work Checklist**:
+
 - [ ] Read relevant files
 - [ ] Searched for similar implementations
 - [ ] Identified patterns to follow
@@ -119,76 +124,97 @@ Read current ID, increment by 1.
 
 **Notes**:
 
-**Errors Log**:
+**Visual Operations Log**:
 
----
+**Errors Log**:
 ```
+
+**Date Fields:**
+| Field | When to Set | Required For |
+|-------|-------------|--------------|
+| **Created** | When task is created | All tasks |
+| **Started** | When Status → in-progress | in-progress, done |
+| **Finished** | When Status → done | done |
+
+**Dependencies Syntax:**
+
+- Single: `(depends: Phase 1)`
+- Multiple: `(depends: Phase 1, Phase 2)`
 
 **Workflow Types:**
 
-| Type | When to Use | Pipeline Behavior |
-|------|-------------|-------------------|
-| **Feature** | New functionality, multi-step | Full planning, dependency tracking |
-| **Refactor** | Code restructuring | Add → Migrate → Remove stages |
-| **Investigation** | Debugging, root cause | Reproduce → Investigate → Fix |
-| **Migration** | Data/schema changes | Backup → Transform → Validate |
-| **Simple** | Quick fixes, single file | Minimal overhead |
+| Type              | When to Use                   | Pipeline Behavior                  |
+| ----------------- | ----------------------------- | ---------------------------------- |
+| **Feature**       | New functionality, multi-step | Full planning, dependency tracking |
+| **Refactor**      | Code restructuring            | Add → Migrate → Remove stages      |
+| **Investigation** | Debugging, root cause         | Reproduce → Investigate → Fix      |
+| **Migration**     | Data/schema changes           | Backup → Transform → Validate      |
+| **Simple**        | Quick fixes, single file      | Minimal overhead                   |
 
 **Complexity Levels:**
 
-| Level | Scope | Planning Required |
-|-------|-------|-------------------|
-| **Simple** | 1-2 files, single concern | Minimal subtasks |
-| **Standard** | 3-10 files, 1-2 services | Detailed subtasks with phases |
-| **Complex** | 10+ files, multiple services | Notes file, extensive planning |
+| Level        | Scope                        | Planning Required              |
+| ------------ | ---------------------------- | ------------------------------ |
+| **Simple**   | 1-2 files, single concern    | Minimal subtasks               |
+| **Standard** | 3-10 files, 1-2 services     | Detailed subtasks with phases  |
+| **Complex**  | 10+ files, multiple services | Notes file, extensive planning |
 
 **Update config after creating:**
+
 ```markdown
 <!-- Config: Last Task ID: XXX -->  ← Increment this
 ```
 
 ### Step 2: Start Work (Change Status)
 
-**Before starting**, complete the Pre-Work Checklist in the task, then edit the Status field:
+**Before starting**, complete the Pre-Work Checklist in the task, then:
+
+1. **Update the Status field**: `todo` → `in-progress`
+2. **Add Started date**
+3. **(Optional)** Move task block to "In Progress" section for file clarity
 
 ```markdown
-# BEFORE:
-**Priority**: High | **Category**: Feature | **Status**: todo
+# Update Status field and add Started date:
 
-# AFTER (only edit Status, add Started):
 **Priority**: High | **Category**: Feature | **Status**: in-progress
 **Created**: 2026-01-13 | **Started**: 2026-01-13
 
 **Pre-Work Checklist**:
+
 - [x] Read relevant files
 - [x] Searched for similar implementations
 - [x] Identified patterns to follow
 - [x] Reviewed known gotchas
 ```
 
-**DO NOT move the task block.**
+**Status field is authoritative.** The UI auto-reorganizes mismatches on load. Moving blocks is optional but recommended when editing files directly.
 
 **DO NOT skip the pre-work checklist.** This prevents pattern violations and duplicate code.
 
 ### Step 3: Work and Update
 
 Mark subtasks as completed:
+
 ```markdown
 **Subtasks**:
+
 - [x] Completed subtask
 - [x] Another completed
 - [ ] Still pending
 ```
 
 Add progress to Notes:
+
 ```markdown
 **Notes**:
+
 - Investigated issue
 - Found root cause in file.ts:42
 - Implemented fix
 ```
 
 Log errors as they occur:
+
 ```markdown
 **Errors Log**:
 | Error | Attempt | Resolution |
@@ -211,19 +237,20 @@ Log errors as they occur:
 
 **If any check fails:** Fix before marking done. Never defer issues.
 
-**When ALL checks pass**, edit the Status field:
+**When ALL checks pass:**
+
+1. **Update the Status field**: `in-progress` → `done`
+2. **Add Finished date**
+3. **(Optional)** Move task block to "Done" section for file clarity
 
 ```markdown
-# BEFORE:
-**Priority**: High | **Category**: Feature | **Status**: in-progress
-**Created**: 2026-01-13 | **Started**: 2026-01-13
+# Update Status field and add Finished date:
 
-# AFTER (only edit Status, add Finished):
 **Priority**: High | **Category**: Feature | **Status**: done
 **Created**: 2026-01-13 | **Started**: 2026-01-13 | **Finished**: 2026-01-13
 ```
 
-**DO NOT move the task block.**
+**Status field is authoritative.** The UI auto-reorganizes mismatches on load.
 
 ### Step 5: Commit with Task Reference
 
@@ -235,47 +262,27 @@ git commit -m "feat: description (TASK-XXX)"
 
 ## The 3-Strike Error Protocol
 
-When errors occur, follow this escalation:
+| Attempt | Action                                                                                 |
+| ------- | -------------------------------------------------------------------------------------- |
+| 1       | Diagnose & fix - identify root cause, apply targeted fix, log to Errors Log            |
+| 2       | Alternative approach - different method/tool/library, NEVER repeat same failing action |
+| 3       | Broader rethink - question assumptions, search for solutions, update plan              |
+| After 3 | Escalate to user - explain what you tried, share specific error, ask for guidance      |
 
-```
-ATTEMPT 1: Diagnose & Fix
-  → Read error carefully
-  → Identify root cause
-  → Apply targeted fix
-  → Log to Errors Log
-
-ATTEMPT 2: Alternative Approach
-  → Same error? Try different method
-  → Different tool? Different library?
-  → NEVER repeat exact same failing action
-  → Log attempt to Errors Log
-
-ATTEMPT 3: Broader Rethink
-  → Question assumptions
-  → Search for solutions
-  → Consider updating the plan
-  → Log attempt to Errors Log
-
-AFTER 3 FAILURES: Escalate to User
-  → Explain what you tried
-  → Share the specific error
-  → Ask for guidance
-```
-
-**Key principle:** Error recovery is a signal of true agentic behavior. Leave wrong turns in context - they inform better decisions.
+**Key principle:** Error recovery is a signal of true agentic behavior.
 
 ---
 
 ## Read vs Write Decision Matrix
 
-| Situation | Action | Reason |
-|-----------|--------|--------|
-| Just wrote a file | DON'T read | Content still in context |
-| Viewed image/PDF | Write notes NOW | Multimodal → text before lost |
-| Browser returned data | Write to notes | Screenshots don't persist |
-| Starting new phase | Read plan/notes | Re-orient if context stale |
-| Error occurred | Read relevant file | Need current state to fix |
-| Resuming after gap | Read tasks.md + notes/ | Recover full state |
+| Situation             | Action                 | Reason                        |
+| --------------------- | ---------------------- | ----------------------------- |
+| Just wrote a file     | DON'T read             | Content still in context      |
+| Viewed image/PDF      | Write notes NOW        | Multimodal → text before lost |
+| Browser returned data | Write to notes         | Screenshots don't persist     |
+| Starting new phase    | Read plan/notes        | Re-orient if context stale    |
+| Error occurred        | Read relevant file     | Need current state to fix     |
+| Resuming after gap    | Read tasks.md + notes/ | Recover full state            |
 
 ---
 
@@ -305,6 +312,7 @@ Action 2: Read PDF
 ### When to Create Notes
 
 **Trigger after 2 of:**
+
 - Screenshots (Claude in Chrome, browser automation)
 - PDFs or images
 - Search results
@@ -316,81 +324,25 @@ Action 2: Read PDF
 
 **Location:** `planning/notes/TASK-XXX.md`
 
-```markdown
-# Notes: TASK-XXX | [Task Title]
+Key sections: Summary, Analysis, Patterns Discovered, Gotchas, Decisions, Resources, Action Items
 
-## Summary
-
-[Brief overview of what this document covers]
-
-## Analysis
-
-### [Source/Topic]: [Description] (YYYY-MM-DD HH:MM)
-- Observation 1
-- Observation 2
-- Key insight
-
-## Patterns Discovered
-
-Reusable techniques that apply beyond this task:
-
-| Pattern | Context | Example |
-|---------|---------|---------|
-| [Technique] | [When to use] | [Code reference] |
-
-## Gotchas
-
-Pitfalls to avoid in future work:
-
-| Gotcha | Trigger | Prevention |
-|--------|---------|------------|
-| [Problem] | [What causes it] | [How to avoid] |
-
-## Decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| [Choice] | [Why] |
-
-## Issues
-
-| Issue | Impact | Resolution |
-|-------|--------|------------|
-| [Problem] | [Effect] | [Fix] |
-
-## Resources
-
-- [Link or path to source]
-
-## Action Items
-
-- [ ] Follow-up task 1
-- [ ] Follow-up task 2
-```
-
-**Patterns vs Gotchas:**
 - **Patterns** = "Do this" - reusable solutions
 - **Gotchas** = "Don't do this" - mistakes to avoid
 
-### Link Notes to Task
-
-Add to task in tasks.md:
-```markdown
-**Notes**:
-Documentation in notes/TASK-XXX.md
-```
+Link notes to task: `**Notes**: Documentation in notes/TASK-XXX.md`
 
 ---
 
 ## Status Values
 
-| Status | Description | Required Fields |
-|--------|-------------|-----------------|
-| `todo` | Not started | Created |
-| `in-progress` | Active work | Created, Started |
-| `done` | Completed | Created, Started, Finished |
+| Status        | Description | Required Fields            |
+| ------------- | ----------- | -------------------------- |
+| `todo`        | Not started | Created                    |
+| `in-progress` | Active work | Created, Started           |
+| `done`        | Completed   | Created, Started, Finished |
 
 **Valid transitions:**
+
 ```
 todo → in-progress → done
 ```
@@ -403,6 +355,7 @@ WebFetch and WebSearch are auto-logged by hooks:
 
 ```markdown
 **Visual Operations Log**:
+
 - 2026-01-13 10:30:45 - WebFetch: https://docs.example.com
 - 2026-01-13 10:31:22 - WebSearch: "query"
 ```
@@ -427,247 +380,61 @@ planning/
 
 ## File Format for UI Compatibility
 
-The task-memory UI (`task-memory.html`) requires a specific format. Tasks MUST be nested under column sections.
+The task-memory UI requires a specific markdown format. **See [UI_FORMAT.md](UI_FORMAT.md) for complete documentation.**
 
-### Required Structure
+**Quick Reference:**
 
-```markdown
-# Kanban Board
-
-<!-- Config: Last Task ID: XXX -->
-
-## ⚙️ Configuration
-
-**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
-
-**Categories**: Feature, Bug, Docs, Research, Refactor, Migration
-
-**Users**: @alice, @bob
-
-**Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
-
-**Tags**: #tag1 #tag2 #tag3
-
----
-
-## 📝 To Do
-
-### TASK-001 | Task Title
-**Priority**: High | **Category**: Feature | **Status**: todo
-...
-
-## 🚧 In Progress
-
-### TASK-002 | Another Task
-**Priority**: Medium | **Category**: Bug | **Status**: in-progress
-...
-
-## ✅ Done
-
-### TASK-003 | Completed Task
-**Priority**: Low | **Category**: Docs | **Status**: done
-...
-```
-
-### Critical Requirements
-
-1. **Configuration section**: Must use `## ⚙️ Configuration` header (with emoji)
-2. **Columns format**: `**Columns**: Name (id) | Name (id) | Name (id)`
-3. **Column sections**: Tasks must be under column headers like `## 📝 To Do`
-4. **Task headers**: Use `### TASK-XXX` (h3 level), NOT `## TASK-XXX` (h2 level)
-5. **Separator**: Use `---` after the configuration section
-
-### Column ID Mapping
-
-The `(id)` in the Columns definition maps to the `**Status**:` field:
-
-| Column Definition | Status Value |
-|-------------------|--------------|
-| `To Do (todo)` | `**Status**: todo` |
-| `In Progress (in-progress)` | `**Status**: in-progress` |
-| `Done (done)` | `**Status**: done` |
-
-### ❌ Invalid Format (Won't Parse)
-
-```markdown
-## TASK-001 | Task Title       ← WRONG: h2 level, not under column
-**Status**: done
-
-## TASK-002 | Another Task     ← WRONG: standalone sections
-**Status**: todo
-```
-
-### ✅ Valid Format (Will Parse)
-
-```markdown
-## 📝 To Do
-
-### TASK-002 | Another Task    ← CORRECT: h3 level, under column
-**Status**: todo
-
-## ✅ Done
-
-### TASK-001 | Task Title      ← CORRECT: h3 level, under column
-**Status**: done
-```
+- Configuration section: `## ⚙️ Configuration` with Columns definition
+- Column sections: `## To Do`, `## In Progress`, `## Done` (h2 level)
+- Task headers: `### TASK-XXX | Title` (h3 level, under column sections)
+- Status field must match column: `**Status**: todo|in-progress|done`
+- No `---` separators between tasks (only after config section)
 
 ---
 
 ## Monorepo Support
 
-task-memory supports three flexible patterns for monorepos. Choose the pattern that fits your project structure.
+task-memory supports flexible patterns for monorepos. **See [MONOREPO.md](MONOREPO.md) for complete documentation.**
 
-### Option A: Per-Package Planning (Auto-Detected)
+**Quick Reference:**
 
-Each package/workspace gets its own planning folder. Hooks automatically find the nearest `planning/tasks.md` walking up from the current directory.
-
-```
-monorepo/
-├── packages/
-│   ├── api/
-│   │   └── planning/
-│   │       ├── tasks.md
-│   │       └── notes/
-│   ├── admin/
-│   │   └── planning/
-│   │       ├── tasks.md
-│   │       └── notes/
-│   └── web/
-│       └── planning/
-│           ├── tasks.md
-│           └── notes/
-└── planning/              ← Root fallback
-    └── tasks.md
-```
-
-**How it works:** When working in `packages/api/src/`, hooks detect `packages/api/planning/tasks.md`.
-
-### Option B: Centralized with Domain Subdirs
-
-Single `planning/` folder with domain-based subdirectories. Requires skill/CLAUDE.md guidance for file selection.
-
-```
-monorepo/
-└── planning/
-    ├── api/
-    │   └── tasks.md
-    ├── admin/
-    │   └── tasks.md
-    ├── web/
-    │   └── tasks.md
-    └── notes/             ← Shared notes
-```
-
-**Add to CLAUDE.md:**
-```markdown
-### Task Management
-
-**Domain-based planning files:**
-| Work Type | Planning File |
-|-----------|---------------|
-| API/Backend | `planning/api/tasks.md` |
-| Admin Portal | `planning/admin/tasks.md` |
-| Public Web | `planning/web/tasks.md` |
-
-Cross-domain work: Create tasks in ALL relevant files.
-```
-
-### Option C: Configuration-Based
-
-Explicit mapping in `.task-memory.json` for complete control.
-
-```json
-{
-  "planning_dir": "docs/todo",
-  "planning_dirs": {
-    "api": "packages/api/planning",
-    "admin": "packages/admin/planning",
-    "default": "planning"
-  }
-}
-```
-
-**Single directory override:**
-```json
-{
-  "planning_dir": "docs/planning"
-}
-```
-
-### CLAUDE.md Fallback
-
-When hooks can't auto-detect the correct planning file (Option B or complex setups), add explicit guidance to your project's `CLAUDE.md`:
-
-```markdown
-## Task Management (task-memory)
-
-**Planning file:** `planning/tasks.md`
-
-Before ANY work:
-1. Create task in planning/tasks.md
-2. Set Status: in-progress
-3. Do the work
-4. Set Status: done
-5. Commit with (TASK-XXX) reference
-```
-
-This ensures Claude knows where to find/create tasks even without hooks.
+- **Option A (Auto-Detected):** Per-package `planning/` folders - hooks find nearest tasks.md
+- **Option B (Centralized):** Single `planning/` with domain subdirectories - add guidance to CLAUDE.md
+- **Option C (Config-Based):** Explicit `.task-memory.json` mapping
 
 ---
 
 ## Common Mistakes
 
-### ❌ Moving task blocks
-```
-*Cuts TASK-001 from "To Do"*
-*Pastes into "In Progress"*  ← WRONG
-```
-**Fix:** Only change `Status: todo` → `Status: in-progress`
+**See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for complete troubleshooting guide.**
 
-### ❌ Working without task
-```
-User: "Fix the bug"
-Assistant: *immediately writes code*  ← WRONG
-```
-**Fix:** Create TASK-XXX first, then code
-
-### ❌ Skipping research preservation
-```
-View screenshot → Read PDF → Code → [context reset] → Lost insights  ← WRONG
-```
-**Fix:** Create notes file after 2 visual operations
-
-### ❌ Vague notes
-```markdown
-- Looked at screenshot, has panels  ← WRONG
-```
-**Fix:**
-```markdown
-- 3-panel layout: 250px left, fluid center, 300px right  ← CORRECT
-```
-
-### ❌ Repeating failed actions
-```
-npm install fails → npm install again → npm install again  ← WRONG
-```
-**Fix:** Log error, try alternative (yarn, pnpm, check network)
+**Quick Fixes:**
+| Mistake | Prevention |
+|---------|------------|
+| Creating duplicate sections | Use EXISTING section headers |
+| Adding `---` between tasks | Only use after config section |
+| Working without task | Create TASK-XXX first |
+| Skipping research preservation | Create notes after 2 visual ops |
+| Repeating failed actions | Log error, try different approach |
 
 ---
 
 ## Verification Checklist
 
 Before ANY work:
+
 ```
 ☐ Created TASK-XXX in tasks.md
 ☐ Set Workflow type and Complexity level
 ☐ Used proper format (Status field, subtasks, Errors Log)
 ☐ Incremented Last Task ID in config
 ☐ Completed Pre-Work Checklist (read files, search similar, identify patterns)
-☐ Changed Status: todo → in-progress (NOT moved block)
+☐ Changed Status: todo → in-progress
 ☐ Added Started: date
 ```
 
 During work:
+
 ```
 ☐ Updating subtasks as completed [x]
 ☐ Respecting phase dependencies
@@ -678,10 +445,11 @@ During work:
 ```
 
 After work:
+
 ```
 ☐ Ran Self-Critique checklist (quality, patterns, completeness)
 ☐ Documented patterns and gotchas discovered
-☐ Changed Status: in-progress → done (NOT moved block)
+☐ Changed Status: in-progress → done
 ☐ Added Finished: date
 ☐ All subtasks checked [x]
 ☐ Committed with (TASK-XXX) reference
@@ -710,6 +478,7 @@ For complex tasks, subtasks can declare dependencies:
 
 ```markdown
 **Subtasks**:
+
 - [x] Phase 1: Setup database schema
 - [x] Phase 2: Create API endpoints (depends: Phase 1)
 - [ ] Phase 3: Build frontend forms (depends: Phase 2)
@@ -717,6 +486,7 @@ For complex tasks, subtasks can declare dependencies:
 ```
 
 **Rules:**
+
 - Never start a phase until its dependencies are complete
 - Phases without dependencies can run in parallel
 - Use `(depends: Phase X)` or `(depends: Phase X, Phase Y)` syntax
@@ -724,11 +494,12 @@ For complex tasks, subtasks can declare dependencies:
 **Parallelism Analysis:**
 
 When planning, identify which phases can run concurrently:
+
 - Same dependencies = potentially parallel
 - No overlapping files = safe to parallelize
 - Different services/concerns = good candidates
 
 ---
 
-**Version:** 2.5.0
+**Version:** 2.7.0
 **License:** MIT

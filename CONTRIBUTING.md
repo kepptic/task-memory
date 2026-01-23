@@ -10,6 +10,40 @@ This document guides you through the process of contributing in a way that's smo
 
 ---
 
+## Contribution Paths
+
+Task Memory has two main areas for contribution:
+
+| Path | Focus | Skills |
+|------|-------|--------|
+| **React App** | Kanban UI in `task-memory.html` | React, JavaScript, Tailwind |
+| **Claude Code Plugin** | Hooks, skills, and rules | Bash, Claude Code |
+
+You can contribute to either or both!
+
+### Repository Structure
+
+```
+task-memory/
+├── hooks/                    # Plugin source (EDIT HERE)
+├── skills/                   # Plugin source (EDIT HERE)
+├── rules/                    # Plugin source (EDIT HERE)
+│
+├── .claude/                  # Local testing (symlinks to above)
+│   ├── settings.json         # Project-specific config
+│   ├── hooks/  → ../hooks/   # Symlink
+│   ├── skills/ → ../skills/  # Symlink
+│   └── rules/  → ../rules/   # Symlink
+│
+├── .claude-plugin/           # Plugin manifest for distribution
+├── src/                      # React app source
+└── planning/                 # Test data
+```
+
+**Key insight:** Edit files in root `hooks/`, `skills/`, `rules/`. The `.claude/` folder contains symlinks, so changes are immediately available for testing.
+
+---
+
 ## Code of Conduct
 
 We are committed to providing a welcoming and inspiring community for all. Please read and follow our [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
@@ -182,6 +216,158 @@ The project uses **Vite** with a special plugin (`vite-plugin-singlefile`) to bu
 pnpm build
 ├── dist/index.html       (intermediate)
 └── task-memory.html     (final, copied to root)
+```
+
+---
+
+## Plugin Development (Claude Code)
+
+### Development Workflow
+
+This project uses **symlinks** for efficient plugin development:
+
+```
+hooks/                 ← EDIT HERE (source of truth)
+skills/                ← EDIT HERE
+rules/                 ← EDIT HERE
+
+.claude/
+├── settings.json      ← Project config (uses $CLAUDE_PROJECT_DIR)
+├── hooks/ → ../hooks/ ← Symlink (auto-updates)
+├── skills/ → ../skills/
+└── rules/ → ../rules/
+```
+
+**Workflow:**
+1. Edit files in root `hooks/`, `skills/`, or `rules/`
+2. Changes are immediately available via symlinks
+3. Test by running Claude Code in this project
+4. No sync step needed
+
+### Two Configuration Files
+
+| File | Purpose | Path Variable |
+|------|---------|---------------|
+| `.claude/settings.json` | Local testing (this project) | `$CLAUDE_PROJECT_DIR` |
+| `hooks/hooks.json` | Plugin distribution (when installed) | `${CLAUDE_PLUGIN_ROOT}` |
+
+When users install the plugin, `hooks/hooks.json` is used. When developing locally, `.claude/settings.json` is used.
+
+### Hook Scripts
+
+Hook scripts are located in `hooks/` and executed by Claude Code at various lifecycle events.
+
+**Key files:**
+- `task-memory-hook.sh` - Main hook handler (SessionStart, PreToolUse, PostToolUse, Stop)
+- `skill-eval.sh` - User prompt classifier (TASK vs QUESTION detection)
+
+**Testing hooks directly:**
+
+```bash
+# Test SessionStart
+echo '{"hook_event_name":"SessionStart","session_id":"test-123"}' | ./hooks/task-memory-hook.sh
+
+# Test PreToolUse with WebFetch
+echo '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com"}}' | ./hooks/task-memory-hook.sh
+
+# Test Stop hook
+echo '{"hook_event_name":"Stop","session_id":"test-123"}' | ./hooks/task-memory-hook.sh
+```
+
+**Hook development guidelines:**
+
+1. **Read JSON from stdin** - All hooks receive JSON input
+2. **Output to stdout** - Messages appear in Claude's context
+3. **Exit codes** - 0 = success, non-zero = error
+4. **Blocking (Stop hook)** - Return `{"decision": "block", "reason": "..."}` to prevent session end
+
+### Skills
+
+Skills are located in `skills/` and provide slash command documentation.
+
+**Structure:**
+```
+skills/
+├── task-memory/
+│   ├── SKILL.md           # Main skill documentation
+│   ├── MONOREPO.md        # Monorepo patterns
+│   ├── TROUBLESHOOTING.md # Common issues
+│   └── UI_FORMAT.md       # Task format reference
+└── task-status/
+    └── SKILL.md           # Quick context check
+```
+
+**Writing a skill:**
+
+```markdown
+---
+name: my-skill
+description: Brief description (max 1024 chars)
+user-invocable: true
+allowed-tools:
+  - Read
+  - Write
+---
+
+# Skill Name
+
+## When to Use
+
+- Use case 1
+- Use case 2
+
+## Workflow
+
+Step-by-step instructions for Claude to follow.
+```
+
+### Rules
+
+Rules are located in `rules/` and enforce workflow patterns.
+
+**Current rules:**
+- `task-memory.md` - Task creation and completion rules
+- `ui-design-system.md` - Design guidelines for the Kanban UI
+
+### Testing Plugin Changes
+
+**Method 1: Test in this project (recommended)**
+
+Since `.claude/` symlinks to root folders, just run Claude Code:
+
+```bash
+cd /path/to/task-memory
+claude
+```
+
+**Method 2: Test in a fresh project**
+
+```bash
+# Create test project
+mkdir /tmp/test-project
+cp -r hooks/ skills/ rules/ planning/ /tmp/test-project/
+
+# Create settings.json for standalone use
+cat > /tmp/test-project/.claude/settings.json << 'EOF'
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/task-memory-hook.sh"}]}]
+  }
+}
+EOF
+
+cd /tmp/test-project
+claude
+```
+
+**Method 3: Test individual hooks**
+
+```bash
+# Check session tracking files
+ls /tmp/task-memory-session-*.txt
+
+# Test specific hook events
+echo '{"hook_event_name":"SessionStart"}' | ./hooks/task-memory-hook.sh
 ```
 
 ---
@@ -528,50 +714,90 @@ Test in all supported browsers:
 
 ```
 task-memory/
-├── src/
+├── hooks/                   # Plugin source files (EDIT HERE)
+│   ├── hooks.json           # Plugin hook config (uses ${CLAUDE_PLUGIN_ROOT})
+│   ├── task-memory-hook.sh  # Main lifecycle hook
+│   ├── skill-eval.sh        # Prompt classifier
+│   └── README.md            # Hook documentation
+│
+├── skills/                  # Plugin skills (EDIT HERE)
+│   ├── task-memory/         # /task-memory skill
+│   │   ├── SKILL.md
+│   │   ├── MONOREPO.md
+│   │   ├── TROUBLESHOOTING.md
+│   │   └── UI_FORMAT.md
+│   └── task-status/         # /task-status skill
+│       └── SKILL.md
+│
+├── rules/                   # Plugin rules (EDIT HERE)
+│   ├── task-memory.md       # Task workflow rules
+│   └── ui-design-system.md  # UI design guidelines
+│
+├── .claude/                 # Local testing (symlinks to above)
+│   ├── settings.json        # Project hook config (uses $CLAUDE_PROJECT_DIR)
+│   ├── hooks/ → ../hooks/   # Symlink
+│   ├── skills/ → ../skills/ # Symlink
+│   └── rules/ → ../rules/   # Symlink
+│
+├── .claude-plugin/          # Plugin distribution metadata
+│   ├── plugin.json          # Plugin manifest
+│   └── marketplace.json     # Marketplace listing
+│
+├── src/                     # React Kanban UI
 │   ├── components/          # React UI components
-│   │   ├── TaskCard.jsx
-│   │   ├── KanbanBoard.jsx
-│   │   └── ...
-│   ├── lib/                 # Utilities and helpers
-│   │   ├── markdownParser.js
-│   │   └── fileSystem.js
-│   ├── stores/              # State management
-│   │   └── taskStore.js
-│   ├── theme/               # Theme and styling
-│   ├── utils/               # General utilities
+│   ├── utils/               # Markdown parser, file system
 │   ├── App.jsx              # Root component
-│   ├── main.jsx             # Entry point
-│   └── style.css            # Global styles
+│   └── main.jsx             # Entry point
+│
+├── planning/                # Test data / example
+│   ├── tasks.md             # Active tasks
+│   ├── archive.md           # Completed tasks
+│   └── notes/               # Task documentation
 │
 ├── examples/                # Sample markdown files
 ├── docs/                    # Documentation
-├── dist/                    # Built files (generated)
+├── tests/                   # Test files
 │
-├── package.json             # Dependencies and scripts
-├── vite.config.js           # Build configuration
-├── eslint.config.mjs        # Linting rules
-├── index.html               # Dev server template
-│
-├── task-memory.html        # Built single-file app (GENERATED)
+├── task-memory.html         # Built single-file app (GENERATED)
+├── CLAUDE.md                # Project instructions
 ├── README.md                # User documentation
 ├── CONTRIBUTING.md          # This file
-├── CODE_OF_CONDUCT.md       # Community guidelines
-├── CHANGELOG.md             # Version history
-└── LICENSE                  # ISC License
+└── LICENSE                  # MIT License
 ```
 
 ---
 
 ## Key Files for Contributors
 
+### React App
+
 | File | Purpose |
 |------|---------|
-| `src/App.jsx` | Main application logic |
-| `src/lib/markdownParser.js` | Parsing markdown to tasks |
-| `src/stores/taskStore.js` | State management |
-| `vite.config.js` | Build configuration (don't modify lightly) |
+| `src/App.jsx` | Main application component |
+| `src/utils/markdown.js` | Markdown parser/serializer |
+| `src/utils/fileSystem.js` | File System Access API wrapper |
+| `vite.config.js` | Build configuration |
 | `package.json` | Dependencies and scripts |
+
+### Claude Code Plugin (Edit in root folders)
+
+| File | Purpose |
+|------|---------|
+| `hooks/hooks.json` | Plugin hook config (for distribution) |
+| `hooks/task-memory-hook.sh` | Main lifecycle hook |
+| `hooks/skill-eval.sh` | TASK vs QUESTION classifier |
+| `skills/task-memory/SKILL.md` | Full workflow documentation |
+| `skills/task-status/SKILL.md` | Quick context check |
+| `rules/task-memory.md` | Task workflow rules |
+
+### Local Testing Config
+
+| File | Purpose |
+|------|---------|
+| `.claude/settings.json` | Project hook config (for local testing) |
+| `.claude/hooks/` | Symlink to `../hooks/` |
+| `.claude/skills/` | Symlink to `../skills/` |
+| `.claude/rules/` | Symlink to `../rules/` |
 
 ---
 

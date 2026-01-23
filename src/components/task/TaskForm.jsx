@@ -35,6 +35,7 @@ export function TaskForm({
     due: '',
     finished: '',
     visualOpsLog: [],
+    errorsLog: [],
   });
 
   const [newTag, setNewTag] = useState('');
@@ -63,6 +64,7 @@ export function TaskForm({
         due: task.due || '',
         finished: task.finished || task.completed || '',
         visualOpsLog: task.visualOpsLog || [],
+        errorsLog: task.errorsLog || [],
       });
     } else {
       setFormData({
@@ -84,6 +86,7 @@ export function TaskForm({
         due: '',
         finished: '',
         visualOpsLog: [],
+        errorsLog: [],
       });
     }
     setNewTag('');
@@ -449,6 +452,22 @@ export function TaskForm({
             placeholder="Additional notes..."
             rows={4}
           />
+        </div>
+
+        {/* Errors Log */}
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="label" style={{ color: 'var(--status-critical)' }}>Errors Log</label>
+          <textarea
+            className="input textarea font-mono"
+            style={{ fontSize: '0.8125rem', borderColor: formData.errorsLog?.length > 0 ? 'var(--status-critical)' : undefined }}
+            value={(formData.errorsLog || []).join('\n')}
+            onChange={(e) => handleChange('errorsLog', e.target.value.split('\n').filter(line => line.trim()))}
+            placeholder="Log errors encountered during task execution (one per line)..."
+            rows={3}
+          />
+          <span className="text-muted" style={{ fontSize: '0.6875rem', marginTop: 'var(--space-1)', display: 'block' }}>
+            One error per line. Used for tracking issues encountered during task work.
+          </span>
         </div>
 
         {/* Actions */}

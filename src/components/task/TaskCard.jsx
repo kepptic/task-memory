@@ -39,10 +39,20 @@ export const TaskCardContent = memo(function TaskCardContent({ task, onEdit, onC
     onEdit?.(task);
   };
 
+  // Build accessible description for screen readers
+  const accessibleDescription = [
+    task.title,
+    `Priority: ${priorityInfo.label}`,
+    task.category && `Category: ${task.category}`,
+    subtasks.length > 0 && `${completedSubtasks} of ${subtasks.length} subtasks complete`,
+  ].filter(Boolean).join('. ');
+
   return (
-    <div
+    <article
       className={`task-card ${isDragging ? 'dragging' : ''}`}
       onClick={() => onClick?.(task)}
+      aria-label={accessibleDescription}
+      aria-describedby={`task-${task.id}-title`}
     >
       {/* Header */}
       <div className="task-card-header">
@@ -57,7 +67,7 @@ export const TaskCardContent = memo(function TaskCardContent({ task, onEdit, onC
       </div>
 
       {/* Title */}
-      <h3 className="task-card-title">{task.title}</h3>
+      <h3 id={`task-${task.id}-title`} className="task-card-title">{task.title}</h3>
 
       {/* Description */}
       {task.description && (
@@ -110,7 +120,7 @@ export const TaskCardContent = memo(function TaskCardContent({ task, onEdit, onC
           </div>
         </div>
       )}
-    </div>
+    </article>
   );
 });
 

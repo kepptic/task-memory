@@ -1,6 +1,6 @@
 {
   "name": "task-memory",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Privacy-first Kanban task manager with Manus-style memory - tasks remember your research across sessions",
   "author": {
     "name": "kepptic",

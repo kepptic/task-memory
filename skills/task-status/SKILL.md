@@ -1,7 +1,7 @@
 ---
 name: task-status
-version: "1.2.0"
-description: Quick context check using the 5-Question Reboot Test. Shows workflow type, complexity, phase dependencies, and verification status.
+version: "1.3.0"
+description: Provides quick context verification using the 5-Question Reboot Test. Shows current task progress, workflow type, complexity, phase dependencies, and remaining subtasks. Use when starting new sessions, resuming after breaks, when context feels uncertain, or before making major implementation decisions.
 user-invocable: true
 allowed-tools:
   - Read
@@ -166,6 +166,53 @@ This skill reads from:
 - **planning/notes/** - Task documentation (research, audits, reviews)
 
 Use with `/task-memory` to preserve research before checking status.
+
+---
+
+## Format Reference
+
+For complete format documentation, see `/task-memory` skill.
+
+**Required Task Structure:**
+```markdown
+### TASK-XXX | Title                                    # Must be h3 (###)
+**Priority**: 🟠 High | **Category**: Feature | **Status**: in-progress | **Assigned**: @user
+**Workflow**: Feature | **Complexity**: Standard
+**Created**: 2026-01-15 | **Started**: 2026-01-15 | **Finished**:
+**Tags**: #tag1 #tag2
+
+Description text...
+
+**Subtasks**:
+- [x] Phase 1: Completed task
+- [ ] Phase 2: Current task (depends: Phase 1)
+- [ ] Phase 3: Future task (depends: Phase 2)
+
+**Pre-Work Checklist**:
+- [x] Read relevant files
+- [x] Searched for similar implementations
+- [x] Identified patterns to follow
+- [x] Reviewed known gotchas
+
+**Notes**:
+
+**Visual Operations Log**:
+
+**Errors Log**:
+```
+
+**Key Format Rules:**
+| Rule | Requirement |
+|------|-------------|
+| Task header | Must be `### TASK-XXX` (h3 level) |
+| Column sections | Must be `## Name` (h2 level) |
+| Status values | `todo`, `in-progress`, `done` |
+| Date format | `YYYY-MM-DD` |
+| Dependencies | `(depends: Phase X)` or `(depends: Phase X, Phase Y)` |
+
+**Workflow Types:** Feature, Refactor, Investigation, Migration, Simple
+
+**Complexity Levels:** Simple (1-2 files), Standard (3-10 files), Complex (10+ files)
 
 ---
 

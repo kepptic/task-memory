@@ -21,6 +21,7 @@
 ### TASK-005 | Add user authentication
 
 **Priority**: High | **Category**: Backend | **Status**: todo
+**Workflow**: Feature | **Complexity**: Standard
 **Assigned**: @bob
 **Created**: 2026-01-10
 **Tags**: #backend #api
@@ -41,6 +42,7 @@ Implement JWT-based user authentication for the API.
 ### TASK-003 | Implement dashboard UI
 
 **Priority**: High | **Category**: Feature | **Status**: in-progress
+**Workflow**: Feature | **Complexity**: Standard
 **Assigned**: @alice
 **Created**: 2026-01-08 | **Started**: 2026-01-11
 **Tags**: #frontend #research
@@ -70,6 +72,7 @@ Documentation in notes/TASK-003.md
 ### TASK-004 | Fix pagination bug
 
 **Priority**: Critical | **Category**: Bug | **Status**: in-progress
+**Workflow**: Investigation | **Complexity**: Simple
 **Assigned**: @bob
 **Created**: 2026-01-09 | **Started**: 2026-01-12
 **Tags**: #backend #urgent
@@ -86,10 +89,8 @@ Users report that pagination returns duplicate items on page 2.
 Reproduced: When sorting by date DESC, offset calculation is wrong.
 
 **Errors Log**:
-| Error | Attempt | Resolution |
-|-------|---------|------------|
-| Test timeout | 1 | Increased jest timeout to 10s |
-| DB connection refused | 2 | Started postgres container |
+- 2026-01-12 09:15:30 - Error: Test timeout - Increased jest timeout to 10s
+- 2026-01-12 09:22:45 - Error: DB connection refused - Started postgres container
 
 ---
 
@@ -98,6 +99,7 @@ Reproduced: When sorting by date DESC, offset calculation is wrong.
 ### TASK-001 | Project setup and configuration
 
 **Priority**: Critical | **Category**: Feature | **Status**: done
+**Workflow**: Simple | **Complexity**: Simple
 **Assigned**: @alice, @bob
 **Created**: 2026-01-05 | **Started**: 2026-01-05 | **Finished**: 2026-01-07
 **Tags**: #backend #frontend
@@ -120,6 +122,7 @@ CI/CD pipeline runs tests on every PR.
 ### TASK-002 | Research API design patterns
 
 **Priority**: Medium | **Category**: Research | **Status**: done
+**Workflow**: Investigation | **Complexity**: Simple
 **Assigned**: @alice
 **Created**: 2026-01-06 | **Started**: 2026-01-07 | **Finished**: 2026-01-08
 **Tags**: #research #api

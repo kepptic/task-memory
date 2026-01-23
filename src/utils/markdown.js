@@ -34,14 +34,25 @@ function parseMarkdown(content) {
         .split("|")
         .map((col) => {
           const trimmed = col.trim();
-          // Try to match "Name (id)" format
+          // Try to match "Name (id)" format first
           const match = trimmed.match(/(.+?)\s*\((.+?)\)/);
           if (match) {
-            return { name: match[1].trim(), id: match[2].trim() };
+            const displayName = match[1].trim();
+            const explicitId = match[2].trim();
+            return {
+              name: displayName,
+              id: explicitId,
+              originalHeader: displayName, // Store for round-trip preservation
+            };
           }
-          // Fallback: use name as id (derive id from name)
+          // Fallback: derive canonical ID from name
           if (trimmed) {
-            return { name: trimmed, id: trimmed };
+            const canonicalId = deriveColumnId(trimmed);
+            return {
+              name: trimmed,
+              id: canonicalId,
+              originalHeader: trimmed, // Store for round-trip preservation
+            };
           }
           return null;
         })
@@ -86,12 +97,13 @@ function parseMarkdown(content) {
   }
 
   // Default columns if not found
+  // These defaults match the generateInitialTaskFile() template in fileSystem.js
   if (config.columns.length === 0) {
     config.columns = [
-      { name: "📝 To Do", id: "todo" },
-      { name: "🚀 In Progress", id: "in-progress" },
-      { name: "👀 In Review", id: "in-review" },
-      { name: "✅ Done", id: "done" },
+      { name: "📝 To Do", id: "todo", originalHeader: "📝 To Do" },
+      { name: "🚀 In Progress", id: "in-progress", originalHeader: "🚀 In Progress" },
+      { name: "👀 In Review", id: "in-review", originalHeader: "👀 In Review" },
+      { name: "✅ Done", id: "done", originalHeader: "✅ Done" },
     ];
   }
 
@@ -140,28 +152,27 @@ function parseMarkdown(content) {
     const sectionName = match[1].trim();
     if (sectionName === "---") continue;
 
-    // Derive ID from name
-    const sectionId = sectionName
-      .toLowerCase()
-      .replace(/[^\w\s-]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .replace(/-+/g, "-") || sectionName;
+    // Derive canonical ID from name using the shared function
+    const sectionId = deriveColumnId(sectionName);
 
     allSections.push({ name: sectionName, id: sectionId });
   }
 
   // Parse tasks from configured columns
+  console.log('📊 Parsing tasks from columns:', config.columns.map(c => `${c.name}(${c.id})`).join(', '));
   config.columns.forEach((column) => {
     const columnTasks = parseTasksFromSection(content, column.name, column.id);
+    console.log(`📋 Column "${column.name}" (id: ${column.id}): found ${columnTasks.length} tasks`);
     tasks.push(...columnTasks);
   });
 
   // Find and rescue orphaned tasks (from sections not in config.columns)
-  const defaultColumn = config.columns[0]?.id || "To Do";
+  const defaultColumn = config.columns[0]?.id || "todo";
   allSections.forEach((section) => {
+    // Use canonical ID comparison for matching
+    const sectionCanonicalId = deriveColumnId(section.name);
     const isConfigured = config.columns.some(
-      (col) => col.id === section.id || col.name === section.name
+      (col) => col.id === sectionCanonicalId || deriveColumnId(col.name) === sectionCanonicalId
     );
     if (!isConfigured) {
       // Parse tasks from this orphaned section and move them to default column
@@ -188,6 +199,39 @@ function normalizeForComparison(text) {
     .toLowerCase();
 }
 
+/**
+ * Derive a canonical column ID from a display name.
+ * This is the SINGLE SOURCE OF TRUTH for ID derivation.
+ * Used for: column config parsing, section header matching, task status comparison
+ *
+ * Examples:
+ *   "📝 To Do" → "to-do"
+ *   "To Do" → "to-do"
+ *   "🚀 In Progress" → "in-progress"
+ *   "In Progress" → "in-progress"
+ *   "✅ Done" → "done"
+ */
+function deriveColumnId(name) {
+  if (!name) return 'column';
+
+  return name
+    // Remove ALL emoji ranges (comprehensive)
+    .replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F000}-\u{1F02F}]|[\u{1F0A0}-\u{1F0FF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{231A}-\u{231B}]|[\u{25AA}-\u{25AB}]|[\u{25B6}]|[\u{25C0}]|[\u{25FB}-\u{25FE}]|[\u{2614}-\u{2615}]|[\u{2648}-\u{2653}]|[\u{267F}]|[\u{2693}]|[\u{26A1}]|[\u{26AA}-\u{26AB}]|[\u{26BD}-\u{26BE}]|[\u{26C4}-\u{26C5}]|[\u{26CE}]|[\u{26D4}]|[\u{26EA}]|[\u{26F2}-\u{26F3}]|[\u{26F5}]|[\u{26FA}]|[\u{26FD}]|[\u{2702}]|[\u{2705}]|[\u{2708}-\u{270D}]|[\u{270F}]|[\u{2712}]|[\u{2714}]|[\u{2716}]|[\u{271D}]|[\u{2721}]|[\u{2728}]|[\u{2733}-\u{2734}]|[\u{2744}]|[\u{2747}]|[\u{274C}]|[\u{274E}]|[\u{2753}-\u{2755}]|[\u{2757}]|[\u{2763}-\u{2764}]|[\u{2795}-\u{2797}]|[\u{27A1}]|[\u{27B0}]|[\u{27BF}]/gu, '')
+    // Remove other special characters (keep letters, numbers, whitespace, hyphens)
+    .replace(/[^\w\s-]/g, '')
+    // Trim and lowercase
+    .trim()
+    .toLowerCase()
+    // Replace whitespace with hyphens
+    .replace(/\s+/g, '-')
+    // Remove leading/trailing hyphens
+    .replace(/^-+|-+$/g, '')
+    // Collapse multiple hyphens
+    .replace(/-+/g, '-')
+    // Fallback if empty
+    || 'column';
+}
+
 // Parse tasks from a markdown section (reusable for both kanban and archive)
 function parseTasksFromSection(content, sectionName, statusId) {
   const tasksFound = [];
@@ -195,18 +239,21 @@ function parseTasksFromSection(content, sectionName, statusId) {
   // Split by ## to get sections
   const sections = content.split(/\n##\s+/);
   let sectionContent = null;
-  const normalizedSectionName = normalizeForComparison(sectionName);
+
+  // Derive canonical ID for the section we're looking for
+  const targetCanonicalId = deriveColumnId(sectionName);
 
   for (let section of sections) {
     // Get the first line (section header)
     const newlineIndex = section.indexOf('\n');
     const headerLine = newlineIndex > 0 ? section.substring(0, newlineIndex) : section;
-    const normalizedHeader = normalizeForComparison(headerLine);
 
-    // Match if normalized versions are equal or one contains the other
-    if (normalizedHeader === normalizedSectionName ||
-        normalizedHeader.includes(normalizedSectionName) ||
-        normalizedSectionName.includes(normalizedHeader)) {
+    // Derive canonical ID for this header
+    const headerCanonicalId = deriveColumnId(headerLine);
+
+    // STRICT MATCH: Only match if canonical IDs are exactly equal
+    // This prevents "To Do" from matching "Done" (which was happening with includes())
+    if (headerCanonicalId === targetCanonicalId) {
       // Extract content after the section title (first line)
       sectionContent = newlineIndex > 0 ? section.substring(newlineIndex).trim() : '';
       break;
@@ -540,7 +587,9 @@ function generateMarkdown(tasks, config) {
 
   // Add tasks by column
   config.columns.forEach((column) => {
-    md += `## ${column.name}\n\n`;
+    // Use originalHeader for round-trip preservation, fallback to name
+    const sectionHeader = column.originalHeader || column.name;
+    md += `## ${sectionHeader}\n\n`;
 
     const columnTasks = tasks.filter((t) => t.status === column.id);
     columnTasks.forEach((task) => {
@@ -629,14 +678,22 @@ function generateArchiveMarkdown(archivedTasks) {
   archivedTasks.forEach((task) => {
     md += `### ${task.id} | ${task.title}\n`;
 
+    // Meta line: Priority, Category, Status, Assigned
     let meta = "";
     if (task.priority) meta += `**Priority**: ${task.priority}`;
     if (task.category)
       meta += (meta ? " | " : "") + `**Category**: ${task.category}`;
-    if (task.assignees.length > 0)
-      meta +=
-        (meta ? " | " : "") + `**Assigned**: ${task.assignees.join(", ")}`;
+    meta += (meta ? " | " : "") + `**Status**: ${task.status || 'done'}`;
+    if (task.assignees && task.assignees.length > 0)
+      meta += ` | **Assigned**: ${task.assignees.join(", ")}`;
     if (meta) md += meta + "\n";
+
+    // Workflow and Complexity line
+    let workflowLine = "";
+    if (task.workflow) workflowLine += `**Workflow**: ${task.workflow}`;
+    if (task.complexity)
+      workflowLine += (workflowLine ? " | " : "") + `**Complexity**: ${task.complexity}`;
+    if (workflowLine) md += workflowLine + "\n";
 
     // Write dates line
     let dates = "";
@@ -648,7 +705,7 @@ function generateArchiveMarkdown(archivedTasks) {
       dates += (dates ? " | " : "") + `**Finished**: ${task.completed}`;
     if (dates) md += dates + "\n";
 
-    if (task.tags.length > 0) {
+    if (task.tags && task.tags.length > 0) {
       md += `**Tags**: ${task.tags.join(" ")}\n`;
     }
 
@@ -663,8 +720,32 @@ function generateArchiveMarkdown(archivedTasks) {
       });
     }
 
+    // Pre-Work Checklist
+    if (task.preWorkChecklist && task.preWorkChecklist.length > 0) {
+      md += `\n**Pre-Work Checklist**:\n`;
+      task.preWorkChecklist.forEach((item) => {
+        md += `- [${item.completed ? "x" : " "}] ${item.text}\n`;
+      });
+    }
+
     if (task.notes) {
       md += `\n**Notes**:\n${task.notes}\n`;
+    }
+
+    // Visual Operations Log
+    if (task.visualOpsLog && task.visualOpsLog.length > 0) {
+      md += `\n**Visual Operations Log**:\n`;
+      task.visualOpsLog.forEach(entry => {
+        md += `- ${entry}\n`;
+      });
+    }
+
+    // Errors Log
+    if (task.errorsLog && task.errorsLog.length > 0) {
+      md += `\n**Errors Log**:\n`;
+      task.errorsLog.forEach(entry => {
+        md += `- ${entry}\n`;
+      });
     }
 
     md += `\n`;
@@ -740,6 +821,7 @@ function markdownToHtml(markdown) {
   });
 
   // Sanitize HTML to prevent XSS attacks
+  // Block javascript:, data:, and vbscript: URLs to prevent XSS
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
       "h1",
@@ -756,6 +838,8 @@ function markdownToHtml(markdown) {
       "br",
     ],
     ALLOWED_ATTR: ["href", "target", "class"],
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
+    ALLOW_DATA_ATTR: false,
   });
 }
 
@@ -786,6 +870,8 @@ export const markdownParser = {
   generateArchiveMarkdown,
   markdownToHtml,
   scheduleStatusReorganization,
+  deriveColumnId,
+  normalizeForComparison,
 };
 
 export {
@@ -797,4 +883,6 @@ export {
   generateArchiveMarkdown,
   markdownToHtml,
   scheduleStatusReorganization,
+  deriveColumnId,
+  normalizeForComparison,
 };

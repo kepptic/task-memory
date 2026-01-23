@@ -266,6 +266,16 @@ function App() {
   // File watcher ref
   const fileWatcherStartedRef = useRef(false);
 
+  // Clean up file watcher on unmount
+  useEffect(() => {
+    return () => {
+      if (fileWatcherStartedRef.current) {
+        fileWatcher.stopFileWatcher();
+        fileWatcherStartedRef.current = false;
+      }
+    };
+  }, []);
+
   // Apply theme
   useEffect(() => {
     const applyTheme = (themeName) => {

@@ -1,5 +1,15 @@
 # task-memory
 
+## Rule Hierarchy
+
+When instructions conflict, follow this priority order:
+1. **CLAUDE.md** (project-specific overrides) - highest priority
+2. **.claude/rules/** (enforcement rules) - workflow constraints
+3. **.claude/skills/** (detailed guidance) - how-to documentation
+4. **hooks/** (implementation) - automated enforcement
+
+---
+
 ## Mission
 
 **Task Memory** is a context-preserving task system for Claude Code. It answers:

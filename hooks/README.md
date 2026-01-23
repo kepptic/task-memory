@@ -5,12 +5,24 @@ Single unified hook for context management, research logging, error tracking, an
 ## Files
 
 ```
-hooks/
-├── hooks.json              # Hook configuration
-├── task-memory-hook.sh     # Unified hook handler
-├── skill-eval.sh           # Skill evaluation engine
-└── README.md               # This file
+.claude/
+├── settings.json           # Project hooks configuration (auto-loaded)
+└── hooks/
+    ├── hooks.json          # Plugin format (for plugin installations)
+    ├── task-memory-hook.sh # Unified hook handler
+    ├── skill-eval.sh       # Skill evaluation engine
+    └── README.md           # This file
 ```
+
+## Installation
+
+### For Users Who Clone This Repo (Automatic)
+
+Hooks are configured in `.claude/settings.json` and load automatically when you open the project in Claude Code. No manual setup required.
+
+### For Plugin Installation
+
+If installing as a Claude Code plugin, the `hooks.json` file uses `${CLAUDE_PLUGIN_ROOT}` paths.
 
 ## Requirements
 
@@ -176,30 +188,25 @@ Creates an **Errors Log** section in the task:
 - 2026-01-12 10:30:45 - `npm run build` → missing script: build
 ```
 
-### Stop
+### Stop (Blocking)
 
-Verifies task completion before ending session:
+**Forces Claude to continue working** if subtasks are incomplete:
 
-```
-============================================================
-🔍 TASK COMPLETION CHECK
-============================================================
-
-⚠️  INCOMPLETE: TASK-004 | Test hook functionality
-
-📊 Progress: 0/2
-
-🎯 Remaining:
-   - [ ] Run a WebSearch
-   - [ ] Verify log appears in Notes
-
-❌ Complete subtasks before stopping
-
-💡 Or move task to 'To Do' if pausing
-============================================================
+```json
+{
+  "decision": "block",
+  "reason": "TASK-004 has 2 incomplete subtasks: - Run a WebSearch - Verify log appears in Notes. Complete these subtasks before stopping, or change Status to 'todo' if pausing work."
+}
 ```
 
-Exits with code 1 to block stopping if subtasks incomplete.
+**How it works:**
+- Returns JSON with `"decision": "block"` and exit code 0
+- Claude receives the `reason` and continues working instead of stopping
+- This creates an autonomous loop until work is complete
+
+**To allow stopping:**
+- Complete all subtasks `[x]`
+- Or change task `**Status**: todo` to pause work
 
 ## Configuration
 

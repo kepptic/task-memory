@@ -19,6 +19,46 @@ PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 RESEARCH_COUNTER="/tmp/task-memory-research-count"
 PROGRESS_COUNTER="/tmp/task-memory-progress-count"
 
+# Session tracking - track which tasks were worked on this session
+SESSION_ID=""
+SESSION_TASK_FILE=""
+
+init_session() {
+    local input="$1"
+    SESSION_ID=$(echo "$input" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | head -1)
+    if [ -n "$SESSION_ID" ]; then
+        SESSION_TASK_FILE="/tmp/task-memory-session-${SESSION_ID}.txt"
+    fi
+}
+
+# Record that a task was worked on this session
+record_session_task() {
+    local task_id="$1"
+    if [ -n "$SESSION_TASK_FILE" ] && [ -n "$task_id" ]; then
+        # Only add if not already recorded
+        if ! grep -q "^${task_id}$" "$SESSION_TASK_FILE" 2>/dev/null; then
+            echo "$task_id" >> "$SESSION_TASK_FILE"
+        fi
+    fi
+}
+
+# Check if a task was worked on this session
+was_task_worked_on() {
+    local task_id="$1"
+    if [ -n "$SESSION_TASK_FILE" ] && [ -f "$SESSION_TASK_FILE" ]; then
+        grep -q "^${task_id}$" "$SESSION_TASK_FILE" 2>/dev/null
+        return $?
+    fi
+    return 1  # No session file = task not worked on
+}
+
+# Get the task worked on this session (if any)
+get_session_task() {
+    if [ -n "$SESSION_TASK_FILE" ] && [ -f "$SESSION_TASK_FILE" ]; then
+        tail -1 "$SESSION_TASK_FILE" 2>/dev/null
+    fi
+}
+
 # Find planning directory with priority:
 # 1. .task-memory.json config (explicit mapping)
 # 2. Nearest planning/ directory walking up from cwd
@@ -81,11 +121,11 @@ get_current_task() {
     task_id=$(echo "$task_line" | sed 's/### \(TASK-[0-9]*\).*/\1/')
     title=$(echo "$task_line" | sed 's/.*| //')
 
-    # Count subtasks
+    # Count subtasks (use [x ] pattern to match only checkboxes, not any character)
     local task_block completed total
     task_block=$(sed -n "/^### $task_id/,/^---$/p" "$TASKS_FILE" 2>/dev/null | head -n -1)
     completed=$(echo "$task_block" | grep -c '\- \[x\]' 2>/dev/null) || completed=0
-    total=$(echo "$task_block" | grep -c '\- \[.\]' 2>/dev/null) || total=0
+    total=$(echo "$task_block" | grep -c '\- \[[x ]\]' 2>/dev/null) || total=0
 
     echo "$task_id|$title|$completed|$total"
 }
@@ -242,6 +282,9 @@ handle_session_start() {
 
     IFS='|' read -r task_id title completed total <<< "$task_info"
 
+    # NOTE: We don't record the task here - only when actual work (Write/Edit/Bash) is done
+    # This prevents read-only sessions (like /task-memory-init) from being blocked by incomplete tasks
+
     echo "" >&2
     echo "CURRENT: $task_id | $title" >&2
 
@@ -271,8 +314,8 @@ handle_pre_tool_use() {
     local tool_input="$2"
 
     case "$tool_name" in
-        Write|Edit|Bash)
-            # Context refresh
+        Write|Edit)
+            # These are definite code modifications - record as work
             local task_info task_id title completed total
             task_info=$(get_current_task)
 
@@ -281,6 +324,9 @@ handle_pre_tool_use() {
             fi
 
             IFS='|' read -r task_id title completed total <<< "$task_info"
+
+            # Record this task as being worked on in this session
+            record_session_task "$task_id"
 
             echo "" >&2
             echo "------------------------------------------------------------" >&2
@@ -437,64 +483,39 @@ handle_stop() {
     local task_info task_id title completed total
     task_info=$(get_current_task)
 
-    echo "" >&2
-    echo "============================================================" >&2
-    echo "TASK COMPLETION CHECK" >&2
-    echo "============================================================" >&2
-
+    # No in-progress tasks - allow stop
     if [ -z "$task_info" ]; then
-        echo "" >&2
-        echo "No in-progress tasks" >&2
-        echo "============================================================" >&2
-        echo "" >&2
         exit 0
     fi
 
     IFS='|' read -r task_id title completed total <<< "$task_info"
 
-    if [ "$total" -eq 0 ]; then
-        echo "" >&2
-        echo "$task_id has no subtasks" >&2
-        echo "============================================================" >&2
-        echo "" >&2
+    # Check if this task was worked on this session
+    # If not worked on this session, allow stop (don't block unrelated tasks)
+    if ! was_task_worked_on "$task_id"; then
         exit 0
     fi
 
-    if [ "$completed" -eq "$total" ]; then
-        echo "" >&2
-        echo "✅ $task_id - all $total subtasks complete!" >&2
-        echo "" >&2
-        echo "⚠️  TASK STILL IN PROGRESS - Please complete:" >&2
-        echo "   1. Move task to '## Done' section in tasks.md" >&2
-        echo "   2. Change **Status**: in-progress → done" >&2
-        echo "   3. Add **Finished**: $(date '+%Y-%m-%d')" >&2
-        echo "" >&2
-        echo "Edit: $TASKS_FILE" >&2
-        echo "============================================================" >&2
-        echo "" >&2
-        exit 1  # Block until task moved to Done
+    # No subtasks defined - allow stop
+    if [ "$total" -eq 0 ]; then
+        exit 0
     fi
 
-    # Incomplete - warn and block
+    # All subtasks complete but task not moved to Done
+    if [ "$completed" -eq "$total" ]; then
+        local reason="All $total subtasks complete for $task_id but task still in-progress. Please: 1) Change Status to done, 2) Move task to Done section, 3) Add Finished date. Then you may stop."
+        echo "{\"decision\": \"block\", \"reason\": \"$reason\"}"
+        exit 0
+    fi
+
+    # Incomplete subtasks - block and list remaining work
     local remaining=$((total - completed))
+    local subtasks_list
+    subtasks_list=$(get_incomplete_subtasks "$task_id" | head -5 | sed 's/^/- /' | tr '\n' ' ' | sed 's/ $//')
 
-    echo "" >&2
-    echo "INCOMPLETE: $task_id | $title" >&2
-    echo "" >&2
-    echo "Progress: $completed/$total" >&2
-    echo "" >&2
-    echo "Remaining:" >&2
-    get_incomplete_subtasks "$task_id" | while read -r subtask; do
-        echo "   - [ ] $subtask" >&2
-    done
-    echo "" >&2
-    echo "Complete subtasks before stopping" >&2
-    echo "" >&2
-    echo "Or move task to 'To Do' if pausing" >&2
-    echo "============================================================" >&2
-    echo "" >&2
-
-    exit 1  # Block stop
+    local reason="$task_id has $remaining incomplete subtasks: $subtasks_list. Complete these subtasks before stopping, or change Status to 'todo' if pausing work."
+    echo "{\"decision\": \"block\", \"reason\": \"$reason\"}"
+    exit 0
 }
 
 # =============================================================================
@@ -505,6 +526,9 @@ main() {
     # Read JSON from stdin
     local input
     input=$(cat)
+
+    # Initialize session tracking
+    init_session "$input"
 
     # Extract hook event and data
     local hook_event tool_name tool_input tool_result
@@ -523,7 +547,7 @@ main() {
         PostToolUse)
             handle_post_tool_use "$tool_name" "$tool_result"
             ;;
-        Stop)
+        Stop|SessionEnd)
             handle_stop
             ;;
     esac

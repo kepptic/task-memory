@@ -1,5 +1,5 @@
 // File watcher module
-// Handles auto-save and external change detection
+// Handles auto-save and external change detection with content hash comparison
 
 // Debounce timer for auto-save
 let autoSaveTimer = null;
@@ -17,9 +17,31 @@ let lastCheckedModified = 0;
 // Current content for comparison
 let currentKanbanContent = "";
 
+// Content hash for reliable change detection
+let currentContentHash = null;
+
+// Callbacks for notifications
+let notificationCallbacks = {};
+
+// Compute SHA-256 hash of content
+async function computeHash(content) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(content);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 // Actual save function (called by debounced autoSave)
 async function performSave(fileHandle, content) {
   if (!fileHandle) return;
+
+  // Don't save while applying external changes
+  if (isApplyingExternalChanges) {
+    console.log('⏳ Skipping save - applying external changes');
+    return false;
+  }
 
   try {
     // Mark that we're saving (for dev server reload detection)
@@ -32,6 +54,7 @@ async function performSave(fileHandle, content) {
     await writable.close();
 
     currentKanbanContent = content;
+    currentContentHash = await computeHash(content);
 
     // Update last save timestamp to ignore this change in file watcher
     lastSaveTimestamp = Date.now();
@@ -69,29 +92,36 @@ function autoSave(fileHandle, generateContent) {
   // Schedule save for 500ms from now
   autoSaveTimer = setTimeout(async () => {
     autoSaveTimer = null;
+
+    // Double-check flag before actually saving
+    if (isApplyingExternalChanges) {
+      console.log('⏳ AutoSave cancelled - external changes in progress');
+      return;
+    }
+
     const content = generateContent();
     await performSave(fileHandle, content);
   }, 500);
 }
 
-// Smart update function that only modifies changed tasks
-function applyExternalChanges(oldTasks, newTasks, callbacks) {
+// Detect which components changed between old and new task lists
+function detectChangedComponents(oldTasks, newTasks) {
+  const changes = {
+    addedTasks: [],
+    removedTasks: [],
+    movedTasks: [],
+    updatedTasks: [],
+    hasChanges: false,
+  };
+
   // Create maps for quick lookup
   const oldTasksMap = new Map(oldTasks.map((t) => [t.id, t]));
   const newTasksMap = new Map(newTasks.map((t) => [t.id, t]));
 
-  let addedCount = 0;
-  let removedCount = 0;
-  let movedCount = 0;
-  let updatedCount = 0;
-
   // Find tasks that were removed (in old but not in new)
   for (const oldTask of oldTasks) {
     if (!newTasksMap.has(oldTask.id)) {
-      if (callbacks.onTaskRemoved) {
-        callbacks.onTaskRemoved(oldTask);
-      }
-      removedCount++;
+      changes.removedTasks.push(oldTask);
     }
   }
 
@@ -101,10 +131,7 @@ function applyExternalChanges(oldTasks, newTasks, callbacks) {
 
     if (!oldTask) {
       // Task was added
-      if (callbacks.onTaskAdded) {
-        callbacks.onTaskAdded(newTask);
-      }
-      addedCount++;
+      changes.addedTasks.push(newTask);
     } else {
       // Task exists, check if it changed
       const statusChanged = oldTask.status !== newTask.status;
@@ -112,30 +139,70 @@ function applyExternalChanges(oldTasks, newTasks, callbacks) {
         JSON.stringify(oldTask) !== JSON.stringify(newTask);
 
       if (statusChanged) {
-        if (callbacks.onTaskMoved) {
-          callbacks.onTaskMoved(newTask, oldTask.status);
-        }
-        movedCount++;
+        changes.movedTasks.push({ task: newTask, fromStatus: oldTask.status });
       } else if (contentChanged) {
-        if (callbacks.onTaskUpdated) {
-          callbacks.onTaskUpdated(newTask);
-        }
-        updatedCount++;
+        changes.updatedTasks.push({ oldTask, newTask });
       }
     }
   }
 
+  changes.hasChanges =
+    changes.addedTasks.length > 0 ||
+    changes.removedTasks.length > 0 ||
+    changes.movedTasks.length > 0 ||
+    changes.updatedTasks.length > 0;
+
+  return changes;
+}
+
+// Smart update function that only modifies changed tasks
+function applyExternalChanges(oldTasks, newTasks, callbacks) {
+  const changes = detectChangedComponents(oldTasks, newTasks);
+
+  // Apply removed tasks
+  for (const task of changes.removedTasks) {
+    if (callbacks.onTaskRemoved) {
+      callbacks.onTaskRemoved(task);
+    }
+  }
+
+  // Apply added tasks
+  for (const task of changes.addedTasks) {
+    if (callbacks.onTaskAdded) {
+      callbacks.onTaskAdded(task);
+    }
+  }
+
+  // Apply moved tasks
+  for (const { task, fromStatus } of changes.movedTasks) {
+    if (callbacks.onTaskMoved) {
+      callbacks.onTaskMoved(task, fromStatus);
+    }
+  }
+
+  // Apply updated tasks
+  for (const { newTask } of changes.updatedTasks) {
+    if (callbacks.onTaskUpdated) {
+      callbacks.onTaskUpdated(newTask);
+    }
+  }
+
   // Auto-reorganize: If any task moved due to Status field change, save to reorganize the .md file
-  if (movedCount > 0 && callbacks.onReorganizeNeeded) {
+  if (changes.movedTasks.length > 0 && callbacks.onReorganizeNeeded) {
     setTimeout(() => {
       callbacks.onReorganizeNeeded();
     }, 500); // Small delay to avoid rapid saves
   }
 
-  return { addedCount, removedCount, movedCount, updatedCount };
+  return {
+    addedCount: changes.addedTasks.length,
+    removedCount: changes.removedTasks.length,
+    movedCount: changes.movedTasks.length,
+    updatedCount: changes.updatedTasks.length,
+  };
 }
 
-// Check for external changes to the file
+// Check for external changes to the file using content hash
 async function checkForExternalChanges(fileHandle, callbacks) {
   if (!fileHandle) return;
 
@@ -147,44 +214,61 @@ async function checkForExternalChanges(fileHandle, callbacks) {
     // Initialize on first check
     if (lastCheckedModified === 0) {
       lastCheckedModified = fileModified;
+      const content = await file.text();
+      currentContentHash = await computeHash(content);
       return;
     }
 
-    // Check if file was modified since last check
-    if (fileModified > lastCheckedModified) {
-      // File was modified! But was it us or external?
-      const timeSinceOurSave = Date.now() - lastSaveTimestamp;
-
-      // If we saved within the last 2 seconds, ignore (it's our change)
-      if (timeSinceOurSave < 2000) {
-        lastCheckedModified = fileModified;
-        return;
-      }
-
-      // External change detected!
-      const newContent = await file.text();
-
-      // Check if content actually changed
-      if (newContent !== currentKanbanContent) {
-        console.log("📥 Loading external changes...");
-
-        // Set flag to prevent saving during updates
-        isApplyingExternalChanges = true;
-
-        try {
-          currentKanbanContent = newContent;
-
-          if (callbacks.onExternalChange) {
-            callbacks.onExternalChange(newContent);
-          }
-        } finally {
-          // Clear flag after updates complete
-          isApplyingExternalChanges = false;
-        }
-      }
-
-      lastCheckedModified = fileModified;
+    // Quick timestamp check first (optimization)
+    if (fileModified <= lastCheckedModified) {
+      return; // No change
     }
+
+    // File timestamp changed! Check if it was us or external
+    const timeSinceOurSave = Date.now() - lastSaveTimestamp;
+
+    // If we saved within the last 1.5 seconds, ignore (it's our change)
+    if (timeSinceOurSave < 1500) {
+      lastCheckedModified = fileModified;
+      return;
+    }
+
+    // Timestamp changed - verify with content hash
+    const newContent = await file.text();
+    const newHash = await computeHash(newContent);
+
+    // If hash matches, it's just metadata change (no real content change)
+    if (newHash === currentContentHash) {
+      lastCheckedModified = fileModified;
+      return;
+    }
+
+    // Real external change detected!
+    console.log("📥 External change detected via hash comparison");
+
+    // Set flag to prevent saving during updates
+    isApplyingExternalChanges = true;
+
+    try {
+      // Notify user of external change
+      if (notificationCallbacks.onExternalChangeDetected) {
+        notificationCallbacks.onExternalChangeDetected();
+      }
+
+      currentKanbanContent = newContent;
+      currentContentHash = newHash;
+
+      if (callbacks.onExternalChange) {
+        callbacks.onExternalChange(newContent);
+      }
+    } finally {
+      // Clear flag after updates complete (with small delay to allow React updates)
+      setTimeout(() => {
+        isApplyingExternalChanges = false;
+      }, 100);
+    }
+
+    lastCheckedModified = fileModified;
   } catch (error) {
     console.error("❌ Error checking for file changes:", error);
   }
@@ -209,8 +293,9 @@ function stopFileWatcher() {
 }
 
 // Set current content (for comparison)
-function setCurrentContent(content) {
+async function setCurrentContent(content) {
   currentKanbanContent = content;
+  currentContentHash = await computeHash(content);
 }
 
 // Get current content
@@ -223,25 +308,45 @@ function isApplyingChanges() {
   return isApplyingExternalChanges;
 }
 
+// Set notification callbacks
+function setNotificationCallbacks(callbacks) {
+  notificationCallbacks = callbacks;
+}
+
+// Reset state (for testing or re-initialization)
+function resetState() {
+  lastSaveTimestamp = 0;
+  lastCheckedModified = 0;
+  currentKanbanContent = "";
+  currentContentHash = null;
+  isApplyingExternalChanges = false;
+}
+
 // Export for use in other modules
 export const fileWatcher = {
   performSave,
   autoSave,
   applyExternalChanges,
+  detectChangedComponents,
   startFileWatcher,
   stopFileWatcher,
   setCurrentContent,
   getCurrentContent,
   isApplyingChanges,
+  setNotificationCallbacks,
+  resetState,
 };
 
 export {
   performSave,
   autoSave,
   applyExternalChanges,
+  detectChangedComponents,
   startFileWatcher,
   stopFileWatcher,
   setCurrentContent,
   getCurrentContent,
   isApplyingChanges,
+  setNotificationCallbacks,
+  resetState,
 };

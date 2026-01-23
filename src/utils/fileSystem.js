@@ -156,6 +156,10 @@ async function requestDirectoryAccess(startInHandle = null) {
 }
 
 // Generate initial task file content
+// IMPORTANT: Template format must match parser expectations:
+// - Columns use pipe-separated format on single line
+// - Section headers must derive to same canonical IDs as column config
+// - Column names in config match section headers exactly
 function generateInitialTaskFile() {
   return `# Task Board
 
@@ -163,19 +167,23 @@ function generateInitialTaskFile() {
 
 ## ⚙️ Configuration
 
-**Columns**:
-- **To Do** (todo)
-- **In Progress** (in-progress)
-- **Done** (done)
+**Columns**: 📝 To Do (todo) | 🚀 In Progress (in-progress) | 👀 In Review (in-review) | ✅ Done (done)
 
-**Categories**: Frontend, Backend, Design, Documentation
-**Users**: @alice, @bob, @charlie
+**Categories**: Frontend, Backend, Design, DevOps, Tests, Documentation
+
+**Users**: @user (User)
+
 **Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
-**Tags**: #bug, #feature, #enhancement, #documentation
+
+**Tags**: #bug #feature #ui #backend #urgent #refactor #docs #test
+
+---
 
 ## 📝 To Do
 
-## 🚧 In Progress
+## 🚀 In Progress
+
+## 👀 In Review
 
 ## ✅ Done
 `;
