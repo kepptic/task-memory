@@ -776,28 +776,53 @@ function App() {
     setShowLegacyBanner(false);
   };
 
-  // Switch to a different task file
-  const handleSwitchTaskFile = async (fileName) => {
-    if (!directoryHandle || fileName === currentTaskFileName) return;
+  // Switch to a different task file.
+  // Accepts either a string filename (legacy — same dir as current project)
+  // or a "<relativePath>:<fileName>" key from the switcher dropdown, or an
+  // object { fileName, relativePath }.
+  const handleSwitchTaskFile = async (target) => {
+    if (!directoryHandle) return;
+
+    let fileName, relativePath;
+    if (typeof target === 'string') {
+      if (target.includes(':')) {
+        const idx = target.indexOf(':');
+        relativePath = target.slice(0, idx);
+        fileName = target.slice(idx + 1);
+      } else {
+        fileName = target;
+        relativePath = currentProject?.taskFilePath ?? '';
+      }
+    } else if (target && typeof target === 'object') {
+      fileName = target.fileName;
+      relativePath = target.relativePath ?? '';
+    } else {
+      return;
+    }
+
+    // No-op if already loaded
+    if (
+      fileName === currentTaskFileName &&
+      (relativePath ?? '') === (currentProject?.taskFilePath ?? '')
+    ) {
+      return;
+    }
 
     try {
       setIsLoading(true);
-      setLoadingMessage(`Loading ${fileName}...`);
+      const displayPath = relativePath ? `${relativePath}/${fileName}` : fileName;
+      setLoadingMessage(`Loading ${displayPath}...`);
 
       const result = await fileSystem.loadTaskFile(directoryHandle, {
         fileName,
-        relativePath: currentProject?.taskFilePath ?? '',
+        relativePath,
       });
 
       setFileHandle(result.fileHandle);
       setCurrentTaskFileName(fileName);
 
       // Update legacy banner state
-      if (fileName === 'kanban.md') {
-        setShowLegacyBanner(true);
-      } else {
-        setShowLegacyBanner(false);
-      }
+      setShowLegacyBanner(fileName === 'kanban.md');
 
       // Parse and update state
       const parsed = markdownParser.parseMarkdown(result.content);
@@ -814,16 +839,26 @@ function App() {
       }));
       setTasks(mappedTasks);
 
-      // Update project preference
+      // Persist both fileName and relativePath
       if (currentProject) {
-        await fileSystem.updateProjectTaskFile(currentProject.name, fileName);
-        setCurrentProject({ ...currentProject, taskFileName: fileName });
+        await fileSystem.saveDirectoryHandle(
+          directoryHandle,
+          currentProject.displayName || null,
+          fileName,
+          currentProject.group,
+          relativePath ?? '',
+        );
+        setCurrentProject({
+          ...currentProject,
+          taskFileName: fileName,
+          taskFilePath: relativePath ?? '',
+        });
       }
 
       // Update file watcher
       fileWatcher.setCurrentContent(result.content);
 
-      showNotification(`Switched to ${fileName}`);
+      showNotification(`Switched to ${displayPath}`);
     } catch (error) {
       console.error('Failed to switch file:', error);
       showNotification('Failed to switch file: ' + error.message, 'error');
@@ -1751,28 +1786,51 @@ function App() {
             </div>
           </div>
 
-          {/* Task File Selection */}
-          {hasProject && availableTaskFiles.length > 0 && (
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="label">Task File</label>
-              <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-                <select
-                  className="input select"
-                  value={currentTaskFileName || ''}
-                  onChange={(e) => handleSwitchTaskFile(e.target.value)}
-                  style={{ flex: 1 }}
-                >
-                  {availableTaskFiles.map(file => (
-                    <option key={file} value={file}>{file}</option>
-                  ))}
-                </select>
+          {/* Task File Selection — supports multi-kanban monorepos */}
+          {hasProject && availableTaskFiles.length > 0 && (() => {
+            const currentPath = currentProject?.taskFilePath ?? '';
+            const currentKey = `${currentPath}:${currentTaskFileName || ''}`;
+            const labelFor = (f) => {
+              const base = f.relativePath
+                ? `${f.relativePath}/${f.fileName}`
+                : f.fileName;
+              return f.isLegacy ? `${base} (legacy)` : base;
+            };
+            return (
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="label">
+                  Task File
+                  {availableTaskFiles.length > 1 && (
+                    <span
+                      className="text-muted"
+                      style={{ marginLeft: 'var(--space-2)', fontSize: '0.75rem' }}
+                    >
+                      ({availableTaskFiles.length} kanbans)
+                    </span>
+                  )}
+                </label>
+                <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                  <select
+                    className="input select"
+                    value={currentKey}
+                    onChange={(e) => handleSwitchTaskFile(e.target.value)}
+                    style={{ flex: 1 }}
+                  >
+                    {availableTaskFiles.map(f => {
+                      const key = `${f.relativePath}:${f.fileName}`;
+                      return (
+                        <option key={key} value={key}>{labelFor(f)}</option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <p className="text-muted" style={{ fontSize: '0.75rem', marginTop: 'var(--space-1)' }}>
+                  Current: {currentPath ? `${currentPath}/${currentTaskFileName}` : (currentTaskFileName || 'None')}
+                  {currentTaskFileName === 'kanban.md' && ' (legacy)'}
+                </p>
               </div>
-              <p className="text-muted" style={{ fontSize: '0.75rem', marginTop: 'var(--space-1)' }}>
-                Current: {currentTaskFileName || 'None'}
-                {currentTaskFileName === 'kanban.md' && ' (legacy)'}
-              </p>
-            </div>
-          )}
+            );
+          })()}
 
           <button
             className="btn btn-secondary"

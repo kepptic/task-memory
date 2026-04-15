@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-04-15
+
+### Added
+- **Split-kanban monorepos now first-class.** The HTML app discovers every `tasks.md` / `kanban.md` across `docs/todo/*/`, `planning/*/`, `docs/planning/`, and the repo root — not just the alphabetically-first one — and surfaces them in an in-app switcher. Setsail-style layouts (`docs/todo/{api,admin,public}/tasks.md`, three parallel kanbans) work out of the box: pick the repo root once in the project picker, then switch between admin/api/public inside the app without re-opening the directory.
+- New `discoverAllTaskFiles(dirHandle)` in `utils/fileSystem.js` returns every match across the standard search paths as `[{ fileName, relativePath, isLegacy }, ...]`, deduped. `discoverTaskFile` is now a thin wrapper that returns the first entry (unchanged external behavior for single-file projects).
+- Switcher dropdown gained a `(N kanbans)` label when more than one file is discovered, and each option renders as `<relativePath>/<fileName>` so you can tell them apart at a glance.
+
+### Changed
+- **BREAKING** (internal): `availableTaskFiles` state and `detectTaskFile().available` now contain `{ fileName, relativePath, isLegacy }` objects instead of plain filename strings. External consumers reading these fields must update. The search-order contract and the single-file `discoverTaskFile` return shape are unchanged.
+- `handleSwitchTaskFile(target)` now accepts a `"<relativePath>:<fileName>"` key (what the switcher emits), a `{ fileName, relativePath }` object, or a bare filename (legacy — switches within the current project's directory). Persists both `taskFileName` and `taskFilePath` to IndexedDB so the right file loads next session.
+
+### Unchanged
+- Single-kanban projects behave identically to v2.3.0 — the switcher stays hidden when only one file is found. The Python hook is untouched (multi-file already handled via `task_files_glob` in `.task-memory.json`).
+
 ## [2.3.0] - 2026-04-15
 
 ### Added

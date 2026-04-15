@@ -247,41 +247,54 @@ async function findTaskFileInDir(dirHandle) {
   return null;
 }
 
-// Auto-discover a task file in common locations.
-// Search order:
-//   1. <root>/tasks.md
-//   2. <root>/kanban.md
-//   3. <root>/planning/tasks.md
-//   4. <root>/planning/kanban.md
-//   5. <root>/docs/planning/tasks.md
-//   6. <root>/docs/planning/kanban.md
-//   7. <root>/docs/todo/<child>/tasks.md (first child alphabetically)
-//   8. <root>/docs/todo/<child>/kanban.md
-// Returns { fileHandle, relativePath, taskFileName, isLegacy } or null.
-async function discoverTaskFile(dirHandle) {
-  // 1-2: root
-  const rootHit = await findTaskFileInDir(dirHandle);
-  if (rootHit) {
-    return {
-      ...rootHit,
-      relativePath: '',
-    };
+// List every task file name present in a directory handle.
+// Returns [{ fileName, isLegacy }].
+async function listTaskFilesInDir(dirHandle) {
+  const hits = [];
+  for (const fileName of TASK_FILE_NAMES) {
+    try {
+      await dirHandle.getFileHandle(fileName, { create: false });
+      hits.push({ fileName, isLegacy: fileName === 'kanban.md' });
+    } catch (e) {
+      if (e.name !== 'NotFoundError' && e.name !== 'TypeMismatchError') {
+        throw e;
+      }
+    }
+  }
+  return hits;
+}
+
+// Discover ALL task files across the standard search paths.
+// Returns an array of { fileName, relativePath, isLegacy }, deduped by
+// `${relativePath}:${fileName}`. Order matches discoverTaskFile search order:
+//   root → planning/ → docs/planning/ → docs/todo/*/ → planning/*/
+async function discoverAllTaskFiles(dirHandle) {
+  const seen = new Set();
+  const out = [];
+
+  const push = (relativePath, fileName, isLegacy) => {
+    const key = `${relativePath}:${fileName}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ fileName, relativePath, isLegacy });
+  };
+
+  // Root
+  for (const hit of await listTaskFilesInDir(dirHandle)) {
+    push('', hit.fileName, hit.isLegacy);
   }
 
-  // 3-6: fixed nested candidates
+  // Fixed nested candidates
   for (const segments of NESTED_SEARCH_DIRS) {
     const nested = await walkToDir(dirHandle, segments);
     if (!nested) continue;
-    const hit = await findTaskFileInDir(nested);
-    if (hit) {
-      return {
-        ...hit,
-        relativePath: segments.join('/'),
-      };
+    const rp = segments.join('/');
+    for (const hit of await listTaskFilesInDir(nested)) {
+      push(rp, hit.fileName, hit.isLegacy);
     }
   }
 
-  // 7-8: wildcard parents — iterate children alphabetically
+  // Wildcard parents — iterate children alphabetically
   for (const segments of WILDCARD_PARENTS) {
     const parent = await walkToDir(dirHandle, segments);
     if (!parent) continue;
@@ -291,19 +304,15 @@ async function discoverTaskFile(dirHandle) {
         if (child.kind === 'directory') childNames.push(name);
       }
     } catch (e) {
-      // iteration not supported or permission — skip
       continue;
     }
     childNames.sort();
     for (const name of childNames) {
       try {
         const childDir = await parent.getDirectoryHandle(name, { create: false });
-        const hit = await findTaskFileInDir(childDir);
-        if (hit) {
-          return {
-            ...hit,
-            relativePath: [...segments, name].join('/'),
-          };
+        const rp = [...segments, name].join('/');
+        for (const hit of await listTaskFilesInDir(childDir)) {
+          push(rp, hit.fileName, hit.isLegacy);
         }
       } catch (e) {
         // keep scanning
@@ -311,7 +320,53 @@ async function discoverTaskFile(dirHandle) {
     }
   }
 
-  return null;
+  // planning/<child>/ — only if planning/ itself has subdirs
+  try {
+    const planning = await walkToDir(dirHandle, ['planning']);
+    if (planning) {
+      const childNames = [];
+      try {
+        for await (const [name, child] of planning.entries()) {
+          if (child.kind === 'directory') childNames.push(name);
+        }
+      } catch (e) {
+        // skip
+      }
+      childNames.sort();
+      for (const name of childNames) {
+        try {
+          const childDir = await planning.getDirectoryHandle(name, { create: false });
+          const rp = `planning/${name}`;
+          for (const hit of await listTaskFilesInDir(childDir)) {
+            push(rp, hit.fileName, hit.isLegacy);
+          }
+        } catch (e) {
+          // keep scanning
+        }
+      }
+    }
+  } catch (e) {
+    // planning/ not present or not iterable
+  }
+
+  return out;
+}
+
+// Auto-discover a task file in common locations. Backed by discoverAllTaskFiles;
+// returns the first (highest-priority) match for backwards compatibility.
+// Returns { fileHandle, relativePath, taskFileName, isLegacy } or null.
+async function discoverTaskFile(dirHandle) {
+  const all = await discoverAllTaskFiles(dirHandle);
+  if (all.length === 0) return null;
+  const first = all[0];
+  const targetDir = await resolveTaskDir(dirHandle, first.relativePath);
+  const fileHandle = await targetDir.getFileHandle(first.fileName, { create: false });
+  return {
+    fileHandle,
+    taskFileName: first.fileName,
+    isLegacy: first.isLegacy,
+    relativePath: first.relativePath,
+  };
 }
 
 // Resolve a stored relativePath (e.g. "docs/planning" or "") to a directory
@@ -326,30 +381,27 @@ async function resolveTaskDir(dirHandle, relativePath) {
   return nested;
 }
 
-// Detect which task files exist in the directory
+// Detect task files across the directory tree.
+// Returns:
+//   {
+//     found: relativePath/fileName string of highest-priority match (or null),
+//     legacy: relativePath/fileName string of any kanban.md found (or null),
+//     available: [{ fileName, relativePath, isLegacy }, ...]
+//   }
+// The `available` array covers ALL discovered files across root + nested dirs.
 async function detectTaskFile(dirHandle) {
-  const result = {
-    found: null,
-    legacy: null,
-    available: []
+  const available = await discoverAllTaskFiles(dirHandle);
+  const first = available[0] || null;
+  const legacy = available.find(f => f.isLegacy) || null;
+
+  const pathOf = (entry) =>
+    entry.relativePath ? `${entry.relativePath}/${entry.fileName}` : entry.fileName;
+
+  return {
+    found: first ? pathOf(first) : null,
+    legacy: legacy ? pathOf(legacy) : null,
+    available,
   };
-
-  for (const fileName of TASK_FILE_NAMES) {
-    try {
-      await dirHandle.getFileHandle(fileName);
-      result.available.push(fileName);
-      if (!result.found) {
-        result.found = fileName;
-      }
-      if (fileName === 'kanban.md') {
-        result.legacy = fileName;
-      }
-    } catch (e) {
-      // File doesn't exist, continue
-    }
-  }
-
-  return result;
 }
 
 // Load task file (supports both tasks.md and kanban.md, plus nested paths).
@@ -400,14 +452,10 @@ async function loadTaskFile(dirHandle, preferred = null) {
     const file = await kanbanFileHandle.getFile();
     const content = await file.text();
     console.log(`Task file discovered at "${discovered.relativePath}/${discovered.taskFileName}", size:`, content.length);
-    // If we're at root, also surface legacy/available info for the migration banner
-    let available = [discovered.taskFileName];
-    let hasLegacy = discovered.isLegacy;
-    if (!discovered.relativePath) {
-      const detection = await detectTaskFile(dirHandle);
-      available = detection.available;
-      hasLegacy = detection.legacy !== null;
-    }
+    // Surface every discovered file (multi-kanban monorepos) + legacy flag
+    const detection = await detectTaskFile(dirHandle);
+    const available = detection.available;
+    const hasLegacy = detection.legacy !== null;
     return {
       fileHandle: kanbanFileHandle,
       content,
@@ -431,7 +479,7 @@ async function loadTaskFile(dirHandle, preferred = null) {
     relativePath: '',
     isLegacy: false,
     isNew: true,
-    available: [DEFAULT_TASK_FILE]
+    available: [{ fileName: DEFAULT_TASK_FILE, relativePath: '', isLegacy: false }]
   };
 }
 
@@ -739,6 +787,7 @@ export const fileSystem = {
   loadTaskFile,
   detectTaskFile,
   discoverTaskFile,
+  discoverAllTaskFiles,
   migrateKanbanToTasks,
   updateProjectTaskFile,
   loadArchiveFile,
@@ -762,6 +811,7 @@ export {
   loadTaskFile,
   detectTaskFile,
   discoverTaskFile,
+  discoverAllTaskFiles,
   migrateKanbanToTasks,
   updateProjectTaskFile,
   loadArchiveFile,
