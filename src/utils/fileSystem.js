@@ -227,26 +227,6 @@ async function walkToDir(rootHandle, segments) {
   return current;
 }
 
-// Try to locate a task file (tasks.md / kanban.md) inside a specific directory
-// handle. Returns { fileHandle, taskFileName, isLegacy } or null.
-async function findTaskFileInDir(dirHandle) {
-  for (const fileName of TASK_FILE_NAMES) {
-    try {
-      const fh = await dirHandle.getFileHandle(fileName, { create: false });
-      return {
-        fileHandle: fh,
-        taskFileName: fileName,
-        isLegacy: fileName === 'kanban.md',
-      };
-    } catch (e) {
-      if (e.name !== 'NotFoundError' && e.name !== 'TypeMismatchError') {
-        throw e;
-      }
-    }
-  }
-  return null;
-}
-
 // List every task file name present in a directory handle.
 // Returns [{ fileName, isLegacy }].
 async function listTaskFilesInDir(dirHandle) {
