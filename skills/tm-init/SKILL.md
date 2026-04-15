@@ -80,7 +80,9 @@ Ask the user these questions using AskUserQuestion:
    mkdir -p {planning_dir}/notes
    ```
 
-2. **Create tasks.md with the canonical template** (must match
+2. **If `{planning_dir}/tasks.md` already exists, DO NOT overwrite it.** Use AskUserQuestion to confirm before replacing. Prior Claude sessions commonly Write-over an existing tasks.md and destroy all task content. The plugin now blocks this at the hook level, but tm-init should also respect existing state: if tasks.md exists and has content, skip this step and tell the user the file is already initialized.
+
+3. **Create tasks.md with the canonical template** (must match
    `src/utils/fileSystem.js:163` `generateInitialTaskFile()` exactly so the
    HTML kanban app and the hook agree on column structure):
 

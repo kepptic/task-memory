@@ -626,11 +626,50 @@ def handle_session_start() -> None:
     print("\n" + "=" * 60 + "\n", file=sys.stderr)
 
 
-def handle_pre_tool_use(tool_name: str, tool_input: dict, session_id: str) -> None:
+def _is_tasks_file(path_str: str) -> bool:
+    """True iff the path refers to one of our managed task files."""
+    if not path_str:
+        return False
+    try:
+        edited = Path(path_str).resolve()
+    except (OSError, ValueError):
+        return False
+    for tf in task_files():
+        try:
+            if tf.resolve() == edited:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def handle_pre_tool_use(tool_name: str, tool_input: dict, session_id: str) -> int | None:
+    # Guard: block `Write` on an existing tasks.md that already has task content.
+    # Write replaces the whole file — every prior session that did this on
+    # loro's tasks.md clobbered the canonical structure. Force Edit instead.
+    if tool_name == "Write":
+        file_path = tool_input.get("file_path") or tool_input.get("path") or ""
+        if _is_tasks_file(file_path):
+            try:
+                existing = Path(file_path).read_text() if Path(file_path).is_file() else ""
+            except OSError:
+                existing = ""
+            if TASK_HEADING_RE.search(existing):
+                reason = (
+                    f"BLOCKED: refusing to overwrite tasks.md ({file_path}) with Write — "
+                    f"that destroys existing task blocks. Use Edit with a targeted "
+                    f"old_string/new_string (e.g., flip `**Status**: in-progress` → `done`). "
+                    f"The hook auto-reorganizes sections for you."
+                )
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                    "permissionDecision": "deny", "permissionDecisionReason": reason}}))
+                print(reason, file=sys.stderr)
+                return 2
+
     if tool_name in ("Write", "Edit", "Bash", "Task"):
         task = get_current_task()
         if not task:
-            return
+            return None
         record_session_task(session_id, task["task_id"])
 
         # Multi-file mode: only show the attention nudge on Write/Edit when
@@ -1013,7 +1052,9 @@ def main() -> int:
         elif hook_event == "PreCompact":
             handle_pre_compact(payload)
         elif hook_event == "PreToolUse":
-            handle_pre_tool_use(tool_name, tool_input, session_id)
+            rc = handle_pre_tool_use(tool_name, tool_input, session_id)
+            if isinstance(rc, int) and rc != 0:
+                return rc
         elif hook_event == "PostToolUse":
             handle_post_tool_use(tool_name, tool_input, tool_response, session_id)
         elif hook_event in ("Stop", "SubagentStop"):
