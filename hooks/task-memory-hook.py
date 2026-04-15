@@ -913,6 +913,13 @@ def handle_pre_compact(payload: dict) -> None:
 # Stop / SubagentStop (may block)
 # =============================================================================
 
+MAX_STOP_BLOCKS = 2
+
+
+def _stop_block_count_path(session_id: str) -> Path:
+    return state_path(f"stop-blocks-{session_id}.txt")
+
+
 def handle_stop(session_id: str) -> None:
     task = get_current_task()
     if not task:
@@ -924,21 +931,48 @@ def handle_stop(session_id: str) -> None:
     if task["total"] == 0:
         return
 
+    # Loop prevention: after MAX_STOP_BLOCKS consecutive blocks, allow stop
+    # with a warning. Otherwise the agent gets trapped re-attempting forever.
+    counter = _stop_block_count_path(session_id) if session_id else None
+    block_count = 0
+    if counter and counter.exists():
+        try:
+            block_count = int(counter.read_text().strip() or "0")
+        except (ValueError, OSError):
+            block_count = 0
+
+    if block_count >= MAX_STOP_BLOCKS:
+        print(
+            f"⚠️  task-memory: {task['task_id']} still has incomplete subtasks, "
+            f"but allowing stop after {block_count} blocks. Update the kanban when ready.",
+            file=sys.stderr,
+        )
+        if counter:
+            try:
+                counter.unlink()
+            except OSError:
+                pass
+        return
+
     if task["completed"] == task["total"]:
         reason = (
             f"All {task['total']} subtasks complete for {task['task_id']} but task still "
             f"in-progress. Please: 1) Change Status to done, 2) Move task to Done section, "
             f"3) Add Finished date. Then you may stop."
         )
-        print(json.dumps({"decision": "block", "reason": reason}))
-        return
+    else:
+        remaining = task["total"] - task["completed"]
+        subs = " ".join(f"- {s}" for s in get_incomplete_subtasks(task["block"]))
+        reason = (
+            f"{task['task_id']} has {remaining} incomplete subtasks: {subs}. "
+            f"Complete these subtasks before stopping, or change Status to 'todo' if pausing work."
+        )
 
-    remaining = task["total"] - task["completed"]
-    subs = " ".join(f"- {s}" for s in get_incomplete_subtasks(task["block"]))
-    reason = (
-        f"{task['task_id']} has {remaining} incomplete subtasks: {subs}. "
-        f"Complete these subtasks before stopping, or change Status to 'todo' if pausing work."
-    )
+    if counter:
+        try:
+            counter.write_text(str(block_count + 1))
+        except OSError:
+            pass
     print(json.dumps({"decision": "block", "reason": reason}))
 
 
