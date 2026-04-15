@@ -167,7 +167,7 @@ def get_current_task() -> dict[str, Any] | None:
 
     for task_id, heading, block in _iter_task_blocks(content):
         # Find the Status line inside this block
-        m = re.search(r"^\s*\*\*Status\*\*:\s*([a-z-]+)", block, re.MULTILINE)
+        m = re.search(r"\*\*Status\*\*:\s*([a-z-]+)", block)
         if not m or m.group(1) != "in-progress":
             continue
         title = heading.split("|", 1)[1].strip() if "|" in heading else ""
