@@ -80,20 +80,41 @@ Ask the user these questions using AskUserQuestion:
    mkdir -p {planning_dir}/notes
    ```
 
-2. **Create tasks.md with header:**
+2. **Create tasks.md with the canonical template** (must match
+   `src/utils/fileSystem.js:163` `generateInitialTaskFile()` exactly so the
+   HTML kanban app and the hook agree on column structure):
+
    ```markdown
-   # Kanban Board
+   # Task Board
 
    <!-- Config: Last Task ID: 0 -->
 
-   ## To Do
+   ## ⚙️ Configuration
 
-   ## In Progress
+   **Columns**: 📝 To Do (todo) | 🚀 In Progress (in-progress) | 👀 In Review (in-review) | ✅ Done (done)
 
-   ## Done
+   **Categories**: Frontend, Backend, Design, DevOps, Tests, Documentation
+
+   **Users**: @user (User)
+
+   **Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
+
+   **Tags**: #bug #feature #ui #backend #urgent #refactor #docs #test
 
    ---
+
+   ## 📝 To Do
+
+   ## 🚀 In Progress
+
+   ## 👀 In Review
+
+   ## ✅ Done
    ```
+
+   **Do NOT improvise the format.** The Configuration block, emoji column
+   names, and column IDs are how the parsers find tasks. Missing them
+   means tasks render in wrong columns or not at all.
 
 3. **Create archive.md:**
    ```markdown
