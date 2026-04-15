@@ -160,6 +160,133 @@ def _iter_task_blocks(content: str):
         yield m.group(1), heading, block
 
 
+STATUS_TO_SECTION = {
+    "todo": "to do",
+    "in-progress": "in progress",
+    "done": "done",
+}
+
+SECTION_HEADING_RE = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+
+
+def reorganize_tasks_file() -> bool:
+    """Move each TASK block into the section matching its **Status** field.
+
+    Claude otherwise has to do this manually (2 edits per status change), which
+    costs tokens. This runs on every PostToolUse:Write/Edit that touched
+    tasks.md. Idempotent — only rewrites if something actually moved.
+
+    Strategy:
+      1. Parse into preamble + [section heading + body] list
+      2. For each section, separate non-task prelude/trailing text from task
+         blocks so we preserve separators and prose
+      3. Map each task's Status -> target section name
+      4. Redistribute tasks into their target sections (preserving order
+         within a section for tasks that didn't move)
+      5. Rewrite only if the ordering changed
+
+    Returns True iff the file was modified.
+    """
+    content = read_tasks()
+    if not content:
+        return False
+
+    heading_matches = list(SECTION_HEADING_RE.finditer(content))
+    if not heading_matches:
+        return False
+
+    preamble = content[: heading_matches[0].start()]
+
+    # Build section records in document order
+    sections = []
+    for i, m in enumerate(heading_matches):
+        heading_line = content[m.start():m.end()] + "\n"
+        body_start = m.end()
+        # include the newline immediately after heading in the body
+        if body_start < len(content) and content[body_start] == "\n":
+            body_start += 1
+        body_end = (
+            heading_matches[i + 1].start()
+            if i + 1 < len(heading_matches)
+            else len(content)
+        )
+        body = content[body_start:body_end]
+
+        # Find task blocks within this body. Local iteration mirrors
+        # _iter_task_blocks but scoped to the section body only.
+        task_matches = list(TASK_HEADING_RE.finditer(body))
+        tasks = []
+        pre = body
+        post = ""
+        if task_matches:
+            first = task_matches[0]
+            pre = body[: first.start()]
+            for j, tm in enumerate(task_matches):
+                tstart = tm.start()
+                nxt = task_matches[j + 1].start() if j + 1 < len(task_matches) else len(body)
+                block = body[tstart:nxt]
+                tasks.append(block)
+            # post is already included in the last block (it extends to body end);
+            # if we want any trailing "---" separators to survive a move of the
+            # last task away, we'd need to detect them. Leave simple for now.
+            post = ""
+
+        sections.append({
+            "name": m.group(1).strip().lower(),
+            "heading_line": heading_line,
+            "pre": pre,
+            "post": post,
+            "original_tasks": tasks,
+        })
+
+    # Only reorganize if the three canonical sections all exist.
+    section_names = {s["name"] for s in sections}
+    if not {"to do", "in progress", "done"}.issubset(section_names):
+        return False
+
+    # Re-assign each task to target section per its Status field.
+    assigned: dict[str, list[str]] = {s["name"]: [] for s in sections}
+
+    # Keep a map so if target doesn't exist, task stays in origin.
+    origin: dict[int, str] = {}
+    all_tasks: list[tuple[str, str]] = []  # (target_name, block)
+    for s in sections:
+        for blk in s["original_tasks"]:
+            status_m = re.search(r"\*\*Status\*\*:\s*([a-z-]+)", blk)
+            status = status_m.group(1) if status_m else None
+            target = STATUS_TO_SECTION.get(status, "")
+            if target not in assigned:
+                target = s["name"]  # unknown status -> keep where it was
+            origin[id(blk)] = s["name"]
+            all_tasks.append((target, blk))
+
+    for target, blk in all_tasks:
+        assigned[target].append(blk)
+
+    # Short-circuit if nothing moved.
+    changed = False
+    for s in sections:
+        if s["original_tasks"] != assigned[s["name"]]:
+            changed = True
+            break
+    if not changed:
+        return False
+
+    # Rebuild file.
+    out = [preamble]
+    for s in sections:
+        out.append(s["heading_line"])
+        out.append(s["pre"])
+        out.extend(assigned[s["name"]])
+        out.append(s["post"])
+    new_content = "".join(out)
+    if new_content == content:
+        return False
+
+    TASKS_FILE.write_text(new_content)
+    return True
+
+
 def get_current_task() -> dict[str, Any] | None:
     content = read_tasks()
     if not content:
@@ -374,8 +501,20 @@ def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, s
             mirror_todowrite(todos)
         return
 
-    # Write/Edit => subtask nudge every 3rd op
+    # Write/Edit => auto-reorganize tasks.md if the write touched it, then
+    # subtask nudge every 3rd op.
     if tool_name in ("Write", "Edit"):
+        # If Claude just edited tasks.md, move any blocks whose Status no longer
+        # matches their section. Saves tokens — Claude flips Status, hook moves
+        # the block. No need for a second Edit call.
+        file_path = (tool_input.get("file_path") or tool_input.get("path") or "")
+        if file_path and file_path.endswith(("tasks.md", "kanban.md")):
+            try:
+                if reorganize_tasks_file():
+                    print(f"[task-memory] reorganized {TASKS_FILE.name} by Status", file=sys.stderr)
+            except Exception as e:
+                print(f"[task-memory] reorganize failed: {e}", file=sys.stderr)
+
         task = get_current_task()
         if not task or task["total"] == 0 or task["completed"] == task["total"]:
             return
