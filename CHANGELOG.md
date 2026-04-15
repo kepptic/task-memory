@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-04-15
+
+### Added
+- **TodoWrite mirror** — `PostToolUse:TodoWrite` hook mirrors Claude's native todos into `planning/tasks.md` under a `## From TodoWrite` section. Items matching existing `### TASK-*` headings are skipped to avoid double-writing.
+- **`PreCompact` handler** — writes a full snapshot of the current in-progress task, recent Visual Operations Log and Errors Log entries, and compaction trigger to `planning/notes/{TASK}-precompact-{timestamp}.md` before Claude Code compacts context.
+- **`PostCompact` handler** — restores task context on the other side of compaction (shares the SessionStart handler).
+- **`SubagentStop` handler** — same completion checks as `Stop` apply to sub-agents.
+- **`Task` tool in PreToolUse matcher** — sub-agent spawns now bind to the current task.
+- **`monitors` manifest entry** in `plugin.json` so live task progress shows in `/agents`.
+
+### Changed
+- **Rewrote `task-memory-hook.sh` (558 LOC of bash) as `task-memory-hook.py` (~610 LOC, Python 3.11 stdlib)** — eliminates `sed -i.bak` macOS/GNU divergence, drops brittle `grep -oE` JSON parsing, replaces `set -e` + `grep -c` abort-on-zero footguns. `skill-eval.sh` stays as a tiny bash shim (~25 LOC) that delegates to the Python hook.
+- **Moved research from PreToolUse to PostToolUse** — `WebFetch` / `WebSearch` logging now captures the response snippet (the *finding*), not just the attempt. URL + first 120 chars of the response land in the Visual Operations Log.
+- **State files moved out of `/tmp`** — counters and session files now live under `$CLAUDE_PROJECT_DIR/.claude/state/task-memory/` instead of `/tmp/task-memory-*`. Avoids cross-project leakage and reboot loss. Added to `.gitignore`.
+- **`SessionEnd` decoupled from `Stop`** — `SessionEnd` now flushes session state and never emits `{"decision":"block"}`. Only `Stop` / `SubagentStop` gate on task completion.
+- **JSON parsing now uses `json` stdlib (Python) or `jq` (bash)** — the old `grep -oE '"tool_input"...{[^}]*}'` pattern broke on nested objects and newlines.
+- **Renamed `task-memory-init` skill to `tm-init`** — avoids collision with Claude Code's built-in `/init` command.
+
+### Fixed
+- `set -e` combined with `grep -c` (returns 1 on zero matches) would abort the hook mid-run. The Python rewrite removes the whole class.
+- `sed -i.bak` fallback files (`tasks.md.bak`) no longer created on every run — Python does atomic rewrites.
+- WebFetch/WebSearch logging no longer misses the response (was logged *before* the tool executed).
+- Task-block parsing no longer mis-counts subtasks when a task block contains nested `---` horizontal rules (block boundaries now derived from `### TASK-*` headings instead of `---`).
+
+### Migration Notes
+- Delete any `/tmp/task-memory-*` files — the plugin won't read them anymore.
+- If you had `/task-memory-init` bound somewhere, update to `/tm-init`.
+- Plugin consumers should re-install to pick up the new `hooks.json` matcher set.
+
 ## [1.1.0] - 2026-01-16
 
 ### Added
@@ -62,7 +91,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Manus Context Engineering](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus) principles
 - [MarkdownTaskManager](https://github.com/ioniks/MarkdownTaskManager) by @ioniks
 
-[Unreleased]: https://github.com/kepptic/task-memory/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/kepptic/task-memory/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/kepptic/task-memory/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/kepptic/task-memory/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/kepptic/task-memory/compare/v1.0.1...v1.0.3
 [1.0.1]: https://github.com/kepptic/task-memory/releases/tag/v1.0.1

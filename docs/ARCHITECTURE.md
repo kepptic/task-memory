@@ -49,22 +49,22 @@ User creates task in tasks.md
 ```
 Claude Code Event          Hook Script              Action
 ─────────────────────────────────────────────────────────────────
-SessionStart        →   task-memory-hook.sh   →   Display current task
+SessionStart        →   task-memory-hook.py   →   Display current task
                                                    Record session task
 
 UserPromptSubmit    →   skill-eval.sh         →   Detect TASK vs QUESTION
                                                    Show task context
 
-PreToolUse          →   task-memory-hook.sh   →   Refresh context (Write/Edit/Bash)
+PreToolUse          →   task-memory-hook.py   →   Refresh context (Write/Edit/Bash)
 (Write/Edit/Bash)                                  Record session task
 
-PreToolUse          →   task-memory-hook.sh   →   Log to Visual Operations Log
+PreToolUse          →   task-memory-hook.py   →   Log to Visual Operations Log
 (WebFetch/WebSearch)                               Trigger 2-Action Rule reminder
 
-PostToolUse         →   task-memory-hook.sh   →   Subtask completion reminder
+PostToolUse         →   task-memory-hook.py   →   Subtask completion reminder
 (Write/Edit/Bash)                                  Error logging (Bash failures)
 
-Stop                →   task-memory-hook.sh   →   Check session task completion
+Stop                →   task-memory-hook.py   →   Check session task completion
                                                    Block if subtasks incomplete
                                                    Return JSON: {"decision": "block"}
 ```
@@ -143,7 +143,7 @@ File System Access API
 
 **Hook Scripts:**
 - `skill-eval.sh` - Evaluates user prompt, detects TASK vs QUESTION
-- `task-memory-hook.sh` - Unified hook handler for all events
+- `task-memory-hook.py` - Unified hook handler for all events
 
 **Configuration:**
 - `.claude/settings.json` - Hook registration (project settings)

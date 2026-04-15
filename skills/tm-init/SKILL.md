@@ -1,6 +1,6 @@
 ---
-name: task-memory-init
-description: Initialize task-memory in a project. Detects monorepos, asks configuration questions, sets up planning directory, and updates CLAUDE.md. Use when setting up task-memory for the first time in a project.
+name: tm-init
+description: Initialize task-memory in a project. Detects monorepos, asks configuration questions, sets up planning directory, and updates CLAUDE.md. Use when setting up task-memory for the first time in a project. (Renamed from task-memory-init in 2.0 to avoid colliding with Claude Code's built-in /init command.)
 user-invocable: true
 allowed-tools:
   - Read

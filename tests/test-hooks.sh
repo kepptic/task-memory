@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-hooks.sh - Comprehensive test suite for task-memory-hook.sh
+# test-hooks.sh - Comprehensive test suite for task-memory-hook.py
 #
 # Run: ./tests/test-hooks.sh
 # Requires: The hook script and a planning/tasks.md file
@@ -20,7 +20,7 @@ TESTS_FAILED=0
 # Get script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-HOOK_SCRIPT="$PROJECT_ROOT/.claude/hooks/task-memory-hook.sh"
+HOOK_SCRIPT="$PROJECT_ROOT/.claude/hooks/task-memory-hook.py"
 
 # Test fixtures directory
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"

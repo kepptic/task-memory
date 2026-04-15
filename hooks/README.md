@@ -9,7 +9,7 @@ Single unified hook for context management, research logging, error tracking, an
 ├── settings.json           # Project hooks configuration (auto-loaded)
 └── hooks/
     ├── hooks.json          # Plugin format (for plugin installations)
-    ├── task-memory-hook.sh # Unified hook handler
+    ├── task-memory-hook.py # Unified hook handler
     ├── skill-eval.sh       # Skill evaluation engine
     └── README.md           # This file
 ```

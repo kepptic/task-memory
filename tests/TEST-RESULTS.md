@@ -135,7 +135,7 @@ These may be intentional design evolution.
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `.claude/hooks/task-memory-hook.sh` | 535 | Unified hook handler |
+| `.claude/hooks/task-memory-hook.py` | 535 | Unified hook handler |
 | `.claude/hooks/hooks.json` | 74 | Hook configuration |
 | `src/utils/markdown.js` | 857 | Markdown parser/serializer |
 | `src/App.jsx` | ~2000 | Main application |
@@ -166,19 +166,19 @@ chmod +x tests/test-hooks.sh
 
 ```bash
 # Test SessionStart
-echo '{"hook_event_name":"SessionStart"}' | ./.claude/hooks/task-memory-hook.sh
+echo '{"hook_event_name":"SessionStart"}' | ./.claude/hooks/task-memory-hook.py
 
 # Test PreToolUse Write
-echo '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/test.js"}}' | ./.claude/hooks/task-memory-hook.sh
+echo '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/test.js"}}' | ./.claude/hooks/task-memory-hook.py
 
 # Test PreToolUse WebFetch
-echo '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com"}}' | ./.claude/hooks/task-memory-hook.sh
+echo '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com"}}' | ./.claude/hooks/task-memory-hook.py
 
 # Test PostToolUse Bash error
-echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_result":"Error: command not found"}' | ./.claude/hooks/task-memory-hook.sh
+echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_result":"Error: command not found"}' | ./.claude/hooks/task-memory-hook.py
 
 # Test Stop
-echo '{"hook_event_name":"Stop"}' | ./.claude/hooks/task-memory-hook.sh
+echo '{"hook_event_name":"Stop"}' | ./.claude/hooks/task-memory-hook.py
 ```
 
 ---

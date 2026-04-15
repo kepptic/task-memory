@@ -16,31 +16,53 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.py",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.py",
+            "timeout": 15
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|Bash|WebFetch|WebSearch",
+        "matcher": "Write|Edit|Bash|Task",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.sh",
-            "timeout": 30
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.py",
+            "timeout": 15
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|Bash",
+        "matcher": "Write|Edit|Bash|WebFetch|WebSearch|TodoWrite",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.py",
             "timeout": 10
           }
         ]
@@ -51,7 +73,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.py",
             "timeout": 10
           }
         ]
@@ -62,8 +95,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.sh",
-            "timeout": 10
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/task-memory-hook.py",
+            "timeout": 5
           }
         ]
       }

@@ -258,20 +258,20 @@ When users install the plugin, `hooks/hooks.json` is used. When developing local
 Hook scripts are located in `hooks/` and executed by Claude Code at various lifecycle events.
 
 **Key files:**
-- `task-memory-hook.sh` - Main hook handler (SessionStart, PreToolUse, PostToolUse, Stop)
+- `task-memory-hook.py` - Main hook handler (SessionStart, PreToolUse, PostToolUse, Stop)
 - `skill-eval.sh` - User prompt classifier (TASK vs QUESTION detection)
 
 **Testing hooks directly:**
 
 ```bash
 # Test SessionStart
-echo '{"hook_event_name":"SessionStart","session_id":"test-123"}' | ./hooks/task-memory-hook.sh
+echo '{"hook_event_name":"SessionStart","session_id":"test-123"}' | ./hooks/task-memory-hook.py
 
 # Test PreToolUse with WebFetch
-echo '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com"}}' | ./hooks/task-memory-hook.sh
+echo '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com"}}' | ./hooks/task-memory-hook.py
 
 # Test Stop hook
-echo '{"hook_event_name":"Stop","session_id":"test-123"}' | ./hooks/task-memory-hook.sh
+echo '{"hook_event_name":"Stop","session_id":"test-123"}' | ./hooks/task-memory-hook.py
 ```
 
 **Hook development guidelines:**
@@ -351,7 +351,7 @@ cp -r hooks/ skills/ rules/ planning/ /tmp/test-project/
 cat > /tmp/test-project/.claude/settings.json << 'EOF'
 {
   "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/task-memory-hook.sh"}]}]
+    "SessionStart": [{"hooks": [{"type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/task-memory-hook.py"}]}]
   }
 }
 EOF
@@ -367,7 +367,7 @@ claude
 ls /tmp/task-memory-session-*.txt
 
 # Test specific hook events
-echo '{"hook_event_name":"SessionStart"}' | ./hooks/task-memory-hook.sh
+echo '{"hook_event_name":"SessionStart"}' | ./hooks/task-memory-hook.py
 ```
 
 ---
@@ -716,7 +716,7 @@ Test in all supported browsers:
 task-memory/
 ├── hooks/                   # Plugin source files (EDIT HERE)
 │   ├── hooks.json           # Plugin hook config (uses ${CLAUDE_PLUGIN_ROOT})
-│   ├── task-memory-hook.sh  # Main lifecycle hook
+│   ├── task-memory-hook.py  # Main lifecycle hook
 │   ├── skill-eval.sh        # Prompt classifier
 │   └── README.md            # Hook documentation
 │
@@ -784,7 +784,7 @@ task-memory/
 | File | Purpose |
 |------|---------|
 | `hooks/hooks.json` | Plugin hook config (for distribution) |
-| `hooks/task-memory-hook.sh` | Main lifecycle hook |
+| `hooks/task-memory-hook.py` | Main lifecycle hook |
 | `hooks/skill-eval.sh` | TASK vs QUESTION classifier |
 | `skills/task-memory/SKILL.md` | Full workflow documentation |
 | `skills/task-status/SKILL.md` | Quick context check |

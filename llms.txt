@@ -17,7 +17,7 @@ Task Memory is an open-source tool that gives AI coding assistants persistent me
 
 ## Skills (Claude Code Integration)
 
-- [skills/task-memory-init/SKILL.md](skills/task-memory-init/SKILL.md): Initialize task-memory in a new project (monorepo detection, interactive setup)
+- [skills/tm-init/SKILL.md](skills/tm-init/SKILL.md): Initialize task-memory in a new project (monorepo detection, interactive setup)
 - [skills/task-memory/SKILL.md](skills/task-memory/SKILL.md): Full task workflow guide
 - [skills/task-status/SKILL.md](skills/task-status/SKILL.md): Quick context verification (5-Question Reboot Test)
 - [skills/task-memory/MONOREPO.md](skills/task-memory/MONOREPO.md): Monorepo configuration patterns

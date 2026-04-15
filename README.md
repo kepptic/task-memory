@@ -42,7 +42,7 @@ chmod +x /path/to/your-project/hooks/*.sh
 # Run interactive setup
 cd /path/to/your-project
 claude
-# Then run: /task-memory-init
+# Then run: /tm-init
 ```
 
 ### Option 3: Plugin Install
@@ -115,7 +115,7 @@ Your research is preserved:
 
 | Command | Purpose |
 |---------|---------|
-| `/task-memory-init` | Initialize task-memory in a new project |
+| `/tm-init` | Initialize task-memory in a new project (was `/task-memory-init` in v1) |
 | `/task-memory` | Full task planning workflow |
 | `/task-status` | Quick context check (5-Question Reboot Test) |
 
@@ -125,9 +125,10 @@ Your research is preserved:
 your-project/
 ├── hooks/                 # Hook scripts
 │   ├── hooks.json         # Plugin config (uses ${CLAUDE_PLUGIN_ROOT})
-│   ├── task-memory-hook.sh
-│   └── skill-eval.sh
+│   ├── task-memory-hook.py   # Main hook (Python 3.11+ stdlib only)
+│   └── skill-eval.sh         # UserPromptSubmit shim
 ├── skills/                # Skill definitions
+│   ├── tm-init/
 │   ├── task-memory/
 │   └── task-status/
 ├── rules/                 # Workflow rules
@@ -147,12 +148,15 @@ your-project/
 
 | Event | Action |
 |-------|--------|
-| **SessionStart** | Display current task and progress |
+| **SessionStart** / **PostCompact** | Display current task and progress |
 | **UserPromptSubmit** | Show task context |
-| **PreToolUse** (Write/Edit/Bash) | Refresh task context |
-| **PreToolUse** (WebFetch/WebSearch) | Log to Visual Operations Log |
+| **PreToolUse** (Write/Edit/Bash/Task) | Refresh task context, bind work to current task |
+| **PostToolUse** (WebFetch/WebSearch) | Log URL + response snippet to Visual Operations Log |
+| **PostToolUse** (TodoWrite) | Mirror native todos into `planning/tasks.md` under `## From TodoWrite` |
 | **PostToolUse** (Bash errors) | Log to Errors Log |
-| **Stop** | Block if session tasks have incomplete subtasks |
+| **PreCompact** | Dump current task + research log + todos to `planning/notes/{TASK}-precompact-{ts}.md` |
+| **Stop** / **SubagentStop** | Block if session tasks have incomplete subtasks |
+| **SessionEnd** | Flush session state (never blocks) |
 
 ## Configuration
 

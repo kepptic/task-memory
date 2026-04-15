@@ -76,7 +76,7 @@ If hooks aren't working as expected:
 
 2. **Test hook manually:**
    ```bash
-   echo '{"hook_event_name":"SessionStart"}' | .claude/hooks/task-memory-hook.sh
+   echo '{"hook_event_name":"SessionStart"}' | .claude/hooks/task-memory-hook.py
    ```
 
 3. **Check planning directory detection:**

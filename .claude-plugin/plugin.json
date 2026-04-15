@@ -1,7 +1,7 @@
 {
   "name": "task-memory",
-  "version": "1.1.0",
-  "description": "Privacy-first Kanban task manager with Manus-style memory - tasks remember your research across sessions",
+  "version": "2.0.0",
+  "description": "Privacy-first Kanban task manager with Manus-style memory - tasks remember your research across sessions, survive compaction, and mirror native TodoWrite",
   "author": {
     "name": "kepptic",
     "email": "kepptic@users.noreply.github.com"
@@ -14,6 +14,18 @@
     "memory",
     "kanban",
     "tasks",
-    "context-preservation"
+    "context-preservation",
+    "todowrite",
+    "precompact"
+  ],
+  "hooks": "./hooks/hooks.json",
+  "monitors": [
+    {
+      "name": "task-memory-progress",
+      "description": "Live in-progress task + subtask progress",
+      "type": "command",
+      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/task-memory-hook.py",
+      "refreshSeconds": 30
+    }
   ]
 }

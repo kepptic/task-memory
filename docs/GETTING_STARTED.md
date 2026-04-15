@@ -30,7 +30,7 @@ chmod +x /path/to/your-project/hooks/*.sh
 # Run interactive setup
 cd /path/to/your-project
 claude
-# Then run: /task-memory-init
+# Then run: /tm-init
 ```
 
 The init command will:
@@ -113,12 +113,12 @@ As you work, Claude Code automatically:
 
 ## Using Slash Commands
 
-### /task-memory-init
+### /tm-init
 
 Interactive project setup. Use when first adding task-memory to a project:
 
 ```
-/task-memory-init
+/tm-init
 ```
 
 This will:
@@ -166,12 +166,12 @@ This answers 5 questions:
 your-project/
 ├── hooks/                 # Hook scripts
 │   ├── hooks.json         # Plugin hook config
-│   ├── task-memory-hook.sh
+│   ├── task-memory-hook.py
 │   ├── skill-eval.sh
 │   └── init-helper.sh     # Init detection script
 ├── skills/                # Skill definitions
 │   ├── task-memory/
-│   ├── task-memory-init/
+│   ├── tm-init/
 │   └── task-status/
 ├── rules/                 # Workflow rules
 ├── .claude/
