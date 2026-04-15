@@ -255,6 +255,9 @@ function App() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showColumnModal, setShowColumnModal] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [pendingOpenHandle, setPendingOpenHandle] = useState(null);
+  const [openDialogName, setOpenDialogName] = useState('');
+  const [openDialogGroup, setOpenDialogGroup] = useState('');
   const [showSmartArchiveModal, setShowSmartArchiveModal] = useState(false);
   const [smartArchiveColumn, setSmartArchiveColumn] = useState(null);
 
@@ -479,7 +482,7 @@ function App() {
   }, []);
 
   // Load a project from a directory handle
-  const loadProjectFromHandle = async (dirHandle, projectInfo = null) => {
+  const loadProjectFromHandle = async (dirHandle, projectInfo = null, overrides = null) => {
     try {
       setIsLoading(true);
       setLoadingMessage('Loading project files...');
@@ -556,8 +559,13 @@ function App() {
         setArchivedTasks([]);
       }
 
-      // Save to recent projects with task file name
-      await fileSystem.saveDirectoryHandle(dirHandle, null, taskResult.fileName);
+      // Save to recent projects with task file name (and optional displayName/group overrides)
+      await fileSystem.saveDirectoryHandle(
+        dirHandle,
+        overrides?.displayName || null,
+        taskResult.fileName,
+        overrides?.group
+      );
 
       // Update recent projects list
       const projects = await fileSystem.loadRecentProjects();
@@ -630,10 +638,45 @@ function App() {
     try {
       const handle = await fileSystem.requestDirectoryAccess();
       if (handle) {
-        await loadProjectFromHandle(handle);
+        // Defer actual load until user confirms display name + group
+        setPendingOpenHandle(handle);
+        setOpenDialogName(handle.name);
+        setOpenDialogGroup('');
       }
     } catch (error) {
       console.error('Failed to open project:', error);
+    }
+  };
+
+  const handleConfirmOpenProject = async () => {
+    const handle = pendingOpenHandle;
+    if (!handle) return;
+    const displayName = openDialogName.trim() || handle.name;
+    const group = openDialogGroup.trim();
+    setPendingOpenHandle(null);
+    setOpenDialogName('');
+    setOpenDialogGroup('');
+    try {
+      await loadProjectFromHandle(handle, null, { displayName, group });
+    } catch (error) {
+      console.error('Failed to open project:', error);
+    }
+  };
+
+  const handleCancelOpenProject = () => {
+    setPendingOpenHandle(null);
+    setOpenDialogName('');
+    setOpenDialogGroup('');
+  };
+
+  // Rename a project's group
+  const handleRenameGroup = async (index, newGroup) => {
+    try {
+      await fileSystem.renameGroup(index, newGroup);
+      const projects = await fileSystem.loadRecentProjects();
+      setRecentProjects(projects);
+    } catch (error) {
+      console.error('Failed to rename group:', error);
     }
   };
 
@@ -1387,6 +1430,7 @@ function App() {
               recentProjects={recentProjects}
               onSelectProject={handleSelectProject}
               onRenameProject={handleRenameProject}
+              onRenameGroup={handleRenameGroup}
               onDeleteProject={handleDeleteProject}
               onOpenNew={handleOpenProject}
             />
@@ -1775,6 +1819,52 @@ function App() {
         onRestore={handleRestoreTask}
         onDelete={handleDeleteArchivedTask}
       />
+
+      <Modal
+        isOpen={!!pendingOpenHandle}
+        onClose={handleCancelOpenProject}
+        title="Open Project"
+      >
+        <div className="form-group">
+          <label className="label" htmlFor="open-project-name">Display name</label>
+          <input
+            id="open-project-name"
+            type="text"
+            className="input"
+            value={openDialogName}
+            onChange={(e) => setOpenDialogName(e.target.value)}
+            placeholder={pendingOpenHandle?.name || 'Project name'}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmOpenProject(); }}
+          />
+          {pendingOpenHandle && (
+            <div className="project-selector-folder-name" style={{ marginTop: 4 }}>
+              folder: {pendingOpenHandle.name}
+            </div>
+          )}
+        </div>
+        <div className="form-group">
+          <label className="label" htmlFor="open-project-group">Group (optional)</label>
+          <input
+            id="open-project-group"
+            type="text"
+            className="input"
+            list="open-project-group-list"
+            value={openDialogGroup}
+            onChange={(e) => setOpenDialogGroup(e.target.value)}
+            placeholder="e.g. kepptic, clients, personal"
+            onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmOpenProject(); }}
+          />
+          <datalist id="open-project-group-list">
+            {Array.from(new Set(recentProjects.map((p) => p.group).filter(Boolean))).map((g) => (
+              <option key={g} value={g} />
+            ))}
+          </datalist>
+        </div>
+        <div className="form-actions" style={{ justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost" onClick={handleCancelOpenProject}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleConfirmOpenProject}>Open</button>
+        </div>
+      </Modal>
 
       {/* Mobile FAB - Floating Action Button for New Task */}
       {hasProject && (

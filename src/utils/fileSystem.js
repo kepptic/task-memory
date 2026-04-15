@@ -33,7 +33,7 @@ async function openDB() {
 }
 
 // Save directory handle to IndexedDB
-async function saveDirectoryHandle(handle, customName = null, taskFileName = null) {
+async function saveDirectoryHandle(handle, customName = null, taskFileName = null, group = undefined) {
   try {
     const db = await openDB();
     const transaction = db.transaction(STORE_NAME, "readwrite");
@@ -64,6 +64,10 @@ async function saveDirectoryHandle(handle, customName = null, taskFileName = nul
       if (taskFileName) {
         project.taskFileName = taskFileName;
       }
+      // Update group if explicitly provided (allow empty string to clear)
+      if (group !== undefined) {
+        project.group = group || undefined;
+      }
       projects.unshift(project);
     } else {
       // Add new project at the beginning
@@ -72,6 +76,7 @@ async function saveDirectoryHandle(handle, customName = null, taskFileName = nul
         displayName: projectDisplayName,
         handle: handle,
         taskFileName: taskFileName || DEFAULT_TASK_FILE,
+        group: group || undefined,
         lastAccessed: Date.now(),
       });
     }
@@ -465,6 +470,38 @@ async function renameProject(projectIndex, newName) {
   }
 }
 
+// Rename (or clear) a project's group
+async function renameGroup(projectIndex, newGroup) {
+  try {
+    const db = await openDB();
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+
+    const getRequest = store.get(PROJECTS_KEY);
+    const projects = await new Promise((resolve, reject) => {
+      getRequest.onsuccess = () => resolve(getRequest.result || []);
+      getRequest.onerror = () => reject(getRequest.error);
+    });
+
+    if (projectIndex >= 0 && projectIndex < projects.length) {
+      const trimmed = (newGroup || '').trim();
+      projects[projectIndex].group = trimmed || undefined;
+
+      const putRequest = store.put(projects, PROJECTS_KEY);
+      await new Promise((resolve, reject) => {
+        putRequest.onsuccess = resolve;
+        putRequest.onerror = () => reject(putRequest.error);
+      });
+
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error("Failed to rename group:", error);
+    return false;
+  }
+}
+
 // Select a single file (for opening kanban.md files)
 async function selectFile() {
   try {
@@ -550,6 +587,7 @@ export const fileSystem = {
   saveArchiveFile,
   deleteProjectFromRecents,
   renameProject,
+  renameGroup,
 };
 
 export {
@@ -571,4 +609,5 @@ export {
   saveArchiveFile,
   deleteProjectFromRecents,
   renameProject,
+  renameGroup,
 };

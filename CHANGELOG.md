@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-04-15
+
+### Added
+- **Project groups** — Each recent project can be tagged with a free-text group. The Recent Projects dropdown now renders group section headers (e.g. `kepptic`, `clients`, `personal`) with ungrouped projects collected under an "Ungrouped" header.
+- **Open Project dialog** — Opening a new project folder now prompts for a **Display name** and optional **Group** in a styled modal (with `<datalist>` autocomplete from existing groups) instead of silently saving the raw folder name.
+- **Folder subtitle in selector** — Every row in the dropdown now shows the underlying folder name in small monospace text under the display name, so two projects named `tasks` or `planning` are no longer indistinguishable.
+- **Inline group editing** — A tag-icon action on each row lets you edit a project's group in place; the group chip itself is also clickable to edit.
+- **Dropdown filter** — When you have 5+ recent projects, a filter input appears at the top of the dropdown and matches against display name, folder name, and group.
+
+### Changed
+- `saveDirectoryHandle(handle, customName, taskFileName)` now also accepts an optional `group` argument. Existing records without a `group` field are treated as ungrouped — no migration required (IndexedDB tolerates extra fields).
+
 ## [2.0.0] - 2026-04-15
 
 ### Added

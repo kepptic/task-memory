@@ -1875,6 +1875,64 @@ body {
   border-top: 1px solid var(--border-subtle);
 }
 
+.project-selector-filter {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.project-selector-filter .input {
+  width: 100%;
+  font-size: 0.8125rem;
+  padding: 4px 8px;
+}
+
+.project-group-header {
+  padding: var(--space-2) var(--space-3) 4px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  background: var(--surface-base);
+  position: sticky;
+  top: 0;
+}
+
+.project-selector-folder-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-group-badge {
+  font-size: 0.6875rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(120, 120, 200, 0.14);
+  color: var(--text-secondary, var(--text-primary));
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  margin-right: var(--space-1);
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.project-group-badge:hover {
+  background: rgba(120, 120, 200, 0.26);
+}
+
+.project-group-edit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 /* ============================================
    LOADING
    ============================================ */

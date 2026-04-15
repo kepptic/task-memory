@@ -6,7 +6,7 @@
 	},
 	"metadata": {
 		"description": "Privacy-first Kanban task manager with Manus-style memory - mirrors TodoWrite, survives compaction",
-		"version": "2.0.0"
+		"version": "2.1.0"
 	},
 	"plugins": [
 		{
