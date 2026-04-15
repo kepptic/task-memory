@@ -160,32 +160,108 @@ def _iter_task_blocks(content: str):
         yield m.group(1), heading, block
 
 
-STATUS_TO_SECTION = {
-    "todo": "to do",
-    "in-progress": "in progress",
-    "done": "done",
-}
-
 SECTION_HEADING_RE = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+
+# Emoji + symbol ranges to strip when computing canonical column IDs.
+# Mirrors src/utils/markdown.js:214 deriveColumnId(). Keeping the table in sync
+# with the HTML app means both reorganizers (hook and browser) agree on which
+# section a task belongs to — same column config, same answers.
+_EMOJI_RANGES = (
+    (0x1F300, 0x1F9FF),
+    (0x2600, 0x26FF),
+    (0x2700, 0x27BF),
+    (0x1F000, 0x1F02F),
+    (0x1F0A0, 0x1F0FF),
+    (0x2300, 0x23FF),
+    (0x2B00, 0x2BFF),
+    (0x2300, 0x23FF),
+)
+
+
+def _strip_emoji(s: str) -> str:
+    return "".join(ch for ch in s if not any(lo <= ord(ch) <= hi for lo, hi in _EMOJI_RANGES))
+
+
+def derive_column_id(name: str) -> str:
+    """Port of src/utils/markdown.js:214 deriveColumnId().
+
+    "📝 To Do" -> "to-do"
+    "To Do"    -> "to-do"
+    "🚀 In Progress" -> "in-progress"
+    """
+    if not name:
+        return "column"
+    s = _strip_emoji(name)
+    # Keep word chars, whitespace, hyphens; drop everything else
+    s = re.sub(r"[^\w\s-]", "", s, flags=re.UNICODE)
+    s = s.strip().lower()
+    s = re.sub(r"\s+", "-", s)
+    s = re.sub(r"^-+|-+$", "", s)
+    s = re.sub(r"-+", "-", s)
+    return s or "column"
+
+
+def normalize_status(value: str | None, valid_ids: set[str] | None = None) -> str:
+    """Normalize a Status field value to a canonical column ID.
+
+    Accepts: "todo", "to-do", "To Do", "in_progress", "In-Progress" etc.
+
+    Two-pass match against valid_ids when supplied: exact canonical match
+    first, then a hyphen-insensitive fallback so `Status: todo` matches a
+    `## To Do` section (id `to-do`). Without valid_ids, returns the canonical
+    form unchanged.
+    """
+    if not value:
+        return ""
+    v = derive_column_id(value.strip().lower().replace("_", "-"))
+    if not valid_ids or v in valid_ids:
+        return v
+    stripped = v.replace("-", "")
+    for cid in valid_ids:
+        if cid.replace("-", "") == stripped:
+            return cid
+    return v
+
+
+def parse_configured_columns(content: str) -> list[tuple[str, str]]:
+    """Read user's column config from `## ⚙️ Configuration` block.
+
+    Supports both formats:
+      **Columns**: To Do | In Progress | Done
+      **Columns**: 📝 To Do (todo) | 🚀 In Progress (in-progress) | ✅ Done (done)
+
+    Returns list of (canonical_id, display_name). Empty list if not configured.
+    """
+    m = re.search(r"##[ \t]+\S*[ \t]*Configuration\s+([\s\S]*?)(?:^---|\Z)",
+                  content, re.MULTILINE)
+    if not m:
+        return []
+    cm = re.search(r"\*\*Columns\*\*:\s*(.+)", m.group(1))
+    if not cm:
+        return []
+    out = []
+    for raw in cm.group(1).split("|"):
+        col = raw.strip()
+        if not col:
+            continue
+        # "Name (explicit-id)" form
+        idm = re.match(r"^(.+?)\s*\(([^)]+)\)\s*$", col)
+        if idm:
+            out.append((idm.group(2).strip(), idm.group(1).strip()))
+        else:
+            out.append((derive_column_id(col), col))
+    return out
 
 
 def reorganize_tasks_file() -> bool:
     """Move each TASK block into the section matching its **Status** field.
 
-    Claude otherwise has to do this manually (2 edits per status change), which
-    costs tokens. This runs on every PostToolUse:Write/Edit that touched
-    tasks.md. Idempotent — only rewrites if something actually moved.
+    Authoritative source: the `**Status**` field. Both the HTML app and this
+    hook honor that rule and use the same canonical-id matching, so a column
+    headed `## 📝 To Do` collects tasks with `**Status**: todo`, `to-do`, or
+    `To Do` indifferently.
 
-    Strategy:
-      1. Parse into preamble + [section heading + body] list
-      2. For each section, separate non-task prelude/trailing text from task
-         blocks so we preserve separators and prose
-      3. Map each task's Status -> target section name
-      4. Redistribute tasks into their target sections (preserving order
-         within a section for tasks that didn't move)
-      5. Rewrite only if the ordering changed
-
-    Returns True iff the file was modified.
+    Runs on every PostToolUse:Write/Edit that touched tasks.md. Idempotent.
     """
     content = read_tasks()
     if not content:
@@ -197,12 +273,10 @@ def reorganize_tasks_file() -> bool:
 
     preamble = content[: heading_matches[0].start()]
 
-    # Build section records in document order
     sections = []
     for i, m in enumerate(heading_matches):
         heading_line = content[m.start():m.end()] + "\n"
         body_start = m.end()
-        # include the newline immediately after heading in the body
         if body_start < len(content) and content[body_start] == "\n":
             body_start += 1
         body_end = (
@@ -212,73 +286,73 @@ def reorganize_tasks_file() -> bool:
         )
         body = content[body_start:body_end]
 
-        # Find task blocks within this body. Local iteration mirrors
-        # _iter_task_blocks but scoped to the section body only.
         task_matches = list(TASK_HEADING_RE.finditer(body))
         tasks = []
         pre = body
-        post = ""
         if task_matches:
-            first = task_matches[0]
-            pre = body[: first.start()]
+            pre = body[: task_matches[0].start()]
             for j, tm in enumerate(task_matches):
                 tstart = tm.start()
                 nxt = task_matches[j + 1].start() if j + 1 < len(task_matches) else len(body)
-                block = body[tstart:nxt]
-                tasks.append(block)
-            # post is already included in the last block (it extends to body end);
-            # if we want any trailing "---" separators to survive a move of the
-            # last task away, we'd need to detect them. Leave simple for now.
-            post = ""
+                tasks.append(body[tstart:nxt])
 
+        heading_text = m.group(1).strip()
         sections.append({
-            "name": m.group(1).strip().lower(),
+            "id": derive_column_id(heading_text),
+            "heading_text": heading_text,
             "heading_line": heading_line,
             "pre": pre,
-            "post": post,
             "original_tasks": tasks,
         })
 
-    # Only reorganize if the three canonical sections all exist.
-    section_names = {s["name"] for s in sections}
-    if not {"to do", "in progress", "done"}.issubset(section_names):
-        return False
+    # Build canonical_id -> section index. Skip non-column sections like
+    # "From TodoWrite", "Configuration", "Archive" by requiring the id to
+    # appear either in the user's column config OR be a known kanban column.
+    configured = parse_configured_columns(content)
+    if configured:
+        valid_ids = {cid for cid, _ in configured}
+    else:
+        # Defaults match HTML app's generateInitialTaskFile() in fileSystem.js
+        valid_ids = {"todo", "to-do", "in-progress", "in-review", "done"}
+
+    column_sections = [(idx, s) for idx, s in enumerate(sections) if s["id"] in valid_ids]
+    if len(column_sections) < 2:
+        return False  # nothing to reorganize between
+
+    column_id_set = {s["id"] for _, s in column_sections}
 
     # Re-assign each task to target section per its Status field.
-    assigned: dict[str, list[str]] = {s["name"]: [] for s in sections}
+    assigned: list[list[str]] = [list(s["original_tasks"]) for s in sections]
+    moves = 0
 
-    # Keep a map so if target doesn't exist, task stays in origin.
-    origin: dict[int, str] = {}
-    all_tasks: list[tuple[str, str]] = []  # (target_name, block)
-    for s in sections:
-        for blk in s["original_tasks"]:
-            status_m = re.search(r"\*\*Status\*\*:\s*([a-z-]+)", blk)
-            status = status_m.group(1) if status_m else None
-            target = STATUS_TO_SECTION.get(status, "")
-            if target not in assigned:
-                target = s["name"]  # unknown status -> keep where it was
-            origin[id(blk)] = s["name"]
-            all_tasks.append((target, blk))
+    for src_idx, src_section in column_sections:
+        # Iterate snapshot — assigned[src_idx] mutates as we move tasks out
+        for blk in list(assigned[src_idx]):
+            status_m = re.search(r"\*\*Status\*\*:\s*([\w-]+)", blk)
+            target_id = normalize_status(
+                status_m.group(1) if status_m else None,
+                column_id_set,
+            )
+            if not target_id or target_id not in column_id_set:
+                continue  # unknown / non-column status -> leave in place
+            if target_id == src_section["id"]:
+                continue  # already in the right column
+            # Find target section index
+            for tidx, tsec in column_sections:
+                if tsec["id"] == target_id:
+                    assigned[src_idx].remove(blk)
+                    assigned[tidx].append(blk)
+                    moves += 1
+                    break
 
-    for target, blk in all_tasks:
-        assigned[target].append(blk)
-
-    # Short-circuit if nothing moved.
-    changed = False
-    for s in sections:
-        if s["original_tasks"] != assigned[s["name"]]:
-            changed = True
-            break
-    if not changed:
+    if moves == 0:
         return False
 
-    # Rebuild file.
     out = [preamble]
-    for s in sections:
+    for idx, s in enumerate(sections):
         out.append(s["heading_line"])
         out.append(s["pre"])
-        out.extend(assigned[s["name"]])
-        out.append(s["post"])
+        out.extend(assigned[idx])
     new_content = "".join(out)
     if new_content == content:
         return False
