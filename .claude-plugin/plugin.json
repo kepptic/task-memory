@@ -18,14 +18,5 @@
     "todowrite",
     "precompact"
   ],
-  "hooks": "./hooks/hooks.json",
-  "monitors": [
-    {
-      "name": "task-memory-progress",
-      "description": "Live in-progress task + subtask progress",
-      "type": "command",
-      "command": "${CLAUDE_PLUGIN_ROOT}/hooks/task-memory-hook.py",
-      "refreshSeconds": 30
-    }
-  ]
+  "hooks": "./hooks/hooks.json"
 }
