@@ -491,9 +491,13 @@ function App() {
       setDirectoryHandle(dirHandle);
       fileSystem.setDirectoryHandle(dirHandle);
 
-      // Load task file with detection (supports tasks.md and kanban.md)
+      // Load task file with detection (supports tasks.md, kanban.md, and nested paths)
       const preferredFile = projectInfo?.taskFileName || null;
-      const taskResult = await fileSystem.loadTaskFile(dirHandle, preferredFile);
+      const preferredPath = projectInfo?.taskFilePath ?? null;
+      const taskResult = await fileSystem.loadTaskFile(
+        dirHandle,
+        preferredFile ? { fileName: preferredFile, relativePath: preferredPath || '' } : null,
+      );
       setFileHandle(taskResult.fileHandle);
       setCurrentTaskFileName(taskResult.fileName);
 
@@ -559,12 +563,13 @@ function App() {
         setArchivedTasks([]);
       }
 
-      // Save to recent projects with task file name (and optional displayName/group overrides)
+      // Save to recent projects with task file name + relative path (and optional displayName/group overrides)
       await fileSystem.saveDirectoryHandle(
         dirHandle,
         overrides?.displayName || null,
         taskResult.fileName,
-        overrides?.group
+        overrides?.group,
+        taskResult.relativePath ?? '',
       );
 
       // Update recent projects list
@@ -574,9 +579,11 @@ function App() {
       // Set current project
       setCurrentProject(projectInfo || {
         name: dirHandle.name,
-        displayName: dirHandle.name,
+        displayName: overrides?.displayName || dirHandle.name,
         handle: dirHandle,
         taskFileName: taskResult.fileName,
+        taskFilePath: taskResult.relativePath ?? '',
+        group: overrides?.group || undefined,
         lastAccessed: Date.now(),
       });
 
@@ -777,7 +784,10 @@ function App() {
       setIsLoading(true);
       setLoadingMessage(`Loading ${fileName}...`);
 
-      const result = await fileSystem.loadTaskFile(directoryHandle, fileName);
+      const result = await fileSystem.loadTaskFile(directoryHandle, {
+        fileName,
+        relativePath: currentProject?.taskFilePath ?? '',
+      });
 
       setFileHandle(result.fileHandle);
       setCurrentTaskFileName(fileName);

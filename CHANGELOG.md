@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-04-15
+
+### Added
+- **Repo-root project picker with auto-discovery** — Pick the repository root (e.g. `loro/`) instead of the folder holding `tasks.md`, and task-memory will walk the tree to find the right file. This means the Recent Projects dropdown now shows the **repo name** (`loro`) instead of whatever the kanban subfolder happened to be called (`planning`, `todo`, `docs`…), so two projects that both keep tasks in `docs/planning/` are no longer indistinguishable.
+- New `discoverTaskFile(dirHandle)` in `utils/fileSystem.js`. Search order: `<root>/tasks.md` → `<root>/kanban.md` → `planning/tasks.md` → `planning/kanban.md` → `docs/planning/tasks.md` → `docs/planning/kanban.md` → `docs/todo/<child>/tasks.md` (first child alphabetically) → `docs/todo/<child>/kanban.md`. First match wins; if none match, falls through to fresh-init at root like before.
+- New `taskFilePath` field on each project record (empty string = root, else e.g. `"docs/planning"` or `"docs/todo/api"`). Persisted to IndexedDB so subsequent loads skip discovery and go straight to the right file.
+- Project selector rows now show the resolved kanban path under the display name, e.g. `loro · docs/planning/tasks.md`, so you can see at a glance which file each project maps to.
+
+### Changed
+- `loadTaskFile(dirHandle, preferred)` now accepts either a string (legacy: filename at root) or `{ fileName, relativePath }`. All save paths (`saveKanbanFile`, `saveArchiveFile`) already operate on the resolved file handle, so writes land in the nested directory automatically.
+- `saveDirectoryHandle(...)` gained an optional 5th `taskFilePath` argument. Existing callers without it keep working.
+
+### Migration hint
+Existing projects keep working as-is (records with no `taskFilePath` default to root lookup). To get the nicer repo-name display, **re-add your project by picking the repo root** — the dropdown will then show `loro` instead of `planning`.
+
 ## [2.2.0] - 2026-04-15
 
 ### Added

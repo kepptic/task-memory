@@ -1,6 +1,6 @@
 {
   "name": "task-memory",
-  "version": "2.2.2",
+  "version": "2.3.0",
   "description": "Privacy-first Kanban task manager with Manus-style memory - tasks remember your research across sessions, survive compaction, and mirror native TodoWrite",
   "author": {
     "name": "kepptic",

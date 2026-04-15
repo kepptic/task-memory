@@ -209,7 +209,13 @@ export function ProjectSelector({
             <span className="project-selector-project-name">
               {project.displayName || project.name}
             </span>
-            <span className="project-selector-folder-name">{project.name}</span>
+            <span className="project-selector-folder-name">
+              {project.name}
+              {' · '}
+              {project.taskFilePath
+                ? `${project.taskFilePath}/${project.taskFileName || 'tasks.md'}`
+                : (project.taskFileName || 'tasks.md')}
+            </span>
             <span className="project-selector-meta">
               <Clock className="w-3 h-3" />
               {formatDate(project.lastAccessed)}
