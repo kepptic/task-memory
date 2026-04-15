@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-04-15
+
+### Added
+- **Multi-file kanban support** — New `task_files_glob` config field in `.task-memory.json` lets a project spread tasks across multiple kanban files (e.g. `docs/todo/*/tasks.md`). The hook now discovers all matching files, iterates them for in-progress tasks, and labels each one by its parent directory in SessionStart output. Example: Setsail keeps `docs/todo/api/tasks.md`, `docs/todo/admin/tasks.md`, `docs/todo/public/tasks.md`.
+- `todowrite_mirror_file` config field (optional) to pin where TodoWrite items land when multi-file mode is active. Defaults to the first globbed file.
+
+### Changed
+- `read_tasks()` now takes an explicit `path` argument; all callers pass the specific file they operate on so multi-file writes don't scatter across the wrong kanban.
+- `reorganize_tasks_file()` and `append_log_entry()` are now path-aware: reorganize runs only on the file that was just edited, log lines are written to whichever file owns the task ID.
+- In multi-file mode, `ensure_tasks_structure()` no longer auto-creates `planning/tasks.md` — projects using the glob already manage their kanban files. Single-file mode unchanged.
+- PreToolUse Write/Edit attention nudge now only fires when the edited file is the one owning the active in-progress task.
+
+### Unchanged
+- Existing single-file projects: no behavior change. When `task_files_glob` is absent, the hook behaves exactly as 2.1.0.
+
 ## [2.1.0] - 2026-04-15
 
 ### Added

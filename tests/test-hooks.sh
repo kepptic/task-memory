@@ -20,7 +20,7 @@ TESTS_FAILED=0
 # Get script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-HOOK_SCRIPT="$PROJECT_ROOT/.claude/hooks/task-memory-hook.py"
+HOOK_SCRIPT="$PROJECT_ROOT/hooks/task-memory-hook.py"
 
 # Test fixtures directory
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"
@@ -345,6 +345,55 @@ test_session_end_same_as_stop() {
     assert_exit_code "$exit_code" 1 "Exit code is 1 (blocking)"
 }
 
+test_multifile_session_start() {
+    log_test "Multi-file mode: SessionStart lists tasks from all kanbans"
+
+    local MFROOT="$FIXTURES_DIR/multifile"
+    rm -rf "$MFROOT"
+    mkdir -p "$MFROOT/docs/todo/api" "$MFROOT/docs/todo/admin" "$MFROOT/docs/todo/public"
+
+    cat > "$MFROOT/.task-memory.json" << 'EOF'
+{ "task_files_glob": "docs/todo/*/tasks.md" }
+EOF
+
+    local i=1
+    for domain in api admin public; do
+        cat > "$MFROOT/docs/todo/$domain/tasks.md" << EOF
+# $domain Kanban
+
+<!-- Config: Last Task ID: 00$i -->
+
+## In Progress
+
+### TASK-60$i | MF task $domain
+**Status**: in-progress
+
+**Subtasks**:
+- [x] done
+- [ ] pending
+
+---
+
+## Done
+
+---
+EOF
+        i=$((i+1))
+    done
+
+    local output
+    output=$(CLAUDE_PROJECT_DIR="$MFROOT" echo '{"hook_event_name":"SessionStart","session_id":"mf-test"}' | CLAUDE_PROJECT_DIR="$MFROOT" "$HOOK_SCRIPT" 2>&1) || true
+
+    assert_contains "$output" "TASK-601" "API task listed"
+    assert_contains "$output" "TASK-602" "Admin task listed"
+    assert_contains "$output" "TASK-603" "Public task listed"
+    assert_contains "$output" "(api)" "API file label shown"
+    assert_contains "$output" "(admin)" "Admin file label shown"
+    assert_contains "$output" "(public)" "Public file label shown"
+
+    rm -rf "$MFROOT"
+}
+
 test_checkbox_regex() {
     log_test "Checkbox regex correctly counts [x] and [ ] only"
 
@@ -427,6 +476,7 @@ test_post_tool_use_error_logging
 test_stop_incomplete_tasks
 test_session_end_same_as_stop
 test_checkbox_regex
+test_multifile_session_start
 
 # Teardown
 teardown_test_env

@@ -42,18 +42,28 @@ def state_path(name: str) -> Path:
     return STATE_DIR / name
 
 
-def find_planning_dir() -> Path:
-    """Locate planning dir: config -> nearest ancestor -> project root."""
+def _load_config() -> dict:
+    """Read .task-memory.json from project root (empty dict on any error)."""
     config_file = PROJECT_DIR / ".task-memory.json"
     if config_file.is_file():
         try:
             cfg = json.loads(config_file.read_text())
-            planning = cfg.get("planning_dir")
-            if planning:
-                p = Path(planning)
-                return p if p.is_absolute() else (PROJECT_DIR / p)
+            if isinstance(cfg, dict):
+                return cfg
         except (json.JSONDecodeError, OSError):
             pass
+    return {}
+
+
+CONFIG = _load_config()
+
+
+def find_planning_dir() -> Path:
+    """Locate planning dir: config -> nearest ancestor -> project root."""
+    planning = CONFIG.get("planning_dir")
+    if planning:
+        p = Path(planning)
+        return p if p.is_absolute() else (PROJECT_DIR / p)
 
     cwd = Path(os.environ.get("PWD", str(PROJECT_DIR)))
     try:
@@ -75,6 +85,50 @@ def find_planning_dir() -> Path:
 PLANNING_DIR = find_planning_dir()
 TASKS_FILE = PLANNING_DIR / "tasks.md"
 NOTES_DIR = PLANNING_DIR / "notes"
+
+# Multi-file mode: if task_files_glob is set, discover all matching tasks files
+# relative to PROJECT_DIR. Single-file mode keeps existing behavior.
+TASK_FILES_GLOB: str = (CONFIG.get("task_files_glob") or "").strip()
+
+
+def task_files() -> list[Path]:
+    """Return the list of task files to operate on.
+
+    Multi-file mode (config has `task_files_glob`): glob the pattern against
+    PROJECT_DIR and return existing, non-empty files sorted deterministically.
+
+    Single-file mode (default): return [TASKS_FILE] if it exists, else [].
+    """
+    if TASK_FILES_GLOB:
+        try:
+            files = sorted(PROJECT_DIR.glob(TASK_FILES_GLOB))
+        except (OSError, ValueError):
+            return []
+        return [f for f in files if f.is_file()]
+    return [TASKS_FILE] if TASKS_FILE.is_file() else []
+
+
+def primary_task_file() -> Path:
+    """The write target for TodoWrite mirror and other single-file operations.
+
+    Config can override with `todowrite_mirror_file` (relative to PROJECT_DIR).
+    Otherwise: first task file in multi-file mode, or TASKS_FILE default.
+    """
+    override = (CONFIG.get("todowrite_mirror_file") or "").strip()
+    if override:
+        p = Path(override)
+        return p if p.is_absolute() else (PROJECT_DIR / p)
+    files = task_files()
+    if files:
+        return files[0]
+    return TASKS_FILE
+
+
+def _label_for(path: Path) -> str:
+    """Human-readable label for a task file (parent dir name in multi-file mode)."""
+    if TASK_FILES_GLOB:
+        return path.parent.name
+    return ""
 
 
 # =============================================================================
@@ -129,11 +183,16 @@ def increment_counter(f: Path) -> int:
 TASK_HEADING_RE = re.compile(r"^### (TASK-\d+)(.*)$", re.MULTILINE)
 
 
-def read_tasks() -> str:
-    if not TASKS_FILE.is_file():
+def read_tasks(path: Path | None = None) -> str:
+    """Read a task file. Defaults to the primary/single TASKS_FILE.
+
+    In multi-file mode, callers should pass an explicit path.
+    """
+    target = path if path is not None else TASKS_FILE
+    if not target.is_file():
         return ""
     try:
-        return TASKS_FILE.read_text()
+        return target.read_text()
     except OSError:
         return ""
 
@@ -253,7 +312,7 @@ def parse_configured_columns(content: str) -> list[tuple[str, str]]:
     return out
 
 
-def reorganize_tasks_file() -> bool:
+def reorganize_tasks_file(path: Path | None = None) -> bool:
     """Move each TASK block into the section matching its **Status** field.
 
     Authoritative source: the `**Status**` field. Both the HTML app and this
@@ -263,7 +322,8 @@ def reorganize_tasks_file() -> bool:
 
     Runs on every PostToolUse:Write/Edit that touched tasks.md. Idempotent.
     """
-    content = read_tasks()
+    target = path if path is not None else TASKS_FILE
+    content = read_tasks(target)
     if not content:
         return False
 
@@ -357,31 +417,52 @@ def reorganize_tasks_file() -> bool:
     if new_content == content:
         return False
 
-    TASKS_FILE.write_text(new_content)
+    target.write_text(new_content)
     return True
 
 
-def get_current_task() -> dict[str, Any] | None:
-    content = read_tasks()
-    if not content:
-        return None
-
+def _extract_in_progress(content: str, source: Path) -> list[dict[str, Any]]:
+    """Return all in-progress tasks in a content blob, annotated with source path."""
+    out = []
     for task_id, heading, block in _iter_task_blocks(content):
-        # Find the Status line inside this block
         m = re.search(r"\*\*Status\*\*:\s*([a-z-]+)", block)
         if not m or m.group(1) != "in-progress":
             continue
         title = heading.split("|", 1)[1].strip() if "|" in heading else ""
         completed = len(re.findall(r"- \[x\]", block, re.IGNORECASE))
         total = len(re.findall(r"- \[[x ]\]", block, re.IGNORECASE))
-        return {
+        out.append({
             "task_id": task_id,
             "title": title,
             "completed": completed,
             "total": total,
             "block": block,
-        }
+            "source": source,
+            "label": _label_for(source),
+        })
+    return out
+
+
+def get_current_task() -> dict[str, Any] | None:
+    """Return the first in-progress task across all task files, or None."""
+    for f in task_files():
+        content = read_tasks(f)
+        if not content:
+            continue
+        found = _extract_in_progress(content, f)
+        if found:
+            return found[0]
     return None
+
+
+def get_all_in_progress_tasks() -> list[dict[str, Any]]:
+    """Return every in-progress task across all task files."""
+    out = []
+    for f in task_files():
+        content = read_tasks(f)
+        if content:
+            out.extend(_extract_in_progress(content, f))
+    return out
 
 
 def get_incomplete_subtasks(block: str, limit: int = 5) -> list[str]:
@@ -396,8 +477,16 @@ def get_incomplete_subtasks(block: str, limit: int = 5) -> list[str]:
 
 
 def ensure_tasks_structure() -> None:
+    # Notes dir is still a single location even in multi-file mode.
     PLANNING_DIR.mkdir(parents=True, exist_ok=True)
     NOTES_DIR.mkdir(parents=True, exist_ok=True)
+
+    # In multi-file mode, never auto-create files — projects using this mode
+    # already have their kanban files in place. Auto-creating would scatter
+    # empty files into unexpected paths.
+    if TASK_FILES_GLOB:
+        return
+
     if not TASKS_FILE.is_file():
         TASKS_FILE.write_text(
             "# Task Board\n\n"
@@ -428,43 +517,46 @@ def ensure_tasks_structure() -> None:
 
 
 def append_log_entry(task_id: str, log_line: str, section: str = "Visual Operations Log") -> bool:
-    """Append a log line to a named section inside a task block."""
-    content = read_tasks()
-    if not content:
-        return False
+    """Append a log line to a named section inside a task block.
 
-    new_content = None
-    for tid, heading, block in _iter_task_blocks(content):
-        if tid != task_id:
+    Searches all task files, writes to whichever file owns the task.
+    """
+    for f in task_files():
+        content = read_tasks(f)
+        if not content:
             continue
 
-        section_marker = f"**{section}**:"
-        if section_marker in block:
-            # Append line right after the section marker line.
-            new_block = re.sub(
-                rf"(\*\*{re.escape(section)}\*\*:[^\n]*\n)",
-                r"\1" + log_line + "\n",
-                block,
-                count=1,
-            )
-        elif "**Notes**:" in block:
-            # Insert new section at end of block (before any closing content).
-            trailing = "\n" + section_marker + "\n" + log_line + "\n"
-            new_block = block.rstrip() + trailing + "\n"
-        else:
-            trailing = "\n**Notes**:\n\n" + section_marker + "\n" + log_line + "\n"
-            new_block = block.rstrip() + trailing + "\n"
+        new_content = None
+        for tid, heading, block in _iter_task_blocks(content):
+            if tid != task_id:
+                continue
 
-        new_content = content.replace(block, new_block, 1)
-        break
+            section_marker = f"**{section}**:"
+            if section_marker in block:
+                new_block = re.sub(
+                    rf"(\*\*{re.escape(section)}\*\*:[^\n]*\n)",
+                    r"\1" + log_line + "\n",
+                    block,
+                    count=1,
+                )
+            elif "**Notes**:" in block:
+                trailing = "\n" + section_marker + "\n" + log_line + "\n"
+                new_block = block.rstrip() + trailing + "\n"
+            else:
+                trailing = "\n**Notes**:\n\n" + section_marker + "\n" + log_line + "\n"
+                new_block = block.rstrip() + trailing + "\n"
 
-    if new_content is None:
-        return False
-    try:
-        TASKS_FILE.write_text(new_content)
-        return True
-    except OSError:
-        return False
+            new_content = content.replace(block, new_block, 1)
+            break
+
+        if new_content is None:
+            continue
+        try:
+            f.write_text(new_content)
+            return True
+        except OSError:
+            return False
+    return False
 
 
 # =============================================================================
@@ -472,26 +564,54 @@ def append_log_entry(task_id: str, log_line: str, section: str = "Visual Operati
 # =============================================================================
 
 def handle_session_start() -> None:
-    task = get_current_task()
-
     print("", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
     print("TASK-MEMORY SESSION START", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
-    if not TASKS_FILE.is_file():
-        print("\nNo tasks.md found", file=sys.stderr)
-        print("Will be created when you start working.", file=sys.stderr)
+    files = task_files()
+    if not files:
+        if TASK_FILES_GLOB:
+            print(f"\nNo task files matched: {TASK_FILES_GLOB}", file=sys.stderr)
+        else:
+            print("\nNo tasks.md found", file=sys.stderr)
+            print("Will be created when you start working.", file=sys.stderr)
         print("=" * 60 + "\n", file=sys.stderr)
         return
 
-    if not task:
+    all_tasks = get_all_in_progress_tasks()
+
+    # Multi-file mode: list all in-progress tasks with their source labels.
+    if TASK_FILES_GLOB:
+        print(f"\nTask files ({len(files)}):", file=sys.stderr)
+        for f in files:
+            print(f"  - {f.relative_to(PROJECT_DIR) if str(f).startswith(str(PROJECT_DIR)) else f}", file=sys.stderr)
+
+        if not all_tasks:
+            print("\nNo in-progress tasks", file=sys.stderr)
+            print("=" * 60 + "\n", file=sys.stderr)
+            return
+
+        print(f"\n📋 In-progress ({len(all_tasks)}):", file=sys.stderr)
+        for t in all_tasks:
+            title = t["title"][:60]
+            suffix = f" ({t['label']})" if t["label"] else ""
+            progress = ""
+            if t["total"] > 0:
+                progress = f" [{t['completed']}/{t['total']}]"
+            print(f"  • {t['task_id']} | {title}…{progress}{suffix}", file=sys.stderr)
+        print("\n" + "=" * 60 + "\n", file=sys.stderr)
+        return
+
+    # Single-file mode (unchanged behavior).
+    if not all_tasks:
         print(f"\nPlanning: {TASKS_FILE}", file=sys.stderr)
         print("\nNo in-progress tasks", file=sys.stderr)
         print("Create a task with **Status**: in-progress to start", file=sys.stderr)
         print("=" * 60 + "\n", file=sys.stderr)
         return
 
+    task = all_tasks[0]
     print(f"\nCURRENT: {task['task_id']} | {task['title']}", file=sys.stderr)
 
     if task["total"] > 0:
@@ -512,6 +632,20 @@ def handle_pre_tool_use(tool_name: str, tool_input: dict, session_id: str) -> No
         if not task:
             return
         record_session_task(session_id, task["task_id"])
+
+        # Multi-file mode: only show the attention nudge on Write/Edit when
+        # the file being edited is the same file that owns the in-progress
+        # task. Otherwise we'd nag on every edit across an unrelated area.
+        if TASK_FILES_GLOB and tool_name in ("Write", "Edit"):
+            file_path = (tool_input.get("file_path") or tool_input.get("path") or "")
+            try:
+                edited = Path(file_path).resolve() if file_path else None
+                owner = task["source"].resolve()
+            except (OSError, ValueError):
+                edited, owner = None, None
+            if edited != owner:
+                return
+
         print("", file=sys.stderr)
         print("-" * 60, file=sys.stderr)
         print(f"TASK: {task['task_id']} | {task['title']}", file=sys.stderr)
@@ -583,11 +717,23 @@ def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, s
         # the block. No need for a second Edit call.
         file_path = (tool_input.get("file_path") or tool_input.get("path") or "")
         if file_path and file_path.endswith(("tasks.md", "kanban.md")):
+            # Reorganize only the file that was actually edited.
             try:
-                if reorganize_tasks_file():
-                    print(f"[task-memory] reorganized {TASKS_FILE.name} by Status", file=sys.stderr)
-            except Exception as e:
-                print(f"[task-memory] reorganize failed: {e}", file=sys.stderr)
+                edited = Path(file_path).resolve()
+            except (OSError, ValueError):
+                edited = None
+            # Scope the reorganize to a known task file (avoid touching
+            # arbitrary tasks.md files outside our config).
+            known = {p.resolve(): p for p in task_files()}
+            target = known.get(edited) if edited else None
+            if target is None and not TASK_FILES_GLOB and edited == TASKS_FILE.resolve():
+                target = TASKS_FILE
+            if target is not None:
+                try:
+                    if reorganize_tasks_file(target):
+                        print(f"[task-memory] reorganized {target.name} by Status", file=sys.stderr)
+                except Exception as e:
+                    print(f"[task-memory] reorganize failed: {e}", file=sys.stderr)
 
         task = get_current_task()
         if not task or task["total"] == 0 or task["completed"] == task["total"]:
@@ -601,7 +747,8 @@ def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, s
         print("Mark completed items [x]:", file=sys.stderr)
         for s in get_incomplete_subtasks(task["block"]):
             print(f"   - [ ] {s}", file=sys.stderr)
-        print(f"Edit: {TASKS_FILE}", file=sys.stderr)
+        edit_target = task.get("source") or TASKS_FILE
+        print(f"Edit: {edit_target}", file=sys.stderr)
         print("-" * 50 + "\n", file=sys.stderr)
         return
 
@@ -642,12 +789,24 @@ def mirror_todowrite(todos: list[dict]) -> None:
     ### TASK heading (case-insensitive) to avoid double-writing.
     """
     ensure_tasks_structure()
-    content = read_tasks()
+    target = primary_task_file()
+    # In multi-file mode the primary might not exist if user hasn't created it;
+    # create an empty mirror file so we don't silently lose TodoWrite data.
+    if not target.is_file():
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("# Task Board\n\n")
+        except OSError:
+            return
+    content = read_tasks(target)
 
+    # Check against existing titles across ALL task files so we don't
+    # double-mirror items the user has already promoted into a TASK block.
     existing_titles = set()
-    for _, heading, _ in _iter_task_blocks(content):
-        if "|" in heading:
-            existing_titles.add(heading.split("|", 1)[1].strip().lower())
+    for f in task_files():
+        for _, heading, _ in _iter_task_blocks(read_tasks(f)):
+            if "|" in heading:
+                existing_titles.add(heading.split("|", 1)[1].strip().lower())
 
     lines = []
     status_marker = {"completed": "x", "in_progress": "-", "pending": " "}
@@ -686,7 +845,7 @@ def mirror_todowrite(todos: list[dict]) -> None:
         new_content = content.rstrip() + "\n" + new_section
 
     try:
-        TASKS_FILE.write_text(new_content)
+        target.write_text(new_content)
     except OSError:
         pass
 
@@ -727,8 +886,10 @@ def handle_pre_compact(payload: dict) -> None:
     else:
         parts += ["## Current Task", "", "_No in-progress task._", ""]
 
-    # Recent research log (last 20 entries)
-    content = read_tasks()
+    # Recent research log (last 20 entries) — pull from the file that owns
+    # the active task, falling back to the primary file.
+    source = (task.get("source") if task else None) or primary_task_file()
+    content = read_tasks(source)
     for section in ("Visual Operations Log", "Errors Log"):
         m = re.search(rf"\*\*{re.escape(section)}\*\*:\s*\n((?:- .+\n)+)", content)
         if m:

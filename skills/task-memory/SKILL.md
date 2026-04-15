@@ -83,6 +83,45 @@ Before marking a task done, verify:
 
 ---
 
+## Multi-File Projects
+
+Some projects split tasks across multiple kanban files — for example, one
+per domain (`api`, `admin`, `public`) or per workspace in a monorepo.
+The hook supports this via the `task_files_glob` field in
+`.task-memory.json` at the project root:
+
+```json
+{
+  "task_files_glob": "docs/todo/*/tasks.md"
+}
+```
+
+When set, the hook:
+
+- Discovers every file matching the glob (sorted for deterministic output).
+- On `SessionStart`, lists **all** in-progress tasks from every file, each
+  annotated with its parent-directory label so you can see at a glance
+  which file owns what:
+  ```
+  📋 In-progress (3):
+    • TASK-491 | Our Crew page redesign… [2/5] (admin)
+    • TASK-501 | API rate limit… [0/3] (api)
+    • TASK-512 | Public marketing hero… [4/4] (public)
+  ```
+- Routes log appends (`WebFetch`, `WebSearch`, `Bash` errors) to whichever
+  file owns the referenced `TASK-XXX`.
+- Reorganizes the **specific** file that was edited (no cross-file moves).
+- Only nags on Write/Edit when the edited file is the one holding the
+  active task — unrelated edits don't re-print the task context.
+
+Existing single-file projects don't need any config — the old behavior
+(`planning/tasks.md`) is unchanged when `task_files_glob` is absent.
+
+An optional `todowrite_mirror_file` field pins TodoWrite mirroring to one
+file; otherwise the first file in the glob receives the mirror section.
+
+---
+
 ## Workflow
 
 ### Step 1: Create Task
