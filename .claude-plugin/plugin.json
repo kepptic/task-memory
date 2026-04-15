@@ -17,6 +17,5 @@
     "context-preservation",
     "todowrite",
     "precompact"
-  ],
-  "hooks": "./hooks/hooks.json"
+  ]
 }
