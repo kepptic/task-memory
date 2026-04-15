@@ -5,17 +5,17 @@
 		"email": "kepptic@users.noreply.github.com"
 	},
 	"metadata": {
-		"description": "Privacy-first Kanban task manager with Manus-style memory",
-		"version": "1.1.0"
+		"description": "Privacy-first Kanban task manager with Manus-style memory - mirrors TodoWrite, survives compaction",
+		"version": "2.0.0"
 	},
 	"plugins": [
 		{
 			"name": "task-memory",
-			"description": "Privacy-first Kanban task manager with Manus-style memory - tasks remember your research across sessions",
+			"description": "Privacy-first Kanban task manager with Manus-style memory - mirrors native TodoWrite, survives PreCompact, project-local state",
 			"source": "./",
 			"category": "productivity",
 			"strict": false,
-			"skills": ["./skills/task-memory", "./skills/task-status"]
+			"skills": ["./skills/task-memory", "./skills/task-status", "./skills/tm-init"]
 		}
 	]
 }
