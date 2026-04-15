@@ -770,7 +770,24 @@ def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, s
             if target is not None:
                 try:
                     if reorganize_tasks_file(target):
-                        print(f"[task-memory] reorganized {target.name} by Status", file=sys.stderr)
+                        # Tell Claude the file changed out from under it — the
+                        # next Edit on this path needs a fresh Read or old_string
+                        # won't match. additionalContext is surfaced to the
+                        # model in its next turn; stderr shows up in transcript.
+                        msg = (
+                            f"[task-memory] reorganized {target.name} — the file "
+                            f"on disk no longer matches your last Read of "
+                            f"{target}. Re-read this file before your next Edit "
+                            f"to it, or old_string will miss."
+                        )
+                        print(msg, file=sys.stderr)
+                        try:
+                            print(json.dumps({"hookSpecificOutput": {
+                                "hookEventName": "PostToolUse",
+                                "additionalContext": msg,
+                            }}))
+                        except Exception:
+                            pass
                 except Exception as e:
                     print(f"[task-memory] reorganize failed: {e}", file=sys.stderr)
 
