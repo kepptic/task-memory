@@ -1,6 +1,6 @@
 # Kanban Board
 
-<!-- Config: Last Task ID: 14 -->
+<!-- Config: Last Task ID: 16 -->
 
 ## ⚙️ Configuration
 
@@ -132,6 +132,92 @@ Test task for auto-reorganization. Originally in To Do section with Status: in-p
 - 2026-01-16 09:19:30 - Error: Error: command not found
 
 ## Done
+
+### TASK-016 | Dual-Format Release — Claude Code + Cowork
+**Priority**: 🟠 High | **Category**: Feature | **Status**: done | **Assigned**: @user
+**Workflow**: Feature | **Complexity**: Standard
+**Created**: 2026-04-16 | **Started**: 2026-04-16 | **Finished**: 2026-04-16
+**Tags**: #packaging #cowork #release #plugin
+
+Ship task-memory as both a Claude Code plugin (current) and a Cowork plugin so users in either environment can install it natively.
+
+Key finding from port analysis: skills/, commands/, and command-type hooks are format-identical across both runtimes. Differences are limited to: (1) Cowork convention uses thin `commands/*.md` slash-command wrappers in addition to `skills/*/SKILL.md`; (2) Cowork installs via sideloaded `.plugin` archive, not Claude Code's marketplace.json mechanism; (3) `${CLAUDE_PLUGIN_ROOT}` and hook event names are identical across both — no hook changes needed.
+
+**Subtasks**:
+- [x] Phase 1: Add `commands/` directory with thin wrappers for tm-init, task-memory, task-status
+- [x] Phase 2: Verify `hooks/hooks.json` env vars work under Cowork (depends: Phase 1)
+- [x] Phase 3: Bump plugin.json to 3.2.0 and update description (depends: Phase 1)
+- [x] Phase 4: Create `scripts/build-cowork-plugin.sh` that produces a `.plugin` archive (depends: Phase 3)
+- [x] Phase 5: Update README.md with dual-install instructions (depends: Phase 4)
+- [x] Phase 6: Update CLAUDE.md with Cowork install note (depends: Phase 5)
+- [x] Phase 7: Test-run build script, verify archive structure (depends: Phase 4)
+
+**Pre-Work Checklist**:
+- [x] Read relevant files (plugin.json, marketplace.json, hooks.json, hooks/*)
+- [x] Searched for similar implementations (Cowork productivity plugin layout)
+- [x] Identified patterns to follow (commands/ as thin wrappers, skills/ as deep docs)
+- [x] Reviewed known gotchas (virtiofs can't do zip's atomic rename → build script stages in /tmp)
+
+**Notes**:
+Files added:
+- `commands/tm-init.md`, `commands/task-memory.md`, `commands/task-status.md` — Cowork-style thin slash-command wrappers (YAML frontmatter + prose, delegate to `${CLAUDE_PLUGIN_ROOT}/skills/*/SKILL.md`)
+- `scripts/build-cowork-plugin.sh` — produces `dist/task-memory-<version>.plugin` (zip) + `.tar.gz` fallback. Stages in mktemp to avoid fuse/NFS rename failures. Reads version dynamically from plugin.json without jq.
+
+Files updated:
+- `.claude-plugin/plugin.json` → v3.2.0, description mentions both runtimes, adds `claude-code` and `cowork` keywords
+- `README.md` — restructured Quick Start: Claude Code install first, Cowork sideload second, git clone / manual copy / standalone HTML after. Added dual-format callout at top. File Structure diagram now shows `.claude-plugin/`, `commands/`, `scripts/`.
+- `CLAUDE.md` — Install section now documents both paths
+
+Verification (tested in /tmp clean copy):
+- `dist/task-memory-3.2.0.plugin` — 52 KB zip, 26 files
+- All required paths present (plugin.json, hooks.json, 3 skills, 3 commands, README, LICENSE)
+- No leaked __pycache__, .DS_Store, node_modules, or planning/
+- Python hook compiles (`py_compile` passes)
+- All three JSON files parse
+- SessionStart smoke-test: prints TASK-MEMORY SESSION START banner correctly from the unpacked archive
+
+**Errors Log**:
+- 2026-04-16 — zip failed on virtiofs mount ("Operation not permitted" on rename). Fix: build script now stages and zips inside `mktemp -d` (local tmpfs), then copies finished artifact to `dist/`. Works on any filesystem.
+
+### TASK-015 | Structural Context Preservation — v3.1.0 Overhaul
+**Priority**: 🟠 High | **Category**: Feature | **Status**: done | **Assigned**: @user
+**Workflow**: Refactor | **Complexity**: Complex
+**Created**: 2026-04-16 | **Started**: 2026-04-16 | **Finished**: 2026-04-16
+**Tags**: #hooks #skills #context-preservation #plugin
+
+Context loss was the #1 failure mode, and every preservation mechanism was advisory. Make preservation structural via hook enforcement so Claude can't ship research without synthesis.
+
+**Subtasks**:
+- [x] Phase 1: Hook — SessionStart auto-loads notes or warns CONTEXT GAP
+- [x] Phase 2: Hook — auto-create notes skeleton at 2-op boundary (depends: Phase 1)
+- [x] Phase 3: Hook — Stop blocks on empty/skeleton notes with research (depends: Phase 2)
+- [x] Phase 4: Hook — PreCompact appends ops log to main notes file (depends: Phase 2)
+- [x] Phase 5: `/task-status` rewrite — Context Health Score 0-5 (depends: Phase 1)
+- [x] Phase 6: `/task-memory` rewrite — Context Preservation Protocol section (depends: Phase 5)
+- [x] Phase 7: `/tm-init` — CLAUDE.md template includes session-start + preservation (depends: Phase 6)
+- [x] Phase 8: Project CLAUDE.md — triage + preservation tables (depends: Phase 7)
+- [x] Phase 9: TROUBLESHOOTING — document skeleton/gap failure modes
+- [x] Phase 10: Bump plugin.json to 3.1.0
+
+**Pre-Work Checklist**:
+- [x] Read relevant files (hook, all three skills, CLAUDE.md)
+- [x] Searched for similar implementations (existing 2-Action Rule scaffolding)
+- [x] Identified patterns to follow (hook returns JSON with decision: block)
+- [x] Reviewed known gotchas (counter file path; glob bypass in multi-file mode)
+
+**Notes**:
+Files changed:
+- `hooks/task-memory-hook.py` — added `_load_notes_summary`, `_count_research_ops`, `_create_notes_skeleton`, `_notes_has_content`, `_detect_complexity`; rewrote SessionStart, Stop, PreCompact handlers
+- `skills/task-memory/SKILL.md` → v3.0.0
+- `skills/task-status/SKILL.md` → v2.0.0 (Context Health Score)
+- `skills/tm-init/SKILL.md` → v2.0.0 (CLAUDE.md template)
+- `skills/task-memory/TROUBLESHOOTING.md`
+- `CLAUDE.md` (project root)
+- `.claude-plugin/plugin.json` → 3.1.0
+
+Verified in `/tmp/tm-test-gap`: empty-project path, gap detection, Stop block, skeleton creation all pass.
+
+**Errors Log**:
 
 ### TASK-013 | Subtask/Checklist UI Redesign
 **Priority**: 🟠 High | **Category**: UI/UX | **Status**: done | **Assigned**: @user

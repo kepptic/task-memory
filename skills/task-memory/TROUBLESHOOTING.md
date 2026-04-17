@@ -40,7 +40,16 @@ Assistant: *immediately writes code*  ← WRONG
 ```
 View screenshot → Read PDF → Code → [context reset] → Lost insights  ← WRONG
 ```
-**Fix:** Create notes file after 2 visual operations
+**Fix:** After 2 research ops, the hook auto-creates `planning/notes/TASK-XXX.md`. You must fill in Patterns / Gotchas / Decisions — the Stop hook will block if the file is empty on tasks with research.
+
+### ❌ Empty skeleton notes
+```markdown
+## Patterns Discovered
+_Reusable techniques, "do this"_
+
+-                                       ← WRONG: placeholder left empty
+```
+**Fix:** Replace the italic placeholder with actual Patterns. Each bullet should be specific enough to apply without re-reading source material. Stop hook checks for ≥3 non-placeholder lines.
 
 ### ❌ Vague notes
 ```markdown
@@ -51,6 +60,15 @@ View screenshot → Read PDF → Code → [context reset] → Lost insights  ←
 - 3-panel layout: 250px left, fluid center, 300px right  ← CORRECT
 ```
 
+### ❌ Ignoring "CONTEXT GAP DETECTED" at SessionStart
+```
+[SessionStart shows:]
+⚠️  CONTEXT GAP DETECTED
+   6 research operations logged but NO notes file.
+   Previous session insights may be LOST.
+```
+**Fix:** Before coding, read the Visual Operations Log (with its response snippets), synthesize into notes/TASK-XXX.md, then run `/task-status` to re-verify Context Health Score.
+
 ### ❌ Repeating failed actions
 ```
 npm install fails → npm install again → npm install again  ← WRONG
@@ -59,11 +77,16 @@ npm install fails → npm install again → npm install again  ← WRONG
 
 ## Counter File Behavior
 
-The hook uses `/tmp/task-memory-*.txt` for operation counters:
-- `task-memory-research-count` - Tracks WebFetch/WebSearch operations for 2-Action Rule
-- `task-memory-progress-count` - Tracks Write/Edit operations for subtask reminders
+The hook uses `.claude/state/task-memory/` for operation counters (project-scoped, persists across reboots):
+- `research-count` — WebFetch/WebSearch operations for 2-Action Rule
+- `progress-count` — Write/Edit operations for subtask reminders
+- `session-<id>.txt` — per-session task tracking (used by Stop hook)
+- `stop-blocks-<id>.txt` — Stop-block retry counter (loop prevention)
 
-**Note:** These counters reset on system reboot. This is by design - counters are session-local and don't need to persist.
+**To reset counters manually:**
+```bash
+rm -rf .claude/state/task-memory/
+```
 
 ## Hook Debugging
 

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-04-17
+
+### Fixed
+
+- **Stop hook no longer nags on off-topic sessions.** Prior behavior: any `Bash`/`Edit`/`Write`/`Task` tool call stamped the session as "worked on" the in-progress task, so asking an unrelated question while a task was active would trap the model in a Stop-block loop until it manually flipped Status to `todo`. New behavior: the session is stamped only when the tool use is actually task-relevant (touches `tasks.md`, touches `notes/TASK-XXX.md`, touches a path mentioned in the task block body, or references the task ID in a Bash command / Task prompt / Edit content). Read/Grep/Glob never stamp. Set `TASK_MEMORY_FORCE_STAMP=1` to restore pre-3.3 blanket behavior.
+
+- **Sticky loop release.** After `MAX_STOP_BLOCKS` (default 2) consecutive blocks, the hook now writes a `released-{session}-{task}.flag` and will not re-nag for the same session+task combination. Previously the counter was unlinked, so every next Stop cycle started from zero and blocked twice again. Flag is cleared automatically on SessionEnd or by `rm`-ing the path printed in the release message.
+
+### Added
+
+- **Engagement threshold** (`min_engagements_to_block`, default `3`). Sessions with fewer than N relevant tool uses on the active task produce a stderr warning but never block Stop. Prevents the "asked one question, can't stop" failure mode.
+
+- **Off-topic session escape hatch.** `touch .claude/state/task-memory/off-topic-<session-id>.flag` disables all stamping and Stop blocking for the remainder of the session. The Stop hook's block message includes this path so it's copy-paste actionable.
+
+- **Proactive notes skeleton creation.** SessionStart now creates `planning/notes/TASK-XXX.md` with the canonical 6-section skeleton (Summary / Patterns / Gotchas / Decisions / Resources / Open Questions) for every in-progress task — not only after 2 research ops. Guarantees the file exists for PreCompact to append to, even on low-research tasks.
+
+- **Session-state GC on SessionStart.** Files older than `session_state_max_age_hours` (default `24`) are deleted: `session-*.txt`, `stop-blocks-*.txt`, `released-*.flag`, `engagement-*.txt`, `off-topic-*.flag`. Keeps state directory clean even when SessionEnd doesn't fire (crashes, forced exits).
+
+- **Copy-paste actionable Stop block messages.** The block reason now includes the exact `Edit` command to flip Status to `todo` (with the correct relative path), plus the `touch` command for the off-topic flag. Reduces friction when pausing work.
+
+### Changed
+
+- **SessionEnd cleanup is comprehensive.** Now removes `session-*.txt`, `stop-blocks-*.txt`, `off-topic-*.flag`, all `released-{session}-*.flag`, and all `engagement-{session}-*.txt` for the ending session. Previously only the session task file was removed, leaving stop-block counters and other state behind.
+
+- **`examples/` refreshed to canonical format.** `examples/tasks.md` now uses the 4-column emoji layout (`📝 To Do | 🚀 In Progress | 👀 In Review | ✅ Done`) that matches `tm-init` output. Every task carries `Workflow` and `Complexity` fields. `examples/notes/` files rewritten in the canonical skeleton structure so `tm-init` and agents can treat this directory as a reference. New `examples/.task-memory.json` shows the full config surface.
+
+### Known issues
+
+- The pre-3.0 test cases in `tests/test-hooks.sh` assert on output strings that were removed in earlier versions (`2-ACTION RULE`, `INCOMPLETE:`, `TASK COMPLETION CHECK`, `Logged to TASK-002`). They fail both before and after this release. A separate cleanup pass should either fix the assertions to match current output or drop the tests. The 7 new v3.3 test cases all pass.
+
 ## [3.0.0] - 2026-04-15
 
 ### Added

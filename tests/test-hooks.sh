@@ -236,12 +236,18 @@ test_session_start_no_file() {
 }
 
 test_pre_tool_use_write() {
-    log_test "PreToolUse with Write tool"
+    log_test "PreToolUse with Edit tool (task-relevant — touches tasks.md)"
 
     create_test_tasks_file
 
+    # v3.3+ relevance gating: context banner only appears when the tool use
+    # actually touches the task. Editing tasks.md itself is clearly relevant.
+    # (Using Edit instead of Write because Write on tasks.md is correctly
+    # blocked by the anti-clobber guard.)
+    local input
+    input=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Edit","session_id":"prewrite-test","tool_input":{"file_path":"%s/planning/tasks.md","old_string":"x","new_string":"y"}}' "$FIXTURES_DIR")
     local output
-    output=$(echo '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/test/file.js"}}' | "$HOOK_SCRIPT" 2>&1) || true
+    output=$(echo "$input" | "$HOOK_SCRIPT" 2>&1) || true
 
     assert_contains "$output" "TASK: TASK-002" "Task context shown"
     assert_contains "$output" "Progress: 1/3" "Progress shown"
@@ -438,6 +444,215 @@ EOF
 }
 
 # =============================================================================
+# v3.3.0 Tests — relevance gating, sticky release, engagement threshold
+# =============================================================================
+
+# Helper: reset all v3.3 session state between tests so we get a clean slate.
+reset_v33_state() {
+    local state_dir="$FIXTURES_DIR/.claude/state/task-memory"
+    [ -d "$state_dir" ] || return 0
+    rm -f "$state_dir"/session-*.txt "$state_dir"/stop-blocks-*.txt \
+          "$state_dir"/released-*.flag "$state_dir"/engagement-*.txt \
+          "$state_dir"/off-topic-*.flag 2>/dev/null || true
+}
+
+test_stamping_scoped_to_relevant_tool_use() {
+    log_test "v3.3: ambient Bash does NOT stamp session as worked-on"
+
+    create_test_tasks_file
+    reset_v33_state
+
+    local sid="scope-test-session"
+
+    # Unrelated Bash call — should NOT trigger the Stop block, because the
+    # command doesn't mention TASK-002 or any path in the task block.
+    echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"ls /tmp"}}' \
+        | "$HOOK_SCRIPT" 2>&1 || true
+
+    # Now fire Stop. If the ambient Bash stamped us, this would block.
+    local output
+    output=$(echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' \
+        | "$HOOK_SCRIPT" 2>&1) || true
+
+    # Expect NO blocking JSON — empty stdout is fine.
+    if echo "$output" | grep -q '"decision": "block"'; then
+        log_fail "ambient Bash should not cause Stop block (got blocking JSON)"
+    else
+        log_pass "ambient Bash did not stamp session"
+    fi
+}
+
+test_stamping_stamps_on_task_id_in_bash() {
+    log_test "v3.3: Bash command mentioning task id DOES stamp"
+
+    create_test_tasks_file
+    reset_v33_state
+
+    local sid="stamp-test-session"
+
+    # Emit enough engagements to pass the threshold (3 by default).
+    for _ in 1 2 3 4; do
+        echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"grep TASK-002 planning/tasks.md"}}' \
+            | "$HOOK_SCRIPT" 2>&1 || true
+    done
+
+    local output
+    output=$(echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' \
+        | "$HOOK_SCRIPT" 2>&1) || true
+
+    assert_contains "$output" '"decision": "block"' "Stop blocks after relevant engagement"
+    assert_contains "$output" "TASK-002" "Block message names the task"
+}
+
+test_engagement_threshold_releases_short_sessions() {
+    log_test "v3.3: Stop does not block when engagement < threshold"
+
+    create_test_tasks_file
+    reset_v33_state
+
+    local sid="short-session"
+
+    # One relevant tool use — below the default threshold of 3.
+    echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"grep TASK-002 planning/tasks.md"}}' \
+        | "$HOOK_SCRIPT" 2>&1 || true
+
+    local output
+    output=$(echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' \
+        | "$HOOK_SCRIPT" 2>&1) || true
+
+    if echo "$output" | grep -q '"decision": "block"'; then
+        log_fail "short engagement should not block Stop"
+    else
+        log_pass "short engagement released with warning"
+    fi
+    assert_contains "$output" "Not blocking" "Warning mentions non-blocking behavior"
+}
+
+test_off_topic_flag_disables_blocking() {
+    log_test "v3.3: off-topic flag disables Stop blocking for the session"
+
+    create_test_tasks_file
+    reset_v33_state
+
+    local sid="off-topic-session"
+    local state_dir="$FIXTURES_DIR/.claude/state/task-memory"
+    mkdir -p "$state_dir"
+
+    # Accumulate enough engagements to pass threshold (would normally block).
+    for _ in 1 2 3 4; do
+        echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"grep TASK-002 planning/tasks.md"}}' \
+            | "$HOOK_SCRIPT" 2>&1 || true
+    done
+
+    # Drop the off-topic flag.
+    touch "$state_dir/off-topic-$sid.flag"
+
+    local output
+    output=$(echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' \
+        | "$HOOK_SCRIPT" 2>&1) || true
+
+    if echo "$output" | grep -q '"decision": "block"'; then
+        log_fail "off-topic flag should have disabled blocking"
+    else
+        log_pass "off-topic flag suppressed Stop block"
+    fi
+}
+
+test_sticky_release_after_max_blocks() {
+    log_test "v3.3: release flag is written after MAX_STOP_BLOCKS; subsequent Stops don't re-nag"
+
+    create_test_tasks_file
+    reset_v33_state
+
+    local sid="sticky-session"
+
+    # Accumulate engagements.
+    for _ in 1 2 3 4; do
+        echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"grep TASK-002 planning/tasks.md"}}' \
+            | "$HOOK_SCRIPT" 2>&1 || true
+    done
+
+    # Trigger the block cycle: 1st block → counter=1, 2nd block → counter=2,
+    # 3rd Stop sees counter>=MAX and releases.
+    echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' | "$HOOK_SCRIPT" 2>&1 > /dev/null || true
+    echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' | "$HOOK_SCRIPT" 2>&1 > /dev/null || true
+    echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' | "$HOOK_SCRIPT" 2>&1 > /dev/null || true
+
+    local state_dir="$FIXTURES_DIR/.claude/state/task-memory"
+    if [ -f "$state_dir/released-$sid-TASK-002.flag" ]; then
+        log_pass "released flag was written"
+    else
+        log_fail "released flag missing at $state_dir/released-$sid-TASK-002.flag"
+    fi
+
+    # Next Stop should be silent — no blocking JSON.
+    local output
+    output=$(echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' \
+        | "$HOOK_SCRIPT" 2>&1) || true
+    if echo "$output" | grep -q '"decision": "block"'; then
+        log_fail "sticky release should have suppressed subsequent block"
+    else
+        log_pass "subsequent Stop suppressed by release flag"
+    fi
+}
+
+test_session_start_creates_notes_skeleton() {
+    log_test "v3.3: SessionStart proactively creates notes skeleton for in-progress task"
+
+    create_test_tasks_file
+    reset_v33_state
+    rm -f "$FIXTURES_DIR/planning/notes/TASK-002.md"
+
+    echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1 > /dev/null || true
+
+    if [ -f "$FIXTURES_DIR/planning/notes/TASK-002.md" ]; then
+        log_pass "notes skeleton created on SessionStart"
+    else
+        log_fail "notes skeleton not created at planning/notes/TASK-002.md"
+        return
+    fi
+
+    local content
+    content=$(cat "$FIXTURES_DIR/planning/notes/TASK-002.md")
+    assert_contains "$content" "Patterns Discovered" "Skeleton has Patterns section"
+    assert_contains "$content" "Gotchas" "Skeleton has Gotchas section"
+    assert_contains "$content" "Decisions" "Skeleton has Decisions section"
+}
+
+test_session_start_gcs_stale_state() {
+    log_test "v3.3: SessionStart GCs session-state files older than 24h"
+
+    create_test_tasks_file
+    reset_v33_state
+
+    local state_dir="$FIXTURES_DIR/.claude/state/task-memory"
+    mkdir -p "$state_dir"
+
+    # Fresh file — should survive GC.
+    local fresh="$state_dir/session-fresh.txt"
+    echo "TASK-002" > "$fresh"
+
+    # Stale file — 48h old, should be collected.
+    local stale="$state_dir/session-stale.txt"
+    echo "TASK-002" > "$stale"
+    touch -t "$(date -v-48H +%Y%m%d%H%M 2>/dev/null || date -d '-48 hours' +%Y%m%d%H%M)" "$stale"
+
+    echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1 > /dev/null || true
+
+    if [ -f "$fresh" ]; then
+        log_pass "fresh session file preserved"
+    else
+        log_fail "fresh session file was incorrectly GC'd"
+    fi
+
+    if [ ! -f "$stale" ]; then
+        log_pass "stale session file GC'd"
+    else
+        log_fail "stale session file survived GC"
+    fi
+}
+
+# =============================================================================
 # Run Tests
 # =============================================================================
 
@@ -477,6 +692,15 @@ test_stop_incomplete_tasks
 test_session_end_same_as_stop
 test_checkbox_regex
 test_multifile_session_start
+
+# v3.3.0 regression tests
+test_stamping_scoped_to_relevant_tool_use
+test_stamping_stamps_on_task_id_in_bash
+test_engagement_threshold_releases_short_sessions
+test_off_topic_flag_disables_blocking
+test_sticky_release_after_max_blocks
+test_session_start_creates_notes_skeleton
+test_session_start_gcs_stale_state
 
 # Teardown
 teardown_test_env

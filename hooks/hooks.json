@@ -1,6 +1,4 @@
 {
-  "description": "task-memory hooks - context management, research logging, TodoWrite mirror, pre-compact snapshots",
-  "note": "For project settings, use .claude/settings.json instead. This file is for plugin installations.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -14,17 +12,6 @@
       }
     ],
     "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/task-memory-hook.py",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PostCompact": [
       {
         "hooks": [
           {

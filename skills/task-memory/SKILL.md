@@ -1,6 +1,6 @@
 ---
 name: task-memory
-version: "2.7.0"
+version: "3.0.0"
 description: Provides task planning and context preservation for development workflows. Creates structured tasks in planning/tasks.md with subtasks, dependencies, and progress tracking. Use when implementing features, fixing bugs, refactoring code, or any work requiring task tracking. Supports workflow classification (Feature, Refactor, Investigation, Migration, Simple) and complexity assessment. Inspired by Auto-Claude patterns.
 user-invocable: true
 allowed-tools:
@@ -15,6 +15,52 @@ allowed-tools:
 # /task-memory - Task Planning & Context Preservation
 
 Persistent task tracking with documentation. Work survives context resets.
+
+---
+
+## Context Preservation Protocol
+
+Context loss is the #1 failure mode. The protocol below makes preservation structural, not advisory. When you follow it, research survives session end, compaction, and reboots.
+
+### What the hook does automatically
+
+You do NOT need to do these things — the hook handles them:
+
+| Event | What's auto-logged | Where |
+|-------|--------------------|-------|
+| Every WebFetch | Timestamp, URL, response snippet (≤120 chars) | `**Visual Operations Log**:` in tasks.md |
+| Every WebSearch | Timestamp, query, result snippet | `**Visual Operations Log**:` in tasks.md |
+| Every 2 research ops | Creates `planning/notes/TASK-XXX.md` skeleton if missing | notes/ |
+| Bash command with error | Error line appended to Errors Log | `**Errors Log**:` in tasks.md |
+| PreCompact event | Snapshot saved to `notes/TASK-XXX-precompact-TIMESTAMP.md` + ops log appended to main notes file | notes/ |
+| Session start | Displays current task + loaded notes summary OR warns about missing notes | stderr |
+| Attempted Stop with empty notes + research ops | BLOCKS with "fill notes before stopping" | — |
+
+### What YOU must still do
+
+The hook captures **actions** and **response snippets**. You must capture **synthesis**:
+
+| Hook captures (automatic) | You must write (manual) |
+|--------------------------|-------------------------|
+| "WebFetch: docs.example.com => Configuration guide for pagination" | **Pattern**: API uses cursor-based pagination with `X-Next-Token` header |
+| "WebSearch: 'react context memo' => results mention useMemo..." | **Gotcha**: `React.memo` doesn't help if props are objects — must memoize the object too |
+| File paths of Edit operations | **Decision**: Chose Zustand over Redux — smaller bundle, simpler for this scope |
+
+The operations log is the raw material. The notes file is the distilled learning. Session-start reloads the distilled version, not the raw log.
+
+### The 2-Action Rule (updated)
+
+After every 2 research operations, the hook auto-creates `planning/notes/TASK-XXX.md` with skeleton sections. **Your job:** fill in Patterns, Gotchas, and Decisions before session end — not just append raw findings.
+
+**Skeleton sections you must populate:**
+
+- **Patterns Discovered** — reusable techniques ("do this")
+- **Gotchas** — pitfalls with failure modes ("don't do this, because X")
+- **Decisions** — choices + rationale (`Decision — reason`)
+- **Resources** — files/URLs examined with takeaway
+- **Open Questions** — things to verify next session
+
+**If you skip this:** the Stop hook will block you when you try to end the session.
 
 ---
 
@@ -39,11 +85,20 @@ The `**Status**:` field determines task state. The UI reads this field and auto-
 
 **Auto-Reorganization:** If Status doesn't match section, the UI auto-fixes on load. For file clarity when editing directly, move blocks to their matching sections.
 
-### Rule 3: PRESERVE RESEARCH (2-Action Rule)
+### Rule 3: PRESERVE RESEARCH — STRUCTURAL, NOT ADVISORY
 
-After every 2 visual operations (screenshots, PDFs, web searches):
+The hook creates the notes skeleton on SessionStart for every in-progress task (v3.3+). You fill it in with synthesized insights, not raw quotes.
 
-**STOP. Create/update notes file NOW.**
+**Synthesis checklist (applied after every research batch):**
+
+```
+☐ What PATTERN can I extract? (reusable technique)
+☐ What GOTCHA did I hit or avoid? (failure mode + prevention)
+☐ What DECISION did I make? (choice + rationale)
+☐ What RESOURCE was most useful? (file/URL + takeaway)
+```
+
+**Vague ≠ preserved.** "Looked at screenshot, has panels" teaches nothing. Write: "3-panel layout: 250px left nav, fluid center, 300px right panel. Grid template: `250px 1fr 300px`."
 
 ### Rule 4: NEVER REPEAT FAILURES
 
@@ -77,9 +132,12 @@ Before marking a task done, verify:
 ☐ Pattern compliance: Follows existing codebase conventions
 ☐ Completeness: All subtasks genuinely finished
 ☐ No regressions: Existing functionality preserved
+☐ Notes file has substantive Patterns/Gotchas/Decisions (not empty skeleton)
 ```
 
 **If any check fails:** Fix before marking done. Never defer issues to "later."
+
+**The Stop hook enforces the last item.** For Standard or Complex tasks (or any task with ≥2 research ops), you cannot stop until `notes/TASK-XXX.md` has real content.
 
 ---
 
@@ -336,39 +394,28 @@ The `planning/notes/` folder stores task-related documentation that persists acr
 - **Decision logs** - Architecture decisions, trade-off analysis, rationale
 - **Test results** - Test analysis, failure investigation, coverage reports
 
-### The 2-Action Rule
+### Notes File Lifecycle
 
-After every 2 visual operations, save to notes immediately:
+1. **Created automatically** by the hook after 2 research operations (WebFetch/WebSearch). Skeleton has Summary, Patterns Discovered, Gotchas, Decisions, Resources, Open Questions.
+2. **Filled in by you** with synthesized insights — not raw quotes. Each section has a placeholder italic describing what goes there.
+3. **Appended to by PreCompact** — recent operations log entries are merged into the notes file as a timestamped appendix so nothing is lost during compaction.
+4. **Validated at Stop** — if research ops ≥ 2 OR Complexity ∈ {Standard, Complex}, the Stop hook blocks with "fill notes before stopping" when the file is empty or skeleton-only.
+5. **Loaded at SessionStart** — the next session's hook displays the notes summary so you can pick up where you left off.
 
-```
-Action 1: View screenshot
-Action 2: Read PDF
-→ STOP: Create planning/notes/TASK-XXX.md NOW
-```
+### Insight Synthesis Template
 
-**Why:** Screenshots, PDFs, browser results don't persist in context. Text in markdown persists forever.
+**Location:** `planning/notes/TASK-XXX.md` (auto-created)
 
-### When to Create Notes
+| Section | What to write | Example |
+|---------|---------------|---------|
+| Summary | One paragraph: what and why | "Migrating auth from sessions to JWTs because session-store can't scale past 1 node." |
+| Patterns Discovered | Reusable techniques, specific | "Use `jose` library for JWT signing — handles RS256 key rotation via JWKS endpoint." |
+| Gotchas | Pitfall + failure mode | "Don't store JWT in localStorage — XSS attacks can exfiltrate. Use httpOnly cookie." |
+| Decisions | Choice + rationale | "Chose 15-min access + 7-day refresh — balances UX with revocation window." |
+| Resources | File/URL + takeaway | "RFC 7519 §4.1.4: `exp` claim required for access tokens." |
+| Open Questions | What to verify next | "Confirm refresh rotation strategy with security review." |
 
-**Trigger after 2 of:**
-
-- Screenshots (Claude in Chrome, browser automation)
-- PDFs or images
-- Search results
-- Documentation pages
-- Code reviews
-- Any content worth preserving
-
-### Notes File Template
-
-**Location:** `planning/notes/TASK-XXX.md`
-
-Key sections: Summary, Analysis, Patterns Discovered, Gotchas, Decisions, Resources, Action Items
-
-- **Patterns** = "Do this" - reusable solutions
-- **Gotchas** = "Don't do this" - mistakes to avoid
-
-Link notes to task: `**Notes**: Documentation in notes/TASK-XXX.md`
+**Link notes to task:** `**Notes**: Documentation in notes/TASK-XXX.md`
 
 ---
 
@@ -390,16 +437,21 @@ todo → in-progress → done
 
 ## Visual Operations Log
 
-WebFetch and WebSearch are auto-logged by hooks:
+WebFetch and WebSearch are auto-logged by hooks with a response snippet (up to 120 chars), so the log captures both the action AND a preview of what was returned:
 
 ```markdown
 **Visual Operations Log**:
 
-- 2026-01-13 10:30:45 - WebFetch: https://docs.example.com
-- 2026-01-13 10:31:22 - WebSearch: "query"
+- 2026-04-16 10:30:45 - WebFetch: https://docs.example.com => Configuration guide: use env vars via `process.env`, not hardcoded...
+- 2026-04-16 10:31:22 - WebSearch: "react memo" => Results show useMemo() for expensive calc, React.memo for components...
 ```
 
-This is separate from notes - logs capture WHAT you did, notes capture WHAT YOU LEARNED.
+**Log vs. Notes — two layers:**
+
+- **Log** (in tasks.md): raw trail of operations + response preview. Machine-parseable. Captures **what** and **what came back**.
+- **Notes** (in notes/TASK-XXX.md): synthesized Patterns/Gotchas/Decisions. Human-readable. Captures **so what**.
+
+The log is ephemeral reference. The notes file is the durable output. At PreCompact, the hook copies recent log entries into the notes file so you have something to synthesize from.
 
 ---
 
@@ -487,11 +539,20 @@ After work:
 
 ```
 ☐ Ran Self-Critique checklist (quality, patterns, completeness)
-☐ Documented patterns and gotchas discovered
+☐ Notes file has substantive Patterns/Gotchas/Decisions (Stop hook enforces)
 ☐ Changed Status: in-progress → done
 ☐ Added Finished: date
 ☐ All subtasks checked [x]
 ☐ Committed with (TASK-XXX) reference
+```
+
+**Session-start protocol:**
+
+```
+☐ Hook displays current task + notes summary automatically
+☐ If "CONTEXT GAP DETECTED" warning appears, recreate findings from ops log
+☐ Run /task-status for 5-question verification
+☐ Resume from first unchecked subtask
 ```
 
 ---
@@ -540,5 +601,6 @@ When planning, identify which phases can run concurrently:
 
 ---
 
-**Version:** 2.7.0
+**Version:** 3.0.0
 **License:** MIT
+**Changelog 3.0.0:** Structural context preservation — hook auto-creates notes skeleton, Stop blocks on empty notes with research, SessionStart auto-loads notes summary, PreCompact appends ops log to notes file.

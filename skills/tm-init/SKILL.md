@@ -129,7 +129,8 @@ Ask the user these questions using AskUserQuestion:
 
 4. **Create or update CLAUDE.md:**
 
-   If CLAUDE.md exists, append task-memory section:
+   If CLAUDE.md exists, append the task-memory section below. Use `Edit` with `old_string` being the last line of the existing file — DO NOT overwrite with `Write`.
+
    ```markdown
 
    ## Task Memory Integration
@@ -137,16 +138,42 @@ Ask the user these questions using AskUserQuestion:
    This project uses task-memory for context-preserving task management.
 
    **Planning Location:** {planning_dir}/tasks.md
+   **Notes Location:** {planning_dir}/notes/TASK-XXX.md (auto-created on SessionStart for every in-progress task)
 
-   **Skills:** `/task-memory` (full workflow) | `/task-status` (context check)
+   ### Session Start Protocol
 
-   **Rules:**
-   - Create task before implementing
-   - Update Status field to track progress
-   - Reference task ID in commits: `feat: description (TASK-XXX)`
+   At the start of EVERY session:
+   1. The SessionStart hook auto-displays current task + notes summary.
+   2. If you see "⚠️ CONTEXT GAP DETECTED", recreate findings from the operations log BEFORE coding.
+   3. For full verification, run `/task-status` — it computes a Context Health Score (0-5).
+
+   ### Task vs. Question Triage
+
+   - **TASK** (implement, fix, build, refactor, migrate): Create task in {planning_dir}/tasks.md FIRST, then work.
+   - **QUESTION** (what, how, why, explain): Answer directly — no task needed.
+   - **AMBIGUOUS** ("help me with X", "I'm stuck"): Ask one clarifying question before deciding.
+
+   ### Context Preservation Protocol
+
+   The hook handles these automatically — you don't need to remember:
+   - Logs every WebFetch/WebSearch with response snippet to `**Visual Operations Log**`
+   - Auto-creates `{planning_dir}/notes/TASK-XXX.md` skeleton on SessionStart for every in-progress task
+   - Saves pre-compaction snapshot and appends ops log to notes file at PreCompact
+   - Blocks Stop if research ops ≥ 2 and notes file is empty/skeleton
+
+   What YOU must still do:
+   - Fill in Patterns / Gotchas / Decisions in the notes file (hook creates, you synthesize)
+   - Check off subtasks as you complete them
+   - Run self-critique before marking Status: done
+
+   ### Commit Convention
+
+   Reference the task ID in every commit: `feat: description (TASK-XXX)`
+
+   **Skills:** `/tm-init` (setup) | `/task-memory` (full workflow) | `/task-status` (5-question + health score)
    ```
 
-   If CLAUDE.md doesn't exist, create minimal version:
+   If CLAUDE.md doesn't exist, create a full version:
    ```markdown
    # {project_name}
 
@@ -155,21 +182,62 @@ Ask the user these questions using AskUserQuestion:
    This project uses task-memory for context-preserving task management.
 
    **Planning Location:** {planning_dir}/tasks.md
+   **Notes Location:** {planning_dir}/notes/TASK-XXX.md (auto-created on SessionStart for every in-progress task)
 
-   **On every prompt:** Determine if it's a TASK or QUESTION.
-   - **TASK** (implement, fix, build): Create task in {planning_dir}/tasks.md first
-   - **QUESTION** (what, how, why): Answer directly
+   ### Session Start Protocol
 
-   **Skills:** `/task-memory` (full workflow) | `/task-status` (context check)
+   At the start of EVERY session:
+   1. The SessionStart hook auto-displays current task + notes summary.
+   2. If you see "⚠️ CONTEXT GAP DETECTED", recreate findings from the operations log BEFORE coding.
+   3. For full verification, run `/task-status` — it computes a Context Health Score (0-5).
+
+   ### Task vs. Question Triage
+
+   - **TASK** (implement, fix, build, refactor, migrate): Create task in {planning_dir}/tasks.md FIRST, then work.
+   - **QUESTION** (what, how, why, explain): Answer directly — no task needed.
+   - **AMBIGUOUS** ("help me with X", "I'm stuck"): Ask one clarifying question before deciding.
+
+   ### Context Preservation Protocol
+
+   The hook handles these automatically — you don't need to remember:
+   - Logs every WebFetch/WebSearch with response snippet to `**Visual Operations Log**`
+   - Auto-creates `{planning_dir}/notes/TASK-XXX.md` skeleton on SessionStart for every in-progress task
+   - Saves pre-compaction snapshot and appends ops log to notes file at PreCompact
+   - Blocks Stop if research ops ≥ 2 and notes file is empty/skeleton
+
+   What YOU must still do:
+   - Fill in Patterns / Gotchas / Decisions in the notes file (hook creates, you synthesize)
+   - Check off subtasks as you complete them
+   - Run self-critique before marking Status: done
+
+   ### Commit Convention
+
+   Reference the task ID in every commit: `feat: description (TASK-XXX)`
+
+   **Skills:** `/tm-init` (setup) | `/task-memory` (full workflow) | `/task-status` (5-question + health score)
    ```
 
-5. **Create .task-memory.json if non-default location:**
+5. **Create .task-memory.json if non-default location or custom thresholds:**
    ```json
    {
      "planning_dir": "{planning_dir}",
-     "task_prefix": "{prefix}"
+     "task_prefix": "{prefix}",
+     "min_engagements_to_block": 3,
+     "session_state_max_age_hours": 24
    }
    ```
+
+   See [`examples/.task-memory.json`](../../examples/.task-memory.json) for the full
+   config surface. All fields are optional; defaults are sensible.
+
+   | Field | Default | Purpose |
+   |-------|---------|---------|
+   | `planning_dir` | `planning` | Where tasks.md lives, relative to project root |
+   | `task_files_glob` | _(unset)_ | Monorepos: e.g. `docs/todo/*/tasks.md` |
+   | `todowrite_mirror_file` | first file | Target for TodoWrite mirror in multi-file mode |
+   | `task_prefix` | `TASK` | Task-ID prefix (use `PROJECT` for `PROJECT-001` style) |
+   | `min_engagements_to_block` | `3` | Task-relevant tool uses before Stop can block |
+   | `session_state_max_age_hours` | `24` | GC threshold for orphaned session state files |
 
 ### Phase 4: Verification
 
@@ -277,4 +345,5 @@ Task Memory is ready! The nearest planning/tasks.md will be used automatically.
 
 ---
 
-**Version:** 1.0.0 | **License:** MIT
+**Version:** 2.0.0 | **License:** MIT
+**Changelog 2.0.0:** CLAUDE.md template now includes Session Start Protocol, Task vs. Question triage (with AMBIGUOUS case), and Context Preservation Protocol section that describes what the hook auto-handles vs. what Claude must still do.

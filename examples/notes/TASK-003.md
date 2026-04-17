@@ -1,45 +1,36 @@
-# Findings: TASK-003 | Implement dashboard UI
+# TASK-003 Notes — Implement dashboard UI
 
-## Visual Analysis
+_Created 2026-01-11. Captures context that would otherwise be lost at session end or compaction._
 
-### WebFetch: ui.shadcn.com/docs (2026-01-11 10:30)
-- Component library built on Radix primitives
-- Copy/paste model, not npm dependency
-- Tailwind CSS for styling
-- Accessible by default (ARIA)
+## Summary
 
-### WebSearch: React dashboard component patterns (2026-01-11 10:32)
-- Grid layouts common for dashboard
-- Card components for metrics
-- Sidebar navigation pattern
-- Responsive breakpoints important
+Building the main dashboard: header, sidebar nav, metric cards, data grid. Design
+locked in mockups. Using shadcn/ui to match the rest of the codebase and CSS Grid
+for the layout. Header/sidebar shells in progress; data grid is the risk item.
 
-### WebFetch: tailwindcss.com/docs/grid-template-columns (2026-01-11 10:45)
-- CSS Grid via utility classes
-- `grid-cols-{n}` for column count
-- `gap-{n}` for spacing
-- Responsive with `md:grid-cols-3` syntax
+## Patterns Discovered
 
-## Technical Decisions
+- shadcn/ui copy-paste model keeps the component source in the repo — easier to patch than a locked npm dependency.
+- Tailwind CSS Grid utilities (`grid-cols-{n}`, `gap-{n}`, responsive variants) cover the dashboard layout without custom CSS.
+- Radix primitives under shadcn give accessibility for free — focus trap, roving tabindex, ARIA.
 
-| Decision | Rationale |
-|----------|-----------|
-| shadcn/ui | Matches existing codebase patterns |
-| CSS Grid layout | Flexible, responsive dashboard |
-| Card components | Consistent metric display |
+## Gotchas
 
-## Component Structure
+- shadcn components depend on specific Radix versions — bumping Radix unilaterally can break them; update via `pnpm dlx shadcn add <component>` to stay in sync.
+- CSS Grid on the dashboard shell requires an explicit `min-height: 100vh` on the parent or rows collapse when the content is short.
 
-```
-Dashboard/
-├── Header.tsx          # Top navigation
-├── Sidebar.tsx         # Left navigation
-├── MetricCard.tsx      # Reusable stat card
-└── DataGrid.tsx        # Main data table
-```
+## Decisions
+
+- shadcn/ui over MUI or Chakra — matches existing codebase patterns and Tailwind-first styling.
+- CSS Grid layout (not Flexbox) — two-dimensional is natural for dashboards, and `grid-template-areas` will make responsive breakpoints readable.
+- Card component as the unit of metric display — consistent spacing, alignment, and hover affordances across the whole board.
 
 ## Resources
 
-- shadcn/ui: https://ui.shadcn.com/docs
-- Tailwind Grid: https://tailwindcss.com/docs/grid-template-columns
-- Radix Primitives: https://www.radix-ui.com/primitives
+- https://ui.shadcn.com/docs — component library reference
+- https://tailwindcss.com/docs/grid-template-columns — grid utilities
+- https://www.radix-ui.com/primitives — underlying primitives for accessibility
+
+## Open Questions
+
+- Do we need virtualized rows in the data grid now, or wait until row count justifies it? Defer unless real traffic shows jank.

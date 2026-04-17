@@ -1,30 +1,30 @@
-# Kanban Board
+# Task Board
 
-<!-- Config: Last Task ID: 005 -->
+<!-- Config: Last Task ID: 006 -->
 
 ## ⚙️ Configuration
 
-**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+**Columns**: 📝 To Do (todo) | 🚀 In Progress (in-progress) | 👀 In Review (in-review) | ✅ Done (done)
 
-**Categories**: Feature, Bug, Docs, Research
+**Categories**: Frontend, Backend, Design, DevOps, Tests, Documentation, Research
 
 **Users**: @alice, @bob
 
 **Priorities**: 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
 
-**Tags**: #api #frontend #backend #research #urgent
+**Tags**: #api #frontend #backend #research #urgent #bug #feature #docs #test
 
 ---
 
 ## 📝 To Do
 
-### TASK-005 | Add user authentication
+### TASK-006 | Add user authentication
 
 **Priority**: High | **Category**: Backend | **Status**: todo
 **Workflow**: Feature | **Complexity**: Standard
 **Assigned**: @bob
-**Created**: 2026-01-10
-**Tags**: #backend #api
+**Created**: 2026-01-14
+**Tags**: #backend #api #feature
 
 Implement JWT-based user authentication for the API.
 
@@ -37,15 +37,32 @@ Implement JWT-based user authentication for the API.
 
 ---
 
-## 🚧 In Progress
+### TASK-005 | Document the public API
+
+**Priority**: Medium | **Category**: Documentation | **Status**: todo
+**Workflow**: Simple | **Complexity**: Simple
+**Assigned**: @alice
+**Created**: 2026-01-13
+**Tags**: #docs
+
+Write reference docs for every public endpoint. Paused 2026-01-15 pending TASK-006.
+
+**Subtasks**:
+- [ ] Draft endpoint index
+- [ ] Document request/response shapes
+- [ ] Add curl examples
+
+---
+
+## 🚀 In Progress
 
 ### TASK-003 | Implement dashboard UI
 
-**Priority**: High | **Category**: Feature | **Status**: in-progress
+**Priority**: High | **Category**: Frontend | **Status**: in-progress
 **Workflow**: Feature | **Complexity**: Standard
 **Assigned**: @alice
 **Created**: 2026-01-08 | **Started**: 2026-01-11
-**Tags**: #frontend #research
+**Tags**: #frontend #feature
 
 Build the main dashboard interface based on design specs.
 
@@ -57,40 +74,68 @@ Build the main dashboard interface based on design specs.
 - [ ] Implement data grid
 
 **Notes**:
-Reviewed design specs and researched React component options.
-Decision: Using shadcn/ui for consistency with existing codebase.
+Documentation in notes/TASK-003.md — see Decisions section for the shadcn/ui rationale.
 
 **Visual Operations Log**:
 - 2026-01-11 10:30:45 - WebFetch: https://ui.shadcn.com/docs
 - 2026-01-11 10:32:18 - WebSearch: "React dashboard component patterns 2026"
 - 2026-01-11 10:45:22 - WebFetch: https://tailwindcss.com/docs/grid-template-columns
 
-Documentation in notes/TASK-003.md
-
 ---
 
-### TASK-004 | Fix pagination bug
+### TASK-004 | Fix pagination duplicate bug
 
-**Priority**: Critical | **Category**: Bug | **Status**: in-progress
+**Priority**: Critical | **Category**: Backend | **Status**: in-progress
 **Workflow**: Investigation | **Complexity**: Simple
 **Assigned**: @bob
 **Created**: 2026-01-09 | **Started**: 2026-01-12
-**Tags**: #backend #urgent
+**Tags**: #backend #bug #urgent
 
-Users report that pagination returns duplicate items on page 2.
+Users report that pagination returns duplicate items on page 2 when sorting by date DESC.
 
 **Subtasks**:
 - [x] Reproduce the bug locally
 - [ ] Identify root cause
-- [ ] Implement fix
-- [ ] Add regression tests
+- [ ] Implement fix in `src/api/pagination.ts`
+- [ ] Add regression tests in `tests/pagination.test.ts`
 
 **Notes**:
-Reproduced: When sorting by date DESC, offset calculation is wrong.
+Reproduced: offset calculation is wrong when the sort column has ties.
 
 **Errors Log**:
-- 2026-01-12 09:15:30 - Error: Test timeout - Increased jest timeout to 10s
-- 2026-01-12 09:22:45 - Error: DB connection refused - Started postgres container
+- 2026-01-12 09:15:30 - Error: Test timeout — increased Jest timeout to 10s
+- 2026-01-12 09:22:45 - Error: DB connection refused — started postgres container
+
+---
+
+## 👀 In Review
+
+### TASK-002 | Research API design patterns
+
+**Priority**: Medium | **Category**: Research | **Status**: in-review
+**Workflow**: Investigation | **Complexity**: Simple
+**Assigned**: @alice
+**Created**: 2026-01-06 | **Started**: 2026-01-07 | **Finished**: 2026-01-08
+**Tags**: #research #api
+
+Research REST API best practices and propose recommendations for our v1 endpoints.
+
+**Subtasks**:
+- [x] Review existing API designs
+- [x] Research pagination strategies
+- [x] Document error handling patterns
+- [x] Create API style guide
+
+**Notes**:
+Full research documented in notes/TASK-002.md. Recommendations:
+- Cursor-based pagination for list endpoints
+- JSON:API error format
+- `/v1/` URL prefix
+
+**Visual Operations Log**:
+- 2026-01-07 14:20:30 - WebSearch: "REST API pagination best practices"
+- 2026-01-07 14:25:45 - WebFetch: https://jsonapi.org/format/
+- 2026-01-07 14:40:12 - WebFetch: https://developer.github.com/v3/
 
 ---
 
@@ -98,13 +143,13 @@ Reproduced: When sorting by date DESC, offset calculation is wrong.
 
 ### TASK-001 | Project setup and configuration
 
-**Priority**: Critical | **Category**: Feature | **Status**: done
+**Priority**: Critical | **Category**: DevOps | **Status**: done
 **Workflow**: Simple | **Complexity**: Simple
 **Assigned**: @alice, @bob
 **Created**: 2026-01-05 | **Started**: 2026-01-05 | **Finished**: 2026-01-07
-**Tags**: #backend #frontend
+**Tags**: #devops #backend #frontend
 
-Initialize the project with build tooling, linting, and CI/CD.
+Initialize the project with build tooling, linting, and CI.
 
 **Subtasks**:
 - [x] Initialize npm project
@@ -114,38 +159,6 @@ Initialize the project with build tooling, linting, and CI/CD.
 - [x] Setup development environment
 
 **Notes**:
-Project initialized with Vite + React + TypeScript.
-CI/CD pipeline runs tests on every PR.
-
----
-
-### TASK-002 | Research API design patterns
-
-**Priority**: Medium | **Category**: Research | **Status**: done
-**Workflow**: Investigation | **Complexity**: Simple
-**Assigned**: @alice
-**Created**: 2026-01-06 | **Started**: 2026-01-07 | **Finished**: 2026-01-08
-**Tags**: #research #api
-
-Research REST API best practices and document recommendations.
-
-**Subtasks**:
-- [x] Review existing API designs
-- [x] Research pagination strategies
-- [x] Document error handling patterns
-- [x] Create API style guide
-
-**Notes**:
-Completed API research. Recommendations:
-- Use cursor-based pagination for large datasets
-- Standardize error response format
-- Version API with /v1/ prefix
-
-**Visual Operations Log**:
-- 2026-01-07 14:20:30 - WebSearch: "REST API pagination best practices"
-- 2026-01-07 14:25:45 - WebFetch: https://jsonapi.org/format/
-- 2026-01-07 14:40:12 - WebFetch: https://developer.github.com/v3/
-
-Full research documented in notes/TASK-002.md
+Project initialized with Vite + React + TypeScript. CI/CD runs tests on every PR.
 
 ---

@@ -22,7 +22,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -156,6 +156,223 @@ def was_task_worked_on(session_id: str, task_id: str) -> bool:
     if not f.exists():
         return False
     return task_id in f.read_text().splitlines()
+
+
+# -----------------------------------------------------------------------------
+# Relevance gating (v3.3.0): only stamp the session as "worked on" the task
+# when tool use actually touches task-adjacent files or mentions the task id.
+# Prior behavior stamped on any Bash/Edit/Write/Task call, which contaminated
+# unrelated sessions (e.g. asking a question while a task was in-progress).
+# -----------------------------------------------------------------------------
+
+# Off-topic escape: if this file exists, skip all stamping / Stop blocking for
+# the session. The assistant can touch it when it recognizes the current work
+# is unrelated to the active task. Cleared by SessionEnd.
+def off_topic_flag_path(session_id: str) -> Path:
+    return state_path(f"off-topic-{session_id}.flag")
+
+
+def is_off_topic(session_id: str) -> bool:
+    if not session_id:
+        return False
+    return off_topic_flag_path(session_id).exists()
+
+
+# Force-stamp override for parity with pre-3.3 behavior. Rarely needed — the
+# default relevance gate is conservative; set TASK_MEMORY_FORCE_STAMP=1 if a
+# custom workflow needs the old blanket semantics.
+def _force_stamp() -> bool:
+    return os.environ.get("TASK_MEMORY_FORCE_STAMP", "").strip() in ("1", "true", "yes")
+
+
+def _paths_mentioned_in_block(block: str) -> set[str]:
+    """Extract bare file paths mentioned in a task block's body.
+
+    Matches bullets like `- foo/bar.py`, inline `path/to/file.ts`, and code-
+    span `` `src/foo.js` ``. Directory-only mentions (ending in `/`) are
+    dropped — too coarse to be useful for relevance gating.
+    """
+    paths: set[str] = set()
+    # Inline code spans: `...`
+    for m in re.finditer(r"`([^`\n]+\.[A-Za-z0-9_]{1,10})`", block):
+        paths.add(m.group(1).strip())
+    # Bare paths: contains a slash and a dot-extension, non-whitespace run
+    for m in re.finditer(r"(?:(?<=\s)|^)([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_]{1,10})\b", block):
+        candidate = m.group(1).strip()
+        # Filter out obvious non-paths: pure numbers (3.14), email-like (a@b.c)
+        if any(c in candidate for c in ("@",)):
+            continue
+        if "/" in candidate or "\\" in candidate:
+            paths.add(candidate)
+    return paths
+
+
+def _resolve_path_str(p: str) -> Path | None:
+    try:
+        candidate = Path(p)
+        if not candidate.is_absolute():
+            candidate = PROJECT_DIR / candidate
+        return candidate.resolve()
+    except (OSError, ValueError):
+        return None
+
+
+def tool_use_touches_task(tool_name: str, tool_input: dict, task: dict) -> bool:
+    """Return True iff this tool use is plausibly related to the given task.
+
+    Heuristics (any match is enough):
+      1. Tool input references the tasks.md or notes/TASK-XXX.md file directly.
+      2. Tool input file_path resolves to a path mentioned in the task block.
+      3. Bash command or Task agent prompt mentions the task id string.
+      4. Write/Edit new_string or old_string mentions the task id.
+
+    Read/Grep/Glob/LS never count — those are exploration, not work-on-task.
+    """
+    if not task:
+        return False
+    task_id = task.get("task_id", "")
+    block = task.get("block", "") or ""
+
+    # Scope by tool type: only "work" tools can stamp.
+    if tool_name not in ("Write", "Edit", "Bash", "Task"):
+        return False
+
+    file_path = (tool_input.get("file_path") or tool_input.get("path") or "").strip()
+    edited = _resolve_path_str(file_path) if file_path else None
+
+    # (1) tasks.md itself
+    if edited:
+        for tf in task_files():
+            try:
+                if tf.resolve() == edited:
+                    return True
+            except OSError:
+                continue
+        # (1b) notes file for this task
+        try:
+            if edited == (NOTES_DIR / f"{task_id}.md").resolve():
+                return True
+        except OSError:
+            pass
+
+    # (2) path mentioned in task block body
+    if edited:
+        for raw in _paths_mentioned_in_block(block):
+            resolved = _resolve_path_str(raw)
+            if resolved and resolved == edited:
+                return True
+
+    # (3) task id in Bash command or Task prompt
+    if task_id:
+        if tool_name == "Bash":
+            if task_id in (tool_input.get("command") or ""):
+                return True
+        elif tool_name == "Task":
+            if task_id in (tool_input.get("prompt") or ""):
+                return True
+            if task_id in (tool_input.get("description") or ""):
+                return True
+
+    # (4) task id in Edit/Write content
+    if task_id and tool_name in ("Write", "Edit"):
+        for key in ("new_string", "old_string", "content"):
+            if task_id in (tool_input.get(key) or ""):
+                return True
+
+    return False
+
+
+# -----------------------------------------------------------------------------
+# Engagement tracking (v3.3.0): count relevant tool uses per session+task so
+# the Stop hook can distinguish "answered a question while task was open" from
+# "actually worked on the task." Short engagements get a stderr warning; only
+# sustained engagement can block Stop.
+# -----------------------------------------------------------------------------
+
+MIN_ENGAGEMENTS_TO_BLOCK = int(CONFIG.get("min_engagements_to_block") or 3)
+
+
+def engagement_counter_path(session_id: str, task_id: str) -> Path:
+    return state_path(f"engagement-{session_id}-{task_id}.txt")
+
+
+def bump_engagement(session_id: str, task_id: str) -> int:
+    if not (session_id and task_id):
+        return 0
+    f = engagement_counter_path(session_id, task_id)
+    n = 0
+    if f.exists():
+        try:
+            n = int(f.read_text().strip() or "0")
+        except (ValueError, OSError):
+            n = 0
+    try:
+        f.write_text(str(n + 1))
+    except OSError:
+        pass
+    return n + 1
+
+
+def get_engagement(session_id: str, task_id: str) -> int:
+    if not (session_id and task_id):
+        return 0
+    f = engagement_counter_path(session_id, task_id)
+    if not f.exists():
+        return 0
+    try:
+        return int(f.read_text().strip() or "0")
+    except (ValueError, OSError):
+        return 0
+
+
+# -----------------------------------------------------------------------------
+# Sticky release (v3.3.0): after MAX_STOP_BLOCKS consecutive Stop blocks, write
+# a release flag so the hook does not re-nag for the same session+task combo.
+# Flag is cleared by SessionEnd or any subtask/status change.
+# -----------------------------------------------------------------------------
+
+def released_flag_path(session_id: str, task_id: str) -> Path:
+    return state_path(f"released-{session_id}-{task_id}.flag")
+
+
+def is_released(session_id: str, task_id: str) -> bool:
+    if not (session_id and task_id):
+        return False
+    return released_flag_path(session_id, task_id).exists()
+
+
+def mark_released(session_id: str, task_id: str) -> None:
+    if not (session_id and task_id):
+        return
+    try:
+        released_flag_path(session_id, task_id).write_text(
+            datetime.now(timezone.utc).isoformat()
+        )
+    except OSError:
+        pass
+
+
+# -----------------------------------------------------------------------------
+# GC of stale session state. SessionEnd does not always fire (crashes, forced
+# exits), so session-*.txt and friends accumulate. Runs on SessionStart.
+# -----------------------------------------------------------------------------
+
+SESSION_STATE_MAX_AGE_HOURS = int(CONFIG.get("session_state_max_age_hours") or 24)
+
+
+def gc_stale_session_state() -> None:
+    cutoff = time.time() - (SESSION_STATE_MAX_AGE_HOURS * 3600)
+    if not STATE_DIR.exists():
+        return
+    prefixes = ("session-", "stop-blocks-", "released-", "engagement-", "off-topic-")
+    for p in STATE_DIR.iterdir():
+        if not any(p.name.startswith(prefix) for prefix in prefixes):
+            continue
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+        except OSError:
+            pass
 
 
 # =============================================================================
@@ -563,7 +780,42 @@ def append_log_entry(task_id: str, log_line: str, section: str = "Visual Operati
 # Event handlers
 # =============================================================================
 
+def _load_notes_summary(task_id: str) -> str | None:
+    """Load notes file for a task and return a summary (first 40 lines).
+
+    Returns None if no notes file exists or it's empty/skeleton-only.
+    """
+    notes_file = NOTES_DIR / f"{task_id}.md"
+    if not notes_file.is_file():
+        return None
+    try:
+        content = notes_file.read_text().strip()
+    except OSError:
+        return None
+    if not content:
+        return None
+    # Check if it's just a skeleton with no real content
+    lines = content.splitlines()
+    non_empty = [l for l in lines if l.strip() and not l.startswith("#") and not l.startswith("_")]
+    if len(non_empty) < 2:
+        return None
+    # Return first 40 lines as summary
+    return "\n".join(lines[:40])
+
+
+def _count_research_ops(block: str) -> int:
+    """Count research operations in a task's Visual Operations Log."""
+    return len(re.findall(r"- \d{4}-\d{2}-\d{2}.*(?:WebFetch|WebSearch)", block))
+
+
 def handle_session_start() -> None:
+    # v3.3.0: sweep orphaned session state from crashed/forced-exit sessions
+    # before rendering the banner. SessionEnd doesn't always fire.
+    try:
+        gc_stale_session_state()
+    except Exception as e:
+        print(f"[task-memory] GC warning: {e}", file=sys.stderr)
+
     print("", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
     print("TASK-MEMORY SESSION START", file=sys.stderr)
@@ -580,6 +832,17 @@ def handle_session_start() -> None:
         return
 
     all_tasks = get_all_in_progress_tasks()
+
+    # v3.3.0: proactively create notes skeletons for every in-progress task.
+    # Prior behavior only warned when research ops >= 2 and the file was
+    # missing — but by then the insights were often already lost. Creating
+    # the skeleton up front means the file is always there, waiting to be
+    # filled in, and the PreCompact snapshot has a target to append to.
+    for t in all_tasks:
+        try:
+            _create_notes_skeleton(t["task_id"], t["title"])
+        except Exception as e:
+            print(f"[task-memory] skeleton warning ({t['task_id']}): {e}", file=sys.stderr)
 
     # Multi-file mode: list all in-progress tasks with their source labels.
     if TASK_FILES_GLOB:
@@ -600,10 +863,21 @@ def handle_session_start() -> None:
             if t["total"] > 0:
                 progress = f" [{t['completed']}/{t['total']}]"
             print(f"  • {t['task_id']} | {title}…{progress}{suffix}", file=sys.stderr)
+
+        # Show notes status for each task
+        for t in all_tasks:
+            notes_summary = _load_notes_summary(t["task_id"])
+            research_ops = _count_research_ops(t["block"])
+            if notes_summary:
+                print(f"\n  📝 {t['task_id']} notes loaded ({NOTES_DIR / (t['task_id'] + '.md')})", file=sys.stderr)
+            elif research_ops >= 2:
+                print(f"\n  ⚠️  {t['task_id']}: {research_ops} research ops logged but NO notes file!", file=sys.stderr)
+                print(f"     Create: {NOTES_DIR / (t['task_id'] + '.md')}", file=sys.stderr)
+
         print("\n" + "=" * 60 + "\n", file=sys.stderr)
         return
 
-    # Single-file mode (unchanged behavior).
+    # Single-file mode.
     if not all_tasks:
         print(f"\nPlanning: {TASKS_FILE}", file=sys.stderr)
         print("\nNo in-progress tasks", file=sys.stderr)
@@ -622,6 +896,25 @@ def handle_session_start() -> None:
         print("\nNext:", file=sys.stderr)
         for s in get_incomplete_subtasks(task["block"]):
             print(f"   - [ ] {s}", file=sys.stderr)
+
+    # Context reload: show notes summary or warn about missing notes
+    notes_summary = _load_notes_summary(task["task_id"])
+    research_ops = _count_research_ops(task["block"])
+
+    if notes_summary:
+        print(f"\n📝 PRESERVED CONTEXT ({NOTES_DIR / (task['task_id'] + '.md')}):", file=sys.stderr)
+        print("-" * 40, file=sys.stderr)
+        print(notes_summary, file=sys.stderr)
+        print("-" * 40, file=sys.stderr)
+        print("Run /task-status for full context check.", file=sys.stderr)
+    elif research_ops >= 2:
+        print(f"\n⚠️  CONTEXT GAP DETECTED", file=sys.stderr)
+        print(f"   {research_ops} research operations logged but NO notes file.", file=sys.stderr)
+        print(f"   Previous session insights may be LOST.", file=sys.stderr)
+        print(f"   Review Visual Operations Log and recreate findings in:", file=sys.stderr)
+        print(f"   {NOTES_DIR / (task['task_id'] + '.md')}", file=sys.stderr)
+    else:
+        print(f"\nRun /task-status for full context check.", file=sys.stderr)
 
     print("\n" + "=" * 60 + "\n", file=sys.stderr)
 
@@ -670,7 +963,17 @@ def handle_pre_tool_use(tool_name: str, tool_input: dict, session_id: str) -> in
         task = get_current_task()
         if not task:
             return None
-        record_session_task(session_id, task["task_id"])
+
+        # v3.3.0: only stamp the session when the tool use actually touches
+        # the task. Ambient reads/greps no longer contaminate unrelated work.
+        # TASK_MEMORY_FORCE_STAMP=1 restores pre-3.3 blanket behavior.
+        if is_off_topic(session_id):
+            return None
+        if _force_stamp() or tool_use_touches_task(tool_name, tool_input, task):
+            record_session_task(session_id, task["task_id"])
+            bump_engagement(session_id, task["task_id"])
+        else:
+            return None
 
         # Multi-file mode: only show the attention nudge on Write/Edit when
         # the file being edited is the same file that owns the in-progress
@@ -695,6 +998,67 @@ def handle_pre_tool_use(tool_name: str, tool_input: dict, session_id: str) -> in
             for s in get_incomplete_subtasks(task["block"]):
                 print(f"   - [ ] {s}", file=sys.stderr)
         print("-" * 60 + "\n", file=sys.stderr)
+
+
+def _create_notes_skeleton(task_id: str, task_title: str) -> bool:
+    """Create a skeleton notes file with required sections.
+
+    Returns True if created, False if it already exists or couldn't be written.
+    Structural enforcement: by pre-creating sections, Claude only has to fill
+    them in rather than remember to build the structure from scratch.
+    """
+    notes_path = NOTES_DIR / f"{task_id}.md"
+    if notes_path.is_file():
+        return False
+    try:
+        NOTES_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+
+    ts = datetime.now().strftime("%Y-%m-%d")
+    skeleton = f"""# {task_id} Notes — {task_title}
+
+_Created {ts}. Captures context that would otherwise be lost at session end or compaction._
+
+## Summary
+
+_One-paragraph answer to: what is this task doing and why?_
+
+## Patterns Discovered
+
+_Reusable techniques, "do this". Each bullet should be specific enough to apply without re-reading source material._
+
+-
+
+## Gotchas
+
+_Pitfalls, "don't do this". Include the failure mode so the next session doesn't repeat it._
+
+-
+
+## Decisions
+
+_Choices made and rationale. Format: `Decision — reason`._
+
+-
+
+## Resources
+
+_Files, URLs, docs examined. One line each with a takeaway._
+
+-
+
+## Open Questions
+
+_Things to verify, confirm, or ask about before finalizing._
+
+-
+"""
+    try:
+        notes_path.write_text(skeleton)
+        return True
+    except OSError:
+        return False
 
 
 def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, session_id: str) -> None:
@@ -734,10 +1098,22 @@ def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, s
             print(f"Operations count: {count}", file=sys.stderr)
             if task:
                 print(f"Task: {task['task_id']}", file=sys.stderr)
-                print(f"Create/update: {NOTES_DIR}/{task['task_id']}.md", file=sys.stderr)
+                notes_path = NOTES_DIR / f"{task['task_id']}.md"
+                # Auto-create skeleton if notes file doesn't exist yet
+                if not notes_path.is_file():
+                    created = _create_notes_skeleton(task["task_id"], task["title"])
+                    if created:
+                        print(f"CREATED skeleton: {notes_path}", file=sys.stderr)
+                        print(f"⚠️  EDIT IT NOW with insights from your research.", file=sys.stderr)
+                        print(f"    Empty sections = lost context on session end.", file=sys.stderr)
+                    else:
+                        print(f"Create/update: {notes_path}", file=sys.stderr)
+                else:
+                    print(f"Update existing: {notes_path}", file=sys.stderr)
+                    print(f"⚠️  Add new findings from your last 2 operations.", file=sys.stderr)
             else:
                 print(f"Create/update: {NOTES_DIR}/TASK-XXX.md", file=sys.stderr)
-            print("Preserve: observations, decisions, issues, resources", file=sys.stderr)
+            print("Preserve: observations, decisions, patterns, gotchas", file=sys.stderr)
             print("=" * 60 + "\n", file=sys.stderr)
         return
 
@@ -964,6 +1340,39 @@ def handle_pre_compact(payload: dict) -> None:
     except OSError as e:
         print(f"[task-memory] Failed to write snapshot: {e}", file=sys.stderr)
 
+    # Also append the operations log into the main notes file so insights
+    # survive compaction in a discoverable place (not just a timestamped
+    # snapshot). The snapshot is a safety net; the notes file is canonical.
+    if task and task_id != "UNKNOWN":
+        notes_path = NOTES_DIR / f"{task_id}.md"
+        if not notes_path.is_file():
+            _create_notes_skeleton(task_id, task.get("title", ""))
+
+        if notes_path.is_file():
+            try:
+                existing_notes = notes_path.read_text()
+            except OSError:
+                existing_notes = ""
+
+            ops_heading = f"## Pre-Compact Ops Log ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
+            appendix_parts = ["", ops_heading, ""]
+            for section in ("Visual Operations Log", "Errors Log"):
+                m = re.search(rf"\*\*{re.escape(section)}\*\*:\s*\n((?:- .+\n)+)", content)
+                if m:
+                    entries = m.group(1).strip().splitlines()[-20:]
+                    appendix_parts += [f"### {section}", "", *entries, ""]
+
+            if len(appendix_parts) > 3:  # more than just the heading
+                appendix_parts += [
+                    "_Synthesize these into Patterns/Gotchas/Decisions above before they age out._",
+                    "",
+                ]
+                try:
+                    notes_path.write_text(existing_notes.rstrip() + "\n" + "\n".join(appendix_parts))
+                    print(f"[task-memory] Appended ops log to {notes_path}", file=sys.stderr)
+                except OSError as e:
+                    print(f"[task-memory] Failed to append to notes: {e}", file=sys.stderr)
+
 
 # =============================================================================
 # Stop / SubagentStop (may block)
@@ -976,9 +1385,65 @@ def _stop_block_count_path(session_id: str) -> Path:
     return state_path(f"stop-blocks-{session_id}.txt")
 
 
+def _notes_has_content(task_id: str) -> bool:
+    """True if the notes file exists and has substantive content (not just skeleton)."""
+    notes_path = NOTES_DIR / f"{task_id}.md"
+    if not notes_path.is_file():
+        return False
+    try:
+        content = notes_path.read_text()
+    except OSError:
+        return False
+    # Strip skeleton markers — bullets with just "-" and italicized placeholders
+    content_lines = [l for l in content.splitlines() if l.strip()]
+    substantive = [
+        l for l in content_lines
+        if not l.startswith("#")
+        and not l.startswith("_")
+        and l.strip() not in ("-", "- ", "*", "* ")
+    ]
+    # At least 3 lines of real content beyond headers and placeholders
+    return len(substantive) >= 3
+
+
+def _detect_complexity(block: str) -> str:
+    """Extract Complexity field from a task block. Defaults to 'Standard'."""
+    m = re.search(r"\*\*Complexity\*\*:\s*([A-Za-z]+)", block)
+    if m:
+        return m.group(1).strip()
+    return "Standard"
+
+
+def _actionable_pause_hint(task: dict) -> str:
+    """Copy-paste instructions to flip the current task to Status: todo."""
+    try:
+        rel = task["source"].relative_to(PROJECT_DIR)
+    except (KeyError, ValueError):
+        rel = task.get("source") or TASKS_FILE
+    return (
+        f"To pause: Edit {rel} under `### {task['task_id']}` — replace "
+        f"`**Status**: in-progress` with `**Status**: todo`. Section auto-reorganizes."
+    )
+
+
+def _actionable_off_topic_hint(session_id: str) -> str:
+    """Instruct the assistant how to disable blocking for an off-topic session."""
+    if not session_id:
+        return ""
+    flag = off_topic_flag_path(session_id)
+    return (
+        f"If this work is unrelated to the active task: "
+        f"`touch {flag}` and Stop will not block again this session."
+    )
+
+
 def handle_stop(session_id: str) -> None:
     task = get_current_task()
     if not task:
+        return
+
+    # Explicit opt-out wins over everything.
+    if is_off_topic(session_id):
         return
 
     if not was_task_worked_on(session_id, task["task_id"]):
@@ -987,8 +1452,25 @@ def handle_stop(session_id: str) -> None:
     if task["total"] == 0:
         return
 
+    # Sticky release: once we've already given up on this session+task,
+    # don't re-nag every time the user prompts. Cleared on SessionEnd or
+    # status change.
+    if is_released(session_id, task["task_id"]):
+        return
+
+    # Engagement threshold: short one-off sessions (answered a question,
+    # ran a single command) shouldn't block Stop. Warn to stderr but release.
+    engagement = get_engagement(session_id, task["task_id"])
+    if engagement < MIN_ENGAGEMENTS_TO_BLOCK:
+        print(
+            f"⚠️  task-memory: {task['task_id']} touched {engagement}× this session "
+            f"(threshold {MIN_ENGAGEMENTS_TO_BLOCK}). Not blocking Stop.",
+            file=sys.stderr,
+        )
+        return
+
     # Loop prevention: after MAX_STOP_BLOCKS consecutive blocks, allow stop
-    # with a warning. Otherwise the agent gets trapped re-attempting forever.
+    # and mark released so we don't re-nag next cycle.
     counter = _stop_block_count_path(session_id) if session_id else None
     block_count = 0
     if counter and counter.exists():
@@ -1000,9 +1482,11 @@ def handle_stop(session_id: str) -> None:
     if block_count >= MAX_STOP_BLOCKS:
         print(
             f"⚠️  task-memory: {task['task_id']} still has incomplete subtasks, "
-            f"but allowing stop after {block_count} blocks. Update the kanban when ready.",
+            f"allowing stop after {block_count} blocks. Not nagging again this session. "
+            f"Clear: rm {released_flag_path(session_id, task['task_id'])}",
             file=sys.stderr,
         )
+        mark_released(session_id, task["task_id"])
         if counter:
             try:
                 counter.unlink()
@@ -1010,18 +1494,46 @@ def handle_stop(session_id: str) -> None:
                 pass
         return
 
+    # Context-preservation check: if research was performed but notes are empty,
+    # flag it. This is a common leak point — operations log has URLs but the
+    # notes file (what actually persists across sessions) is blank.
+    research_ops = _count_research_ops(task["block"])
+    complexity = _detect_complexity(task["block"])
+    needs_notes = research_ops >= 2 or complexity in ("Standard", "Complex")
+    notes_missing = not _notes_has_content(task["task_id"])
+    pause_hint = _actionable_pause_hint(task)
+    off_topic_hint = _actionable_off_topic_hint(session_id)
+
     if task["completed"] == task["total"]:
-        reason = (
-            f"All {task['total']} subtasks complete for {task['task_id']} but task still "
-            f"in-progress. Please: 1) Change Status to done, 2) Move task to Done section, "
-            f"3) Add Finished date. Then you may stop."
-        )
+        if needs_notes and notes_missing:
+            reason = (
+                f"All {task['total']} subtasks complete for {task['task_id']}, but "
+                f"notes/{task['task_id']}.md is missing or empty. {research_ops} research "
+                f"operations were logged — their insights will be LOST on session end. "
+                f"Fill in notes/{task['task_id']}.md (Patterns, Gotchas, Decisions) before "
+                f"marking done. Then change Status to done and add Finished date. "
+                f"{off_topic_hint}"
+            )
+        else:
+            reason = (
+                f"All {task['total']} subtasks complete for {task['task_id']} but task still "
+                f"in-progress. Please: 1) Change Status to done, 2) Move task to Done section, "
+                f"3) Add Finished date. Then you may stop. {off_topic_hint}"
+            )
     else:
         remaining = task["total"] - task["completed"]
         subs = " ".join(f"- {s}" for s in get_incomplete_subtasks(task["block"]))
+        notes_warning = ""
+        if needs_notes and notes_missing:
+            notes_warning = (
+                f" Also: notes/{task['task_id']}.md is missing — preserve research "
+                f"insights there before pausing or session context will be lost."
+            )
         reason = (
             f"{task['task_id']} has {remaining} incomplete subtasks: {subs}. "
-            f"Complete these subtasks before stopping, or change Status to 'todo' if pausing work."
+            f"Complete these subtasks before stopping, or change Status to 'todo' if pausing work. "
+            f"{pause_hint} {off_topic_hint}"
+            f"{notes_warning}"
         )
 
     if counter:
@@ -1033,14 +1545,30 @@ def handle_stop(session_id: str) -> None:
 
 
 def handle_session_end(session_id: str) -> None:
-    """SessionEnd: flush session task file, never block (finding #5)."""
-    if session_id:
-        f = session_task_file(session_id)
+    """SessionEnd: flush all session-scoped state, never block (finding #5)."""
+    if not session_id:
+        return
+    # Session task file + stop-blocks counter + released flags + off-topic flag
+    # + engagement counters (multiple task ids possible).
+    to_remove = [
+        session_task_file(session_id),
+        _stop_block_count_path(session_id),
+        off_topic_flag_path(session_id),
+    ]
+    for f in to_remove:
         if f.exists():
             try:
                 f.unlink()
             except OSError:
                 pass
+    # Released flags + engagement counters use session_id as prefix — glob.
+    if STATE_DIR.exists():
+        for pattern in (f"released-{session_id}-*.flag", f"engagement-{session_id}-*.txt"):
+            for p in STATE_DIR.glob(pattern):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
 
 # =============================================================================

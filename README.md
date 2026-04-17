@@ -1,11 +1,14 @@
 # Task Memory
 
-> Context-preserving task management for Claude Code. Your research survives context resets.
+> Context-preserving task management for Claude Code **and** Cowork. Your research survives context resets.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-orange.svg)](https://claude.ai/code)
+[![Cowork](https://img.shields.io/badge/Cowork-Sideload-7c6fff.svg)](https://claude.ai/download)
 
-**Task Memory** gives AI coding assistants persistent memory through markdown files. It automatically logs research operations, preserves context across sessions, and enforces task completion before stopping.
+**Task Memory** gives AI assistants persistent memory through markdown files. It automatically logs research operations, preserves context across sessions, and enforces task completion before stopping.
+
+As of v3.2.0 the plugin ships in **dual format** — the same artifact installs into Claude Code (via the kepptic marketplace) and Cowork (via sideloaded `.plugin` archive). Skills, commands, and the Python context-preservation hook are byte-identical across both runtimes.
 
 ```
 "What was I working on? What did I learn? What's next?"
@@ -13,48 +16,67 @@
 
 ## Features
 
-- **Automatic Research Logging** - WebFetch/WebSearch operations logged to your current task
-- **Context Preservation** - Tasks, notes, and errors persist across sessions
-- **2-Action Rule** - Reminds you to save findings after every 2 research operations
-- **Session Tracking** - Stop hook only blocks for tasks worked on in the current session
-- **Kanban Board** - Visual task management in a single HTML file (works offline)
-- **Monorepo Support** - Auto-detects nearest `planning/tasks.md`
+- **Automatic Research Logging** — WebFetch/WebSearch operations logged to your current task
+- **Context Preservation** — Tasks, notes, and errors persist across sessions
+- **Proactive Notes Skeletons** — `planning/notes/TASK-XXX.md` auto-created on SessionStart for every in-progress task, with structural sections (Summary, Patterns, Gotchas, Decisions, Resources, Open Questions)
+- **Scoped Session Tracking** — Stop hook only blocks when tool use actually touches the task (tasks.md, notes file, paths in block, or task ID in Bash/Task input). Off-topic questions don't trap the model in a block loop
+- **Engagement Threshold** — Short sessions (fewer than 3 task-relevant tool uses) never block Stop — prevents "asked one question, can't stop"
+- **Off-topic Escape Hatch** — `touch .claude/state/task-memory/off-topic-<session>.flag` to disable blocking for the rest of the session
+- **Sticky Loop Release** — After 2 consecutive Stop blocks, the hook gives up and won't re-nag for the same session+task
+- **Session-state GC** — Orphaned state files from crashed sessions are swept on SessionStart (configurable via `session_state_max_age_hours`)
+- **Kanban Board** — Visual task management in a single HTML file (works offline)
+- **Monorepo Support** — Auto-detects nearest `planning/tasks.md`, or use `task_files_glob` for split kanbans
 
 ## Quick Start
 
-### Option 1: Git Clone (Recommended)
-
-```bash
-git clone https://github.com/kepptic/task-memory.git
-cd task-memory
-claude  # Hooks load automatically
-```
-
-### Option 2: Add to Existing Project
-
-```bash
-# Copy plugin files to your project
-cp -r hooks/ skills/ rules/ /path/to/your-project/
-mkdir -p /path/to/your-project/.claude
-cp .claude/settings.json /path/to/your-project/.claude/
-chmod +x /path/to/your-project/hooks/*.sh
-
-# Run interactive setup
-cd /path/to/your-project
-claude
-# Then run: /tm-init
-```
-
-### Option 3: Plugin Install
+### Install in Claude Code (Recommended)
 
 ```bash
 /plugin marketplace add kepptic/task-memory
 /plugin install task-memory@kepptic
 ```
 
-### Option 4: Standalone HTML App
+Then `cd` into any project and run `/tm-init`. The hook wires up automatically.
 
-Download [`task-memory.html`](task-memory.html) and open in Chrome/Edge/Opera. Works offline, no installation required.
+### Install in Cowork
+
+Cowork uses sideloaded plugin archives. Either:
+
+1. **Build the archive yourself:**
+   ```bash
+   git clone https://github.com/kepptic/task-memory.git
+   cd task-memory
+   scripts/build-cowork-plugin.sh
+   # Produces: dist/task-memory-<version>.plugin
+   ```
+2. **Or download the prebuilt archive** from the [Releases](https://github.com/kepptic/task-memory/releases) page.
+
+Then in Cowork: drag the `.plugin` file into the chat, or use the **Install plugin** menu and point it at the file. After install, invoke `/tm-init` to bootstrap a project.
+
+### Git Clone (Development)
+
+```bash
+git clone https://github.com/kepptic/task-memory.git
+cd task-memory
+claude  # Hooks load automatically via .claude/settings.json
+```
+
+### Add to an Existing Project
+
+```bash
+cp -r hooks/ skills/ rules/ /path/to/your-project/
+mkdir -p /path/to/your-project/.claude
+cp .claude/settings.json /path/to/your-project/.claude/
+chmod +x /path/to/your-project/hooks/*.sh
+
+cd /path/to/your-project
+claude
+# Then run: /tm-init
+```
+
+### Standalone HTML App
+
+Download [`task-memory.html`](task-memory.html) and open in Chrome/Edge/Opera. Works offline, no installation required — useful if you just want the Kanban viewer without the automation.
 
 ## How It Works
 
@@ -122,26 +144,38 @@ Your research is preserved:
 ## File Structure
 
 ```
-your-project/
-├── hooks/                 # Hook scripts
-│   ├── hooks.json         # Plugin config (uses ${CLAUDE_PLUGIN_ROOT})
+task-memory/
+├── .claude-plugin/
+│   ├── plugin.json        # Manifest (same path for Claude Code + Cowork)
+│   └── marketplace.json   # Claude Code marketplace metadata
+├── hooks/                 # Hook scripts (command-type, portable across both runtimes)
+│   ├── hooks.json         # Hook config (uses ${CLAUDE_PLUGIN_ROOT})
 │   ├── task-memory-hook.py   # Main hook (Python 3.11+ stdlib only)
 │   └── skill-eval.sh         # UserPromptSubmit shim
-├── skills/                # Skill definitions
+├── commands/              # Slash command wrappers (Cowork convention, also works in Claude Code)
+│   ├── tm-init.md
+│   ├── task-memory.md
+│   └── task-status.md
+├── skills/                # Skill definitions (same format in both runtimes)
 │   ├── tm-init/
 │   ├── task-memory/
 │   └── task-status/
+├── scripts/
+│   └── build-cowork-plugin.sh   # Produces dist/*.plugin archive for Cowork sideload
 ├── rules/                 # Workflow rules
-├── .claude/
-│   ├── settings.json      # Project config (uses $CLAUDE_PROJECT_DIR)
-│   ├── hooks/ → ../hooks/ # Symlinks for local testing
-│   ├── skills/ → ../skills/
-│   └── rules/ → ../rules/
+└── .claude/
+    └── settings.json      # Local dev: hooks point at $CLAUDE_PROJECT_DIR paths
+```
+
+Inside a project that *uses* task-memory:
+
+```
+your-project/
 ├── planning/
-│   ├── tasks.md           # Active tasks
+│   ├── tasks.md           # Active tasks (created by /tm-init)
 │   ├── archive.md         # Completed tasks
-│   └── notes/             # Research documentation
-└── .task-memory.json      # Optional: custom config
+│   └── notes/             # Per-task research preservation
+└── .task-memory.json      # Optional: custom planning_dir or task_prefix
 ```
 
 ## Hook Events

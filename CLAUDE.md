@@ -23,13 +23,28 @@ This is an **open source** project. Quality matters. Every task must be verifiab
 
 This project uses the **task-memory** plugin for task tracking.
 
-**On every prompt:** Determine if it's a TASK or QUESTION.
-- **TASK** (implement, fix, build, create): Create task in `planning/tasks.md` first
+### Session Start Protocol
+
+At the start of EVERY session:
+1. The SessionStart hook auto-displays the current task + notes summary.
+2. If you see "⚠️ CONTEXT GAP DETECTED", recreate findings from the operations log BEFORE coding.
+3. For full verification, run `/task-status` — it computes a Context Health Score (0-5).
+
+### Task vs. Question Triage
+
+**On every prompt:** Determine the type.
+- **TASK** (implement, fix, build, refactor, migrate): Create task in `planning/tasks.md` first
 - **QUESTION** (what, how, why, explain): Answer directly
+- **AMBIGUOUS** ("help me with X", "I'm stuck"): Ask one clarifying question first
 
-**Skills:** `/task-memory` (full workflow) | `/task-status` (context check)
+**Skills:** `/tm-init` (setup) | `/task-memory` (full workflow) | `/task-status` (health score)
 
-**Install:** `/plugin install task-memory@kepptic`
+**Install:**
+
+- **Claude Code:** `/plugin install task-memory@kepptic`
+- **Cowork:** build the archive with `scripts/build-cowork-plugin.sh`, then sideload the resulting `dist/task-memory-<version>.plugin` file (drag into the chat or use the Install plugin menu)
+
+Same skills, commands, and Python hook in both runtimes — `.plugin` archive contents are format-identical.
 
 ---
 
@@ -138,23 +153,44 @@ Before marking `Status: done`:
 | Work unfinished | Complexity underestimated | Assess complexity conservatively |
 | Wrong pattern used | Didn't check existing code | Pre-work: search for similar implementations |
 | Bug introduced | Skipped self-critique | Complete Rule 6 before marking done |
-| Context lost | No notes captured | Document insights in Notes section |
+| Context lost | Notes file empty despite research | Hook blocks Stop — fill Patterns/Gotchas/Decisions |
+| Research gap | Ops logged but no synthesis | SessionStart warns; /task-status shows Health Score |
 
 ---
 
-## Session Memory (Preserve Learning)
+## Context Preservation Protocol
 
-After completing complex tasks, add to **Notes**:
+Context loss is the #1 failure mode. In 3.0.0, preservation became structural, not advisory.
 
-```markdown
-**Insights**:
-| Type | Discovery |
-|------|-----------|
-| Pattern | [reusable technique] |
-| Gotcha | [pitfall and prevention] |
-```
+### Hook Handles Automatically (you don't need to remember)
 
-This prevents repeating mistakes across sessions.
+| Event | What happens |
+|-------|--------------|
+| Every WebFetch / WebSearch | Logged to `**Visual Operations Log**` with URL/query + response snippet (≤120 chars) |
+| SessionStart | GC stale session state (>24h); create `planning/notes/TASK-XXX.md` skeleton for every in-progress task; display task + notes summary OR warn about context gap |
+| Every 2 research ops | Notes skeleton re-checked (no-op if already created on SessionStart) |
+| PreCompact | Snapshot saved to `notes/TASK-XXX-precompact-TIMESTAMP.md`; recent ops log appended to main notes file |
+| PreToolUse (Write/Edit/Bash/Task) | Stamp session as worked-on **only if** tool use actually touches task (tasks.md, notes file, paths in block, task ID in content); bump engagement counter |
+| Stop | BLOCKS only if (a) engagement ≥ 3 tool-relevant uses, (b) task has incomplete subtasks or no notes, (c) not already released, (d) not off-topic flagged. After 2 blocks, sticky release — no re-nagging for same session+task |
+| SessionEnd | Flush all session state (session file, stop-blocks, released flags, engagement counters, off-topic flag) |
+
+### Escape Hatches
+
+- `TASK_MEMORY_FORCE_STAMP=1` — restore pre-3.3 blanket stamping (any tool use marks task as worked-on)
+- `touch .claude/state/task-memory/off-topic-<session>.flag` — disable blocking for current session
+- `.task-memory.json` tunables: `min_engagements_to_block` (default 3), `session_state_max_age_hours` (default 24)
+
+### You Must Still (synthesis, not actions)
+
+The log captures **what** you did. Notes capture **so what**.
+
+After every research batch, fill in the notes file with:
+
+- **Patterns** — reusable techniques ("do this"). Be specific.
+- **Gotchas** — pitfalls with failure modes ("don't do this, because Y")
+- **Decisions** — choices + rationale (`Decision — reason`)
+
+"Looked at screenshot, has panels" ≠ preservation. Write: "3-panel layout: 250px left nav, fluid center, 300px right panel."
 
 ---
 

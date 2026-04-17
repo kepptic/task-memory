@@ -1,16 +1,16 @@
 ---
 name: task-status
-version: "1.3.0"
-description: Provides quick context verification using the 5-Question Reboot Test. Shows current task progress, workflow type, complexity, phase dependencies, and remaining subtasks. Use when starting new sessions, resuming after breaks, when context feels uncertain, or before making major implementation decisions.
+version: "2.0.0"
+description: Provides quick context verification using the 5-Question Reboot Test plus Context Health Score. Validates that notes files exist and have substantive content, flags research gaps (ops logged without notes), shows workflow type, complexity, phase dependencies, and remaining subtasks. Use when starting new sessions, resuming after breaks, when context feels uncertain, or before making major implementation decisions.
 user-invocable: true
 allowed-tools:
   - Read
   - Glob
 ---
 
-# /task-status - 5-Question Reboot Test
+# /task-status - 5-Question Reboot Test + Context Health Check
 
-Quickly verify your context is solid by answering 5 key questions.
+Quickly verify your context is solid. The old test asked 5 questions. The new test also computes a **Context Health Score** so you know when preservation has leaked.
 
 ## Quick Start
 
@@ -18,7 +18,7 @@ When invoked, perform these steps:
 
 ### Step 1: Read Tasks
 
-```bash
+```
 Read planning/tasks.md
 ```
 
@@ -31,8 +31,8 @@ Find the task with `**Status**: in-progress`
 | Where am I? | First unchecked subtask | Current phase |
 | Where am I going? | Remaining subtasks with dependencies | What's left |
 | What's the goal? | Task description | Why we're doing this |
-| What have I learned? | Notes + notes/ (patterns, gotchas) | Research insights |
-| What have I done? | Visual Operations Log | Recent actions |
+| What have I learned? | notes/TASK-XXX.md (Patterns, Gotchas, Decisions) | Synthesized insights |
+| What have I done? | Visual Operations Log (with response snippets) | Recent actions + results |
 
 Also extract:
 - **Workflow type** (Feature/Refactor/Investigation/Migration/Simple)
@@ -40,19 +40,42 @@ Also extract:
 - **Pre-Work Checklist** status
 - **Phase dependencies** for remaining subtasks
 
-### Step 3: Check for Notes File
+### Step 3: Check Notes File — Quality Validation
 
-```bash
-Read planning/notes/TASK-XXX.md (if exists)
+Read `planning/notes/TASK-XXX.md` and classify it:
+
+| State | Criteria | Score |
+|-------|----------|-------|
+| **Missing** | File does not exist | 0/3 |
+| **Skeleton** | File exists but all sections are placeholder italics or empty bullets | 1/3 |
+| **Substantive** | Each required section (Patterns, Gotchas, Decisions) has at least one real bullet | 3/3 |
+
+Count Visual Operations Log entries. If ops ≥ 2 but notes = Missing or Skeleton, this is a **research gap** — insights from earlier operations were never synthesized.
+
+### Step 4: Compute Context Health Score
+
+A simple 5-factor score out of 5. Each factor worth 1 point:
+
+```
+☐ Task has Status: in-progress                        (1 pt)
+☐ Task has subtasks defined                           (1 pt)
+☐ Pre-Work Checklist completed                        (1 pt)
+☐ Notes file exists AND has substantive content       (1 pt)
+☐ No research gap (ops/notes ratio healthy)           (1 pt)
 ```
 
-### Step 4: Display Status
+- **5/5** ✅ Context verified, ready to continue
+- **3-4/5** ⚠️  Usable but degraded — note the missing factor
+- **0-2/5** 🚨 Context is broken — reload or rebuild before proceeding
+
+### Step 5: Display Status
 
 ```
 ═══════════════════════════════════════════════════════════════
 📋 TASK STATUS: TASK-XXX | [Title]
 ═══════════════════════════════════════════════════════════════
 Workflow: [Type] | Complexity: [Level] | Pre-Work: [✓/✗]
+Context Health: [N/5] [✅|⚠️|🚨]
 ═══════════════════════════════════════════════════════════════
 
 1️⃣  WHERE AM I?
@@ -70,13 +93,18 @@ Workflow: [Type] | Complexity: [Level] | Pre-Work: [✓/✗]
     [Task description from tasks.md]
 
 4️⃣  WHAT HAVE I LEARNED?
-    Patterns: [From notes file if exists]
-    Gotchas: [From notes file if exists]
-    Notes: [Summary from Notes section]
+    Notes state: [Substantive | Skeleton | Missing]
+    Patterns: [From notes file]
+    Gotchas: [From notes file]
+    Decisions: [From notes file]
 
 5️⃣  WHAT HAVE I DONE?
-    Recent operations:
-    - [Last 3-5 Visual Operations Log entries]
+    Recent operations (with response previews):
+    - [Last 3-5 Visual Operations Log entries including => snippets]
+
+───────────────────────────────────────────────────────────────
+Context Gaps (if any):
+- [List any missing/skeleton notes, ops without synthesis, etc.]
 
 ═══════════════════════════════════════════════════════════════
 ✅ Context verified | Ready to continue
@@ -85,24 +113,50 @@ Workflow: [Type] | Complexity: [Level] | Pre-Work: [✓/✗]
 
 ---
 
-## When Context is Broken
+## When Context Is Degraded
 
-If you can't answer these questions, display:
+If Context Health < 5/5, display explicit recovery instructions:
 
 ```
 ═══════════════════════════════════════════════════════════════
-⚠️  CONTEXT CHECK FAILED
+⚠️  CONTEXT HEALTH: 2/5
 ═══════════════════════════════════════════════════════════════
 
-Missing information:
+Missing factors:
+❌ Notes file is empty skeleton (planning/notes/TASK-005.md)
+❌ Research gap: 4 ops logged, no synthesis captured
+❌ Pre-Work Checklist incomplete
+
+Recommended actions (in order):
+1. Open Visual Operations Log in tasks.md — read the captured snippets
+2. Synthesize into notes/TASK-005.md:
+   - What PATTERN emerges from those 4 ops?
+   - What GOTCHA to record?
+   - What DECISIONS follow?
+3. Complete Pre-Work Checklist before resuming coding
+4. Re-run /task-status to re-verify
+
+═══════════════════════════════════════════════════════════════
+```
+
+### When Context Is Broken (0-1/5)
+
+```
+═══════════════════════════════════════════════════════════════
+🚨 CONTEXT CHECK FAILED
+═══════════════════════════════════════════════════════════════
+
+Cannot proceed safely. Missing:
 - [ ] No in-progress task found
 - [ ] Task has no subtasks defined
-- [ ] No Visual Operations Log
+- [ ] No operations log, no notes
 
 Recommended actions:
 1. Review planning/tasks.md for task status
-2. Add subtasks to break down the work
-3. Continue research to populate logs
+2. If work was in progress, find most recent precompact snapshot:
+   ls planning/notes/*-precompact-*.md
+3. Add subtasks to break down the work
+4. Start from the beginning with /task-memory
 
 ═══════════════════════════════════════════════════════════════
 ```
@@ -112,20 +166,22 @@ Recommended actions:
 ## When to Use
 
 Run `/task-status` when:
-- Starting a new session
+- Starting a new session (the SessionStart hook also shows notes summary automatically)
 - Resuming after a break
 - Context feels uncertain
 - Before making major decisions
+- After the hook displays a "CONTEXT GAP DETECTED" warning
 
 ---
 
-## Example Output
+## Example Output — Healthy Context
 
 ```
 ═══════════════════════════════════════════════════════════════
 📋 TASK STATUS: TASK-004 | Fix hook functionality
 ═══════════════════════════════════════════════════════════════
 Workflow: Investigation | Complexity: Standard | Pre-Work: ✓
+Context Health: 5/5 ✅
 ═══════════════════════════════════════════════════════════════
 
 1️⃣  WHERE AM I?
@@ -139,18 +195,26 @@ Workflow: Investigation | Complexity: Standard | Pre-Work: ✓
     - [ ] Verify 2-Action Rule reminder (depends: Test WebSearch)
 
 3️⃣  WHAT'S THE GOAL?
-    Ensure PreToolUse hook correctly logs research operations
-    to the Visual Operations Log in tasks.md
+    Ensure PostToolUse hook correctly logs research operations
+    to the Visual Operations Log in tasks.md.
 
 4️⃣  WHAT HAVE I LEARNED?
-    Patterns: Hook triggers on WebFetch/WebSearch
-    Gotchas: Must check for planning/ directory first
-    Notes: See planning/notes/TASK-004.md
+    Notes state: Substantive
+    Patterns:
+      - Hook receives tool_response as dict with 'result'/'content' keys
+      - Snippet captured via stripping newlines + truncating to 120 chars
+    Gotchas:
+      - Must check planning/ directory exists before writing (mkdir -p)
+      - `task_files_glob` bypass: don't auto-create in multi-file mode
+    Decisions:
+      - Chose append-not-replace strategy for log entries
 
 5️⃣  WHAT HAVE I DONE?
     Recent operations:
-    - 2026-01-12 10:30:45 - WebFetch: https://docs.example.com
-    - 2026-01-12 10:31:22 - WebSearch: "Claude Code hooks"
+    - 2026-04-16 10:30:45 - WebFetch: https://docs.example.com
+        => Hook reference: PreToolUse receives tool_name, tool_input...
+    - 2026-04-16 10:31:22 - WebSearch: "Claude Code hooks JSON output"
+        => Results mention `decision: block` for PreToolUse...
 
 ═══════════════════════════════════════════════════════════════
 ✅ Context verified | Ready to continue
@@ -159,11 +223,70 @@ Workflow: Investigation | Complexity: Standard | Pre-Work: ✓
 
 ---
 
+## Example Output — Degraded Context (Research Gap)
+
+```
+═══════════════════════════════════════════════════════════════
+📋 TASK STATUS: TASK-007 | Migrate auth to JWT
+═══════════════════════════════════════════════════════════════
+Workflow: Migration | Complexity: Complex | Pre-Work: ✗
+Context Health: 2/5 ⚠️
+═══════════════════════════════════════════════════════════════
+
+1️⃣  WHERE AM I?
+    Current phase: Choose JWT library
+    Progress: 0/5 subtasks complete
+
+2️⃣  WHERE AM I GOING?
+    Remaining:
+    - [ ] Phase 1: Choose JWT library
+    - [ ] Phase 2: Define token schema (depends: Phase 1)
+    - [ ] Phase 3: Implement refresh flow (depends: Phase 2)
+    ...
+
+3️⃣  WHAT'S THE GOAL?
+    Replace session-based auth with JWT to enable multi-node scale.
+
+4️⃣  WHAT HAVE I LEARNED?
+    Notes state: Skeleton (file exists but sections are empty placeholders)
+    ⚠️  6 research operations were logged but synthesis is empty.
+    ⚠️  Session reload cannot recover what you learned.
+
+5️⃣  WHAT HAVE I DONE?
+    Recent operations:
+    - 2026-04-15 14:20 - WebFetch: jwt.io/introduction
+        => JWT consists of Header.Payload.Signature, signed with secret...
+    - 2026-04-15 14:25 - WebSearch: "jose vs jsonwebtoken"
+        => jose is active, jsonwebtoken legacy but more adopted...
+    - 2026-04-15 14:32 - WebFetch: npmjs.com/package/jose
+        => Supports RS256, ES256, EdDSA; built on web crypto API...
+    (3 more operations)
+
+───────────────────────────────────────────────────────────────
+Context Gaps:
+❌ Notes skeleton is empty — 6 ops worth of research unsynthesized
+❌ Pre-Work Checklist incomplete — go read auth/ folder first
+
+Recommended recovery:
+1. Read the response snippets above
+2. Fill in notes/TASK-007.md:
+   - Pattern: "jose library for RS256/ES256, use web crypto API"
+   - Gotcha: "jsonwebtoken is legacy — avoid for new code"
+   - Decision: "Choose jose for modern algorithm support"
+3. Complete Pre-Work Checklist
+4. Re-run /task-status
+
+═══════════════════════════════════════════════════════════════
+```
+
+---
+
 ## Integration
 
 This skill reads from:
-- **planning/tasks.md** - Task status, subtasks, notes, operations log
-- **planning/notes/** - Task documentation (research, audits, reviews)
+- **planning/tasks.md** — task status, subtasks, operations log (with response snippets)
+- **planning/notes/TASK-XXX.md** — task documentation (Patterns, Gotchas, Decisions)
+- **planning/notes/TASK-XXX-precompact-*.md** — pre-compaction snapshots (fallback if main notes missing)
 
 Use with `/task-memory` to preserve research before checking status.
 
@@ -178,7 +301,7 @@ For complete format documentation, see `/task-memory` skill.
 ### TASK-XXX | Title                                    # Must be h3 (###)
 **Priority**: 🟠 High | **Category**: Feature | **Status**: in-progress | **Assigned**: @user
 **Workflow**: Feature | **Complexity**: Standard
-**Created**: 2026-01-15 | **Started**: 2026-01-15 | **Finished**:
+**Created**: 2026-04-15 | **Started**: 2026-04-15 | **Finished**:
 **Tags**: #tag1 #tag2
 
 Description text...
@@ -216,5 +339,6 @@ Description text...
 
 ---
 
-**Version:** 1.2.0
+**Version:** 2.0.0
 **License:** MIT
+**Changelog 2.0.0:** Added Context Health Score, notes quality validation (Missing/Skeleton/Substantive), research gap detection, recovery instructions for degraded context.

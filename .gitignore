@@ -40,7 +40,12 @@ task-memory.html
 
 # Test output
 tests/output/
+tests/fixtures/
 *.test.log
+
+# Build artifacts — plugin archives
+release/
+dist/*.plugin
 
 # OS files
 Thumbs.db
