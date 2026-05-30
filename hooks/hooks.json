@@ -35,7 +35,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|Bash|Task",
+        "matcher": "Write|Edit|Task",
         "hooks": [
           {
             "type": "command",
@@ -47,7 +47,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|Bash|WebFetch|WebSearch|TodoWrite",
+        "matcher": "Write|Edit|WebFetch|WebSearch|TodoWrite",
         "hooks": [
           {
             "type": "command",
