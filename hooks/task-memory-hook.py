@@ -4,7 +4,7 @@ task-memory-hook.py - Unified hook for task-memory plugin.
 
 Handles all Claude Code hook events:
 - SessionStart / PostCompact: Display current task context
-- PreToolUse: Refresh context (Write/Edit/Bash/Task)
+- PreToolUse: Refresh context (Write/Edit/Task)
 - PostToolUse: Research logging (WebFetch/WebSearch), TodoWrite mirror, error logging
 - PreCompact: Dump task + TodoWrite state to a notes snapshot before compaction
 - Stop / SubagentStop: Verify task completion (may block)
@@ -22,7 +22,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -589,8 +589,12 @@ def reorganize_tasks_file(path: Path | None = None) -> bool:
     if configured:
         valid_ids = {cid for cid, _ in configured}
     else:
-        # Defaults match HTML app's generateInitialTaskFile() in fileSystem.js
-        valid_ids = {"todo", "to-do", "in-progress", "in-review", "done"}
+        # Defaults match HTML app's generateInitialTaskFile() in fileSystem.js.
+        # `awaiting` (added v3.4.0) is for tasks where the active work is done
+        # and the next move depends on an external signal (reply, CI run, vendor
+        # decision, etc.). Excluded from get_current_task() so the Stop hook
+        # doesn't nag on parked-pending-signal work.
+        valid_ids = {"todo", "to-do", "in-progress", "in-review", "awaiting", "done"}
 
     column_sections = [(idx, s) for idx, s in enumerate(sections) if s["id"] in valid_ids]
     if len(column_sections) < 2:
@@ -636,6 +640,56 @@ def reorganize_tasks_file(path: Path | None = None) -> bool:
 
     target.write_text(new_content)
     return True
+
+
+def _extract_silence_deadline(block: str) -> str | None:
+    """Pull the silence-deadline date out of an Outcome Branches block.
+
+    Looks for any `If no <…> by <YYYY-MM-DD>` line (case-insensitive). Returns
+    the earliest such date as an ISO string, or None if no deadline is set.
+    Whatever the natural-language phrasing ("If no reply by 2026-04-29",
+    "If no signal by 2026-05-01"), only the YYYY-MM-DD token is parsed.
+    """
+    dates = re.findall(
+        r"-\s*If no [^\n]*?by\s*(\d{4}-\d{2}-\d{2})",
+        block,
+        re.IGNORECASE,
+    )
+    if not dates:
+        return None
+    return min(dates)  # earliest deadline wins if multiple branches list one
+
+
+def _extract_awaiting_overdue(content: str, source: Path) -> list[dict[str, Any]]:
+    """Return awaiting tasks whose silence-deadline (in Outcome Branches) has passed."""
+    today = date.today().isoformat()
+    out = []
+    for task_id, heading, block in _iter_task_blocks(content):
+        m = re.search(r"\*\*Status\*\*:\s*([a-z-]+)", block)
+        if not m or m.group(1) != "awaiting":
+            continue
+        deadline = _extract_silence_deadline(block)
+        if not deadline or deadline > today:
+            continue
+        title = heading.split("|", 1)[1].strip() if "|" in heading else ""
+        out.append({
+            "task_id": task_id,
+            "title": title,
+            "deadline": deadline,
+            "source": source,
+            "label": _label_for(source),
+        })
+    return out
+
+
+def get_awaiting_overdue() -> list[dict[str, Any]]:
+    """Awaiting tasks past their silence-deadline across all task files."""
+    out = []
+    for f in task_files():
+        content = read_tasks(f)
+        if content:
+            out.extend(_extract_awaiting_overdue(content, f))
+    return out
 
 
 def _extract_in_progress(content: str, source: Path) -> list[dict[str, Any]]:
@@ -709,7 +763,7 @@ def ensure_tasks_structure() -> None:
             "# Task Board\n\n"
             "<!-- Config: Last Task ID: 000 -->\n\n"
             "## Configuration\n"
-            "**Columns**: To Do | In Progress | Done\n"
+            "**Columns**: To Do | In Progress | Awaiting | Done\n"
             "**Categories**: Feature, Bug, Docs, Research\n"
             "**Users**: @user\n"
             "**Tags**: #feature #bug #docs #research\n\n"
@@ -717,6 +771,11 @@ def ensure_tasks_structure() -> None:
             "## To Do\n\n"
             "---\n\n"
             "## In Progress\n\n"
+            "---\n\n"
+            "## Awaiting\n\n"
+            "> Tasks parked pending an external signal (reply, build, vendor "
+            "decision). Outcome Branches in each task define what to do when "
+            "the signal arrives — or by when to give up.\n\n"
             "---\n\n"
             "## Done\n\n"
             "---\n"
@@ -832,6 +891,24 @@ def handle_session_start() -> None:
         return
 
     all_tasks = get_all_in_progress_tasks()
+    overdue = get_awaiting_overdue()
+    if overdue:
+        print(
+            f"\n🔔 AWAITING — {len(overdue)} task(s) past their silence-deadline:",
+            file=sys.stderr,
+        )
+        for t in overdue:
+            suffix = f" ({t['label']})" if t.get("label") else ""
+            print(
+                f"  • {t['task_id']} | {t['title'][:60]}  "
+                f"deadline {t['deadline']}{suffix}",
+                file=sys.stderr,
+            )
+        print(
+            "  → Outcome Branches define the silence-path action; execute or "
+            "extend the deadline.",
+            file=sys.stderr,
+        )
 
     # v3.3.0: proactively create notes skeletons for every in-progress task.
     # Prior behavior only warned when research ops >= 2 and the file was
@@ -1415,14 +1492,17 @@ def _detect_complexity(block: str) -> str:
 
 
 def _actionable_pause_hint(task: dict) -> str:
-    """Copy-paste instructions to flip the current task to Status: todo."""
+    """Copy-paste instructions to flip the current task off in-progress."""
     try:
         rel = task["source"].relative_to(PROJECT_DIR)
     except (KeyError, ValueError):
         rel = task.get("source") or TASKS_FILE
     return (
         f"To pause: Edit {rel} under `### {task['task_id']}` — replace "
-        f"`**Status**: in-progress` with `**Status**: todo`. Section auto-reorganizes."
+        f"`**Status**: in-progress` with `**Status**: todo` (work-not-started-again) "
+        f"or `**Status**: awaiting` (action shipped, blocked on an external signal "
+        f"— add an Outcome Branches block describing what to do when the signal "
+        f"arrives or by when to chase). Section auto-reorganizes."
     )
 
 
@@ -1531,7 +1611,7 @@ def handle_stop(session_id: str) -> None:
             )
         reason = (
             f"{task['task_id']} has {remaining} incomplete subtasks: {subs}. "
-            f"Complete these subtasks before stopping, or change Status to 'todo' if pausing work. "
+            f"Complete these subtasks before stopping, or change Status to 'todo' (pause) or 'awaiting' (parked on external signal — add Outcome Branches). "
             f"{pause_hint} {off_topic_hint}"
             f"{notes_warning}"
         )

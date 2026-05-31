@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-04-27
+
+### Added
+
+- **`awaiting` status + column.** A new kanban column for tasks where the active work has shipped but the task can't close until an external signal arrives — a reply, a CI run, a vendor decision, an async backend job. Distinguishes "I'm watching, not driving" from `in-progress` (actively working) and `done` (signal received). Recognized as a default canonical status alongside `todo` / `in-progress` / `in-review` / `done`; the auto-scaffolded `tasks.md` now includes an `## Awaiting` section between `In Progress` and `Done`.
+
+- **Stop-hook awareness of awaiting.** The Stop hook only nags on `in-progress` tasks, so flipping a task to `awaiting` parks it cleanly without triggering "incomplete subtasks" blocks. The pause hint now suggests both `todo` (pause work) and `awaiting` (parked on external signal) as options, with a reminder to add an `Outcome Branches` block describing the signal-arrived and silence-deadline actions.
+
+- **SessionStart awaiting-overdue surface.** When any `awaiting` task has an `If no <…> by YYYY-MM-DD →` line in its Outcome Branches block whose date is in the past, SessionStart prints a `🔔 AWAITING — N task(s) past their silence-deadline:` summary at the top of the banner. The deadline is parsed naively from the task block; only the YYYY-MM-DD token matters, the natural-language phrasing around it is free-form.
+
+- **Outcome Branches convention** (documented in `skills/task-memory/SKILL.md` Rule 7). Tasks waiting on an external signal include a structured branch block — `If <outcome> → <action>`, with at least one `If no signal by <date> → <action>` line for the silence path. Pairs with `awaiting` status: branches define *what* to do; the status communicates *I'm not actively driving*.
+
+### Changed
+
+- **Hooks no longer run on `Bash`.** The `PreToolUse` and `PostToolUse` matchers dropped `Bash` — now `Write|Edit|Task` and `Write|Edit|WebFetch|WebSearch|TodoWrite`. task-memory no longer runs its pre-tool context refresh or post-tool research/error logging on every shell command, saving ~150 ms of hook latency per `Bash` call. Trade-off: a `Bash` command that names a task ID no longer stamps the session as task-relevant (in keeping with 3.3.0's narrower stamping); `Write`/`Edit` task-touch detection and `WebFetch`/`WebSearch` research logging are unchanged.
+
 ## [3.3.0] - 2026-04-17
 
 ### Fixed
@@ -177,7 +193,9 @@ Existing projects keep working as-is (records with no `taskFilePath` default to 
 - [Manus Context Engineering](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus) principles
 - [MarkdownTaskManager](https://github.com/ioniks/MarkdownTaskManager) by @ioniks
 
-[Unreleased]: https://github.com/kepptic/task-memory/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/kepptic/task-memory/compare/v3.4.0...HEAD
+[3.4.0]: https://github.com/kepptic/task-memory/compare/v3.3.0...v3.4.0
+[3.3.0]: https://github.com/kepptic/task-memory/compare/v2.0.0...v3.3.0
 [2.0.0]: https://github.com/kepptic/task-memory/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/kepptic/task-memory/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/kepptic/task-memory/compare/v1.0.1...v1.0.3

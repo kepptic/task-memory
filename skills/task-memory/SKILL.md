@@ -141,6 +141,39 @@ Before marking a task done, verify:
 
 ---
 
+### Rule 7: PLAN THE NEXT MOVE WITH OUTCOME BRANCHES
+
+Most tasks don't end when the action ships — they end when the world responds. An email is sent but needs a reply. A PR is opened but needs CI to pass. A vendor is asked but might say no. A deploy is live but might regress. **If the task's completion depends on a signal that hasn't arrived yet, write down what you'll do for each plausible outcome — including the absence of one.**
+
+The convention is the `**Outcome Branches**` block in the task template. Each branch is one line:
+
+- **If <expected outcome> → <action>** — the success path. Often "close task" or "spawn TASK-YYY for follow-up work."
+- **If <alternative outcome> → <action>** — the documented unhappy paths (rejection, partial success, error). One line each, only the ones likely enough to plan for.
+- **If no signal by <YYYY-MM-DD> → <action>** — the silence path. Always include this when waiting on a human; pick a concrete date, not "eventually." Common actions: chase, escalate, close as abandoned.
+
+**When to include them:**
+
+- ✅ Anything waiting on an external party (email, ticket, vendor, customer, teammate)
+- ✅ Long-running async operations whose result you'll need to act on (deletion, deploy, build, batch job)
+- ✅ Decisions that fork the rest of the work (approval/rejection, A/B result, capacity check)
+
+**When to skip them:**
+
+- ❌ Self-contained tasks where the next step is obvious from the current step's result (refactor a function, fix a typo, add a test)
+- ❌ Tasks where success closes the loop with no waiting (write doc, push commit)
+
+**How to use them while working:**
+
+- When a signal arrives, mark the matching branch resolved (strike through, or move it into the description as `→ resolved 2026-04-27: <what happened>`) and either close the task or carry out the action it specifies.
+- When the silence-deadline hits, the matching branch *is* your action — don't re-decide what to do, just execute. The whole point is to make the decision once, when you have full context, instead of guessing later when the context has decayed.
+- If reality produces an outcome you didn't list, that's worth noting in the task's Decisions log — it's a gap in your forecast, not a failure of the convention.
+
+**Why this exists:** Tasks without outcome branches turn into orphans — the action ships, the task technically isn't done, but nobody remembers what "done" looked like. Writing the branches up front captures the intent while you still have it; future-you (or a different session) can act without re-deriving the plan.
+
+**Pair with `awaiting` status.** When you ship the action and there's nothing more for *you* to do until the signal arrives, flip the task `**Status**: in-progress` → `**Status**: awaiting` (see "Status Values" below). Outcome Branches define *what* to do; `awaiting` communicates *I'm not actively driving*. The Stop hook ignores `awaiting`, so the task parks cleanly. SessionStart will surface any `awaiting` task whose silence-deadline has passed, prompting the silence-path action.
+
+---
+
 ## Multi-File Projects
 
 Some projects split tasks across multiple kanban files — for example, one
@@ -211,6 +244,12 @@ Read current ID, increment by 1.
 - [ ] Phase 1: First subtask
 - [ ] Phase 2: Second subtask (depends: Phase 1)
 - [ ] Phase 3: Third subtask (depends: Phase 2)
+
+**Outcome Branches** _(include when the task's next step depends on an external event — a reply, a build result, a vendor decision, a measurement. Omit for self-contained tasks where the next step is obvious.)_:
+
+- If <expected outcome> → <action / new task / close>
+- If <alternative outcome> → <action>
+- If no signal by <YYYY-MM-DD> → <chase / escalate / close>
 
 **Pre-Work Checklist**:
 
@@ -421,17 +460,24 @@ The `planning/notes/` folder stores task-related documentation that persists acr
 
 ## Status Values
 
-| Status        | Description | Required Fields            |
-| ------------- | ----------- | -------------------------- |
-| `todo`        | Not started | Created                    |
-| `in-progress` | Active work | Created, Started           |
-| `done`        | Completed   | Created, Started, Finished |
+| Status        | Description                                            | Required Fields            |
+| ------------- | ------------------------------------------------------ | -------------------------- |
+| `todo`        | Not started                                            | Created                    |
+| `in-progress` | Actively driving the work                              | Created, Started           |
+| `awaiting`    | Action shipped, parked on an external signal           | Created, Started           |
+| `done`        | Completed (signal received / outcome resolved)         | Created, Started, Finished |
 
 **Valid transitions:**
 
 ```
 todo → in-progress → done
+                  ↘ awaiting → in-progress → done   (signal arrived; act on it)
+                             ↘ done                  (silence deadline; close as abandoned)
 ```
+
+**When to use `awaiting` vs `in-progress`:** if the next thing that has to happen is *you doing something*, it's `in-progress`. If the next thing is *the world doing something* — a person replying, a build finishing, a vendor deciding, a backend deletion completing — it's `awaiting`. Awaiting tasks must carry an **Outcome Branches** block describing what to do when the signal arrives, and **must include a silence-deadline branch** (`If no signal by YYYY-MM-DD → …`). Sessions surface awaiting tasks past that deadline at startup so the silence path actually runs instead of the task drifting forever.
+
+The Stop hook only nags on `in-progress` tasks, so `awaiting` cleanly parks work without triggering "incomplete subtasks" blocks. Choose `awaiting` over `todo` whenever the work has shipped — `todo` should mean *I haven't started yet*, not *I started and stopped*.
 
 ---
 
