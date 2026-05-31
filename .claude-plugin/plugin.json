@@ -1,6 +1,6 @@
 {
   "name": "task-memory",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "description": "Privacy-first Kanban task manager with structural context preservation. Installs in both Claude Code (/plugin install task-memory@kepptic) and Cowork (sideloaded .plugin archive). Hook auto-creates notes skeletons, blocks Stop on empty notes, auto-loads context at SessionStart. Tasks remember your research across sessions, survive compaction, and mirror native TodoWrite.",
   "author": {
     "name": "kepptic",

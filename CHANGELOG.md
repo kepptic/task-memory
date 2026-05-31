@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-05-31
+
+### Fixed
+
+- **Claude Code install command now works.** The marketplace was named `task-memory` in `.claude-plugin/marketplace.json`, so the documented `/plugin install task-memory@kepptic` actually failed (the real ref was `task-memory@task-memory`). Renamed the marketplace to `kepptic` so `task-memory@kepptic` resolves as documented and matches the README / GETTING_STARTED / plugin manifest. The plugin name itself is unchanged (`task-memory`).
+
+### Added
+
+- **Cowork `.plugin` archive attached to GitHub Releases.** `release.yml` now runs `scripts/build-cowork-plugin.sh` and attaches `dist/task-memory.plugin` to each release, so Cowork users can download and sideload the archive directly instead of cloning the repo and building it.
+
 ## [3.4.0] - 2026-04-27
 
 ### Added
@@ -193,7 +203,8 @@ Existing projects keep working as-is (records with no `taskFilePath` default to 
 - [Manus Context Engineering](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus) principles
 - [MarkdownTaskManager](https://github.com/ioniks/MarkdownTaskManager) by @ioniks
 
-[Unreleased]: https://github.com/kepptic/task-memory/compare/v3.4.0...HEAD
+[Unreleased]: https://github.com/kepptic/task-memory/compare/v3.4.1...HEAD
+[3.4.1]: https://github.com/kepptic/task-memory/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/kepptic/task-memory/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/kepptic/task-memory/compare/v2.0.0...v3.3.0
 [2.0.0]: https://github.com/kepptic/task-memory/compare/v1.1.0...v2.0.0

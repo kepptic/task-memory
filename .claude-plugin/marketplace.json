@@ -1,12 +1,12 @@
 {
-	"name": "task-memory",
+	"name": "kepptic",
 	"owner": {
 		"name": "kepptic",
 		"email": "kepptic@users.noreply.github.com"
 	},
 	"metadata": {
 		"description": "Privacy-first Kanban task manager with Manus-style memory - mirrors TodoWrite, survives compaction",
-		"version": "3.4.0"
+		"version": "3.4.1"
 	},
 	"plugins": [
 		{
