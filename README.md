@@ -19,7 +19,7 @@ As of v3.2.0 the plugin ships in **dual format** — the same artifact installs 
 - **Automatic Research Logging** — WebFetch/WebSearch operations logged to your current task
 - **Context Preservation** — Tasks, notes, and errors persist across sessions
 - **Proactive Notes Skeletons** — `planning/notes/TASK-XXX.md` auto-created on SessionStart for every in-progress task, with structural sections (Summary, Patterns, Gotchas, Decisions, Resources, Open Questions)
-- **Scoped Session Tracking** — Stop hook only blocks when tool use actually touches the task (tasks.md, notes file, paths in block, or task ID in Bash/Task input). Off-topic questions don't trap the model in a block loop
+- **Scoped Session Tracking** — Stop hook only blocks when tool use actually touches the task (tasks.md, notes file, paths in the task block, or task ID in a Task-agent prompt). Off-topic questions don't trap the model in a block loop
 - **Engagement Threshold** — Short sessions (fewer than 3 task-relevant tool uses) never block Stop — prevents "asked one question, can't stop"
 - **Off-topic Escape Hatch** — `touch .claude/state/task-memory/off-topic-<session>.flag` to disable blocking for the rest of the session
 - **Sticky Loop Release** — After 2 consecutive Stop blocks, the hook gives up and won't re-nag for the same session+task
@@ -125,13 +125,17 @@ Your research is preserved:
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Getting Started](docs/GETTING_STARTED.md) | Step-by-step setup guide |
-| [Architecture](docs/ARCHITECTURE.md) | System design and data flow |
-| [Skill Guide](skills/task-memory/SKILL.md) | Full workflow documentation |
-| [Troubleshooting](skills/task-memory/TROUBLESHOOTING.md) | Common issues and solutions |
-| [Monorepo Setup](skills/task-memory/MONOREPO.md) | Multi-package configuration |
+Documentation follows the [Diataxis](https://diataxis.fr/) framework:
+
+| Document | Type | Description |
+|----------|------|-------------|
+| [Getting Started](docs/GETTING_STARTED.md) | Tutorial | Step-by-step setup and your first task |
+| [How-To Guides](docs/HOW-TO.md) | How-to | Task-oriented recipes — install, custom paths, monorepo, `awaiting`, unblocking Stop |
+| [Reference](docs/REFERENCE.md) | Reference | Complete spec — statuses, `tasks.md` format, every hook event, config, env vars, state |
+| [Architecture](docs/ARCHITECTURE.md) | Explanation | System design, data flow, and rationale |
+| [Skill Guide](skills/task-memory/SKILL.md) | — | Full workflow documentation |
+| [Troubleshooting](skills/task-memory/TROUBLESHOOTING.md) | — | Common issues and solutions |
+| [Monorepo Setup](skills/task-memory/MONOREPO.md) | — | Multi-package configuration |
 
 ## Skills
 
@@ -182,15 +186,17 @@ your-project/
 
 | Event | Action |
 |-------|--------|
-| **SessionStart** / **PostCompact** | Display current task and progress |
+| **SessionStart** / **PostCompact** | Display current task and progress; create notes skeletons; surface overdue `awaiting` tasks |
 | **UserPromptSubmit** | Show task context |
-| **PreToolUse** (Write/Edit/Bash/Task) | Refresh task context, bind work to current task |
-| **PostToolUse** (WebFetch/WebSearch) | Log URL + response snippet to Visual Operations Log |
+| **PreToolUse** (Write/Edit/Task) | Refresh task context, bind work to current task |
+| **PostToolUse** (WebFetch/WebSearch) | Log URL + response snippet to Visual Operations Log (creates notes skeleton every 2 ops) |
 | **PostToolUse** (TodoWrite) | Mirror native todos into `planning/tasks.md` under `## From TodoWrite` |
-| **PostToolUse** (Bash errors) | Log to Errors Log |
+| **PostToolUse** (Write/Edit) | Relevance/engagement tracking + reorganize the edited file |
 | **PreCompact** | Dump current task + research log + todos to `planning/notes/{TASK}-precompact-{ts}.md` |
-| **Stop** / **SubagentStop** | Block if session tasks have incomplete subtasks |
+| **Stop** / **SubagentStop** | Block if `in-progress` session tasks have incomplete subtasks or empty notes |
 | **SessionEnd** | Flush session state (never blocks) |
+
+> **As of v3.4.0** `Bash` is no longer matched by `PreToolUse`/`PostToolUse`, so the hook no longer auto-logs Bash errors — record errors manually in the `**Errors Log**:` section. See the [Reference](docs/REFERENCE.md#hook-events).
 
 ## Configuration
 
