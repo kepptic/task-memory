@@ -125,17 +125,25 @@ Your research is preserved:
 
 ## Documentation
 
-Documentation follows the [Diataxis](https://diataxis.fr/) framework:
+Documentation follows the [Diataxis](https://diataxis.fr/) framework — four entry points for four needs:
 
-| Document | Type | Description |
+| Document | Type | Read it to… |
 |----------|------|-------------|
-| [Getting Started](docs/GETTING_STARTED.md) | Tutorial | Step-by-step setup and your first task |
-| [How-To Guides](docs/HOW-TO.md) | How-to | Task-oriented recipes — install, custom paths, monorepo, `awaiting`, unblocking Stop |
-| [Reference](docs/REFERENCE.md) | Reference | Complete spec — statuses, `tasks.md` format, every hook event, config, env vars, state |
-| [Architecture](docs/ARCHITECTURE.md) | Explanation | System design, data flow, and rationale |
-| [Skill Guide](skills/task-memory/SKILL.md) | — | Full workflow documentation |
-| [Troubleshooting](skills/task-memory/TROUBLESHOOTING.md) | — | Common issues and solutions |
-| [Monorepo Setup](skills/task-memory/MONOREPO.md) | — | Multi-package configuration |
+| [Tutorial](docs/TUTORIAL.md) | Tutorial | Learn by doing — run your first task end-to-end and watch the memory features fire |
+| [How-To Guides](docs/HOW-TO.md) | How-to | Accomplish a specific task — install, custom paths, monorepo, `awaiting`, unblocking Stop |
+| [Reference](docs/REFERENCE.md) | Reference | Look up exact facts — statuses, `tasks.md` format, every hook event, config, env vars, state |
+| [Explanation](docs/EXPLANATION.md) | Explanation | Understand *why* — the design rationale behind the hooks, statuses, and files |
+
+Deeper dives:
+
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/GETTING_STARTED.md) | Install options + quickstart |
+| [Architecture](docs/ARCHITECTURE.md) | System design, data flow, and internals |
+| [Skill Guide](skills/task-memory/SKILL.md) | Full workflow documentation |
+| [Troubleshooting](skills/task-memory/TROUBLESHOOTING.md) | Common issues and solutions |
+| [Monorepo Setup](skills/task-memory/MONOREPO.md) | Multi-package configuration |
+| [UI Format](skills/task-memory/UI_FORMAT.md) | Kanban markdown parser grammar |
 
 ## Skills
 

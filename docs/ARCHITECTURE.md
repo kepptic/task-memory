@@ -47,27 +47,36 @@ User creates task in tasks.md
 ### 2. Hook Lifecycle
 
 ```
-Claude Code Event          Hook Script              Action
-─────────────────────────────────────────────────────────────────
-SessionStart        →   task-memory-hook.py   →   Display current task
-                                                   Record session task
+Claude Code Event             Hook Script           Action
+────────────────────────────────────────────────────────────────────────
+SessionStart / PostCompact →  task-memory-hook.py → Display current task + notes summary
+                                                     Record session task; surface overdue awaiting
 
-UserPromptSubmit    →   skill-eval.sh         →   Detect TASK vs QUESTION
-                                                   Show task context
+UserPromptSubmit           →  skill-eval.sh       → Show current task context
 
-PreToolUse          →   task-memory-hook.py   →   Refresh context (Write/Edit/Bash)
-(Write/Edit/Bash)                                  Record session task
+PreToolUse (Write|Edit|    →  task-memory-hook.py → Refresh context; bind work to current task
+            Task)
 
-PreToolUse          →   task-memory-hook.py   →   Log to Visual Operations Log
-(WebFetch/WebSearch)                               Trigger 2-Action Rule reminder
+PostToolUse (WebFetch|     →  task-memory-hook.py → Append to Visual Operations Log
+             WebSearch)                              Create notes skeleton every 2 ops (2-Action Rule)
 
-PostToolUse         →   task-memory-hook.py   →   Subtask completion reminder
-(Write/Edit/Bash)                                  Error logging (Bash failures)
+PostToolUse (TodoWrite)    →  task-memory-hook.py → Mirror todos into ## From TodoWrite
 
-Stop                →   task-memory-hook.py   →   Check session task completion
-                                                   Block if subtasks incomplete
-                                                   Return JSON: {"decision": "block"}
+PostToolUse (Write|Edit)   →  task-memory-hook.py → Relevance/engagement tracking; reorganize file
+
+PreCompact                 →  task-memory-hook.py → Snapshot task + ops log + todos to notes/
+
+Stop / SubagentStop        →  task-memory-hook.py → Block if in-progress session task has
+                                                     incomplete subtasks / empty notes
+                                                     Return JSON: {"decision": "block"}
+
+SessionEnd                 →  task-memory-hook.py → Flush session state (never blocks)
 ```
+
+> **As of v3.4.0**, `Bash` was removed from the `PreToolUse`/`PostToolUse`
+> matchers (saves ~150 ms/bash-call). The hook no longer fires on `Bash`, so
+> Bash errors are no longer auto-logged — record them manually in `**Errors
+> Log**:`. See the [Reference](REFERENCE.md#hook-events).
 
 ### 3. Session Tracking
 
@@ -84,7 +93,7 @@ Session Start
 ┌──────────────────────────────────┐
 │ Record tasks worked on:          │
 │ - On context display             │
-│ - On PreToolUse (Write/Edit/Bash)│
+│ - On PreToolUse (Write/Edit/Task)│
 └──────────────────────────────────┘
      │
      ▼
