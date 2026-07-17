@@ -153,7 +153,7 @@ When multiple developers work on separate branches, use per-dev task files to pr
 
 **Verification:** SessionStart shows tasks from all per-dev files, each labeled with its filename.
 
-**Note:** The `.task-memory.json` config key `task_prefix` (value `"TASK"`) is unrelated to the per-file `Task Prefix:` header (dev initials). The config key sets the task ID prefix in the UI; the per-file headers enable team-mode isolation.
+**Note:** The `.task-memory.json` config key `task_prefix` is currently unread/reserved and unrelated to the per-file `Task Prefix:` header (dev initials).
 
 Full details: [Reference → Team mode: Per-dev task files](REFERENCE.md#team-mode-per-dev-task-files).
 

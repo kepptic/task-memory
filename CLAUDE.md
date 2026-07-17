@@ -79,7 +79,7 @@ Status: done        → Place under ## ✅ Done (or ## Done)
 grep -B 3 "^### TASK-" planning/tasks.md | head -4
 
 # Or more strictly with regex:
-grep -B 3 "^### TASK-(?:[A-Z]{2,4}-)?\d+\b" planning/tasks.md | head -4
+grep -B 3 -E "^### TASK-([A-Z]{2,4}-)?[0-9]+" planning/tasks.md | head -4
 ```
 
 ---

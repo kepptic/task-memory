@@ -61,7 +61,7 @@ the working summary.
 Rules the parser enforces:
 
 - **Column sections are `##` (h2):** `## To Do`, `## In Progress`, `## Done` (and optional `## Awaiting`). Use the *existing* headers — do not invent new ones.
-- **Task headers are `### TASK-XXX | Title` (h3)** or `### TASK-<PREFIX>-N | Title` (h3)**, nested under a column section.
+- **Task headers are `### TASK-XXX | Title` (h3)** or `### TASK-<PREFIX>-N | Title` (h3), nested under a column section.
 - **`<!-- Config: Last Task ID: N -->`** tracks the highest task number (legacy format). For team mode with per-dev files, use `<!-- Config: Task Prefix: GR | Last Task ID: 677 -->` (prefix is 2–4 UPPERCASE letters; IDs are not zero-padded, e.g., `TASK-GR-678`).
 - **No `---` separators between tasks.** A `---` is only allowed after the config section.
 - The **`**Status**:` field is authoritative**, not the section a block sits in. The HTML UI auto-reorganizes mismatches on load; when editing by hand, move the block to the matching column for readability.
