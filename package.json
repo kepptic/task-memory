@@ -11,7 +11,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint src/**/*.{js,jsx}"
+    "lint": "eslint src/**/*.{js,jsx}",
+    "test:ui": "node tests/test-ui.mjs"
   },
   "repository": {
     "type": "git",
