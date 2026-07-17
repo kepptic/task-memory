@@ -52,6 +52,14 @@ Fable's rulings (PLAN-final.md supersedes v1):
 - **Q3 = option B** — fix hook path (reorg gate → `.endswith(".md")` + task_files() membership) + cheap UI discovery widen now; watcher-rebind → separate follow-up task.
 - Python = regex widening ONLY; all minting policy in `src/utils/taskId.js`.
 
+## Implementation Outcome (Phase 3 — Sonnet)
+
+Branch `feat/task-017-namespaced-ids`, 5 code commits + 1 docs commit (Haiku). JS tests 32/32; hook suite 54 pass/10 fail (the 10 diff-identical to clean master → pre-existing, unrelated). New module `src/utils/taskId.js` is the single JS source of truth; Python = regex widening only (dead helpers cut). Sonnet deviations (all sound, Fable-verified): dropped unused `boardMeta` useState (kept `boardMetaRef`); `TASK_FILE_RE` uses `[-_.]` separator (accepts `tasks_dg.md`); added `.js` extension for Node ESM; fixed a real pre-existing test-isolation bug (teardown cleared wrong counter path).
+
+## Review Outcome (Phase 4 — Fable, APPROVE WITH NITS)
+
+All acceptance criteria met with traced code paths; live byte-identical round-trip of master's own board (master parser vs branch parser). Nits being cleared: (1) CLAUDE.md grep example used unsupported BRE `(?:`/`\d` → matches nothing → fix to `grep -E "^### TASK-([A-Z]{2,4}-)?[0-9]+"`; (2) tm-init "Team mode?" question missing; (3) REFERENCE.md stray `**`; (4) README/HOW-TO overstate `task_prefix` JSON key; (5) mint tested via mirror copy → extract `mintNextId` into taskId.js for direct test; (6) fileSystem.js catch swallows permission errors → narrow it. Nits 1-4 → Haiku; 5-6 → Sonnet. Extracting mintNextId (nit 5) gives a direct unit test, closing the gap P8 browser smoke covered → browser smoke skipped.
+
 ## Open Questions
 
-- Whether root `task-memory.html` is build-generated (don't hand-edit if so) — Sonnet to confirm in P8.
+- Merge/PR/push of the branch awaits user decision (not on master; not pushed).
