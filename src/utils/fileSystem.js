@@ -8,9 +8,21 @@ const STORE_NAME = "settings";
 const PROJECTS_KEY = "recentProjects";
 const MAX_RECENT_PROJECTS = 10;
 
-// Supported task file names in priority order
+// Supported task file names in priority order. Retained as documentation of
+// the two fixed names discovery always recognizes (tasks.md wins, kanban.md
+// is legacy) — actual discovery is now dynamic via TASK_FILE_RE below.
+// eslint-disable-next-line no-unused-vars
 const TASK_FILE_NAMES = ['tasks.md', 'kanban.md'];
 const DEFAULT_TASK_FILE = 'tasks.md';
+
+// TASK-017: per-dev/per-team task files (`tasks-gr.md`, `tasks_dg.md`) are
+// discovered dynamically alongside the fixed tasks.md/kanban.md names, so
+// each dev/team can mint ids from an independent counter+prefix (see
+// src/utils/taskId.js). Separator class ([-_.]) matches taskId.js's
+// prefixFromFileName so any file this regex discovers can also have its
+// namespace prefix derived from the filename. Deliberately excludes
+// `tasks-archive.md`-shaped names (5+ letter suffix) and plain `archive.md`.
+const TASK_FILE_RE = /^tasks(?:[-_.][A-Za-z]{2,4})?\.md$/i;
 
 // Nested directory candidates searched when no task file exists at root.
 // Order matters — first match wins.
@@ -228,19 +240,33 @@ async function walkToDir(rootHandle, segments) {
 }
 
 // List every task file name present in a directory handle.
-// Returns [{ fileName, isLegacy }].
+// Returns [{ fileName, isLegacy }], sorted tasks.md first, then any
+// discovered tasks-<xx>.md (TASK-017 per-file namespaces) alphabetically,
+// then kanban.md (legacy) last. Enumerates directory entries (rather than
+// probing the fixed TASK_FILE_NAMES list) so per-dev files are discoverable
+// without the caller having to guess every possible prefix in advance.
 async function listTaskFilesInDir(dirHandle) {
   const hits = [];
-  for (const fileName of TASK_FILE_NAMES) {
-    try {
-      await dirHandle.getFileHandle(fileName, { create: false });
-      hits.push({ fileName, isLegacy: fileName === 'kanban.md' });
-    } catch (e) {
-      if (e.name !== 'NotFoundError' && e.name !== 'TypeMismatchError') {
-        throw e;
+  try {
+    for await (const [name, handle] of dirHandle.entries()) {
+      if (handle.kind !== 'file') continue;
+      if (TASK_FILE_RE.test(name) || name === 'kanban.md') {
+        hits.push({ fileName: name, isLegacy: name === 'kanban.md' });
       }
     }
+  } catch (e) {
+    // entries() may be unavailable in some environments/mocks — fail soft.
+    return [];
   }
+
+  const rank = (h) => (h.fileName === 'tasks.md' ? 0 : h.isLegacy ? 2 : 1);
+  hits.sort((a, b) => {
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    return a.fileName.localeCompare(b.fileName);
+  });
+
   return hits;
 }
 
@@ -800,4 +826,5 @@ export {
   deleteProjectFromRecents,
   renameProject,
   renameGroup,
+  TASK_FILE_RE,
 };

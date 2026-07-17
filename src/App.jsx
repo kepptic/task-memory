@@ -34,6 +34,7 @@ import OverflowMenu from './components/common/OverflowMenu';
 import { markdownParser } from './utils/markdown';
 import { fileSystem } from './utils/fileSystem';
 import { fileWatcher } from './utils/fileWatcher';
+import { formatTaskId, maxNumInScope } from './utils/taskId';
 
 // Default columns
 const DEFAULT_COLUMNS = [
@@ -268,6 +269,44 @@ function App() {
 
   // File watcher ref
   const fileWatcherStartedRef = useRef(false);
+
+  // Per-file board meta: { taskPrefix, lastTaskId } of the currently LOADED
+  // file only (TASK-017). A ref (not state) so handleSaveTask can reserve
+  // the next id synchronously — two rapid creates before a rerender must
+  // still get distinct ids. installBoard() is the only writer besides the
+  // mint reservation in handleSaveTask.
+  const boardMetaRef = useRef({ taskPrefix: '', lastTaskId: 0 });
+
+  // Centralized per-parse-site install: applies columns + boardMetaRef from
+  // a parseMarkdown() result and returns the mapped task list. Replaces the
+  // duplicated setColumns/mapping blocks that used to live at each of the 4
+  // parse call sites (loadProjectFromHandle, watcher external-change,
+  // handleSwitchTaskFile, handleRefresh). Callers still own setTasks() so
+  // they can run their own pre/post processing (reorg checks, change
+  // detection) against the returned array before committing it to state.
+  // `_fileName` is accepted (mirroring the parseMarkdown(content, { fileName })
+  // call every caller makes just above) purely so call sites read as
+  // "install the board I just parsed FOR this file" — the prefix itself was
+  // already resolved by parseMarkdown via opts.fileName, so installBoard
+  // doesn't need to re-derive it.
+  const installBoard = useCallback((parsed, _fileName) => {
+    if (parsed.config?.columns?.length > 0) {
+      setColumns(parsed.config.columns.map(col => ({
+        id: col.id || col.name,
+        name: col.name,
+      })));
+    }
+
+    boardMetaRef.current = {
+      taskPrefix: parsed.config?.taskPrefix || '',
+      lastTaskId: parsed.config?.lastTaskId || 0,
+    };
+
+    return (parsed.tasks || []).map(task => ({
+      ...task,
+      column: task.status || 'To Do',
+    }));
+  }, []);
 
   // Clean up file watcher on unmount
   useEffect(() => {
@@ -518,19 +557,8 @@ function App() {
       }
 
       // Parse content
-      const parsed = markdownParser.parseMarkdown(taskResult.content);
-
-      if (parsed.config?.columns?.length > 0) {
-        setColumns(parsed.config.columns.map(col => ({
-          id: col.id || col.name,
-          name: col.name,
-        })));
-      }
-
-      const mappedTasks = (parsed.tasks || []).map(task => ({
-        ...task,
-        column: task.status || 'To Do',
-      }));
+      const parsed = markdownParser.parseMarkdown(taskResult.content, { fileName: taskResult.fileName });
+      const mappedTasks = installBoard(parsed, taskResult.fileName);
 
       // Check for tasks that need reorganization (Status field doesn't match section)
       // NOTE: On initial load, we just notify - don't auto-save to avoid overwriting external changes
@@ -600,28 +628,17 @@ function App() {
 
         fileWatcher.startFileWatcher(taskResult.fileHandle, {
           onExternalChange: (newContent) => {
-            const newParsed = markdownParser.parseMarkdown(newContent);
+            const newParsed = markdownParser.parseMarkdown(newContent, { fileName: taskResult.fileName });
 
             // Detect what changed for component-level updates
             const oldTasksForComparison = tasks;
-            const newMappedTasks = (newParsed.tasks || []).map(task => ({
-              ...task,
-              column: task.status || 'To Do',
-            }));
+            const newMappedTasks = installBoard(newParsed, taskResult.fileName);
 
             // Use smart change detection
             const changes = fileWatcher.detectChangedComponents(oldTasksForComparison, newMappedTasks);
 
             if (changes.hasChanges) {
               console.log(`📥 External changes: +${changes.addedTasks.length} -${changes.removedTasks.length} ~${changes.updatedTasks.length} moved:${changes.movedTasks.length}`);
-            }
-
-            // Update columns if changed
-            if (newParsed.config?.columns?.length > 0) {
-              setColumns(newParsed.config.columns.map(col => ({
-                id: col.id || col.name,
-                name: col.name,
-              })));
             }
 
             // Update tasks
@@ -825,18 +842,8 @@ function App() {
       setShowLegacyBanner(fileName === 'kanban.md');
 
       // Parse and update state
-      const parsed = markdownParser.parseMarkdown(result.content);
-      if (parsed.config?.columns?.length > 0) {
-        setColumns(parsed.config.columns.map(col => ({
-          id: col.id || col.name,
-          name: col.name,
-        })));
-      }
-
-      const mappedTasks = (parsed.tasks || []).map(task => ({
-        ...task,
-        column: task.status || 'To Do',
-      }));
+      const parsed = markdownParser.parseMarkdown(result.content, { fileName });
+      const mappedTasks = installBoard(parsed, fileName);
       setTasks(mappedTasks);
 
       // Persist both fileName and relativePath
@@ -892,11 +899,19 @@ function App() {
       const columnsToSave = overrideColumns || columns;
       console.log('📊 Saving columns:', columnsToSave.map(c => c.name));
 
+      // TASK-017: scope the counter to this file's prefix (boardMetaRef —
+      // the LOADED file's meta) and take the max against the scoped ids
+      // actually on the board. This fixes three things the old global
+      // /TASK-(\d+)/ regex got wrong: (1) it never matched TASK-GR-678 at
+      // all, so a prefixed board would save "Last Task ID: 0"; (2) deleting
+      // the highest-numbered task no longer regresses the counter (it's
+      // monotonic against the ref, not recomputed purely from what's on
+      // screen); (3) a legacy TASK-900 sitting inside a GR-prefixed file
+      // can't jump the GR counter (scoped max).
+      const meta = boardMetaRef.current;
       const config = {
-        lastTaskId: Math.max(...tasks.map(t => {
-          const match = t.id?.match(/TASK-(\d+)/);
-          return match ? parseInt(match[1], 10) : 0;
-        }), 0),
+        taskPrefix: meta.taskPrefix,
+        lastTaskId: Math.max(meta.lastTaskId, maxNumInScope(tasks.map(t => t.id), meta.taskPrefix)),
         columns: columnsToSave.map(col => ({ id: col.id, name: col.name })),
       };
       const markdown = markdownParser.generateMarkdown(tasksForMarkdown, config);
@@ -925,19 +940,8 @@ function App() {
     try {
       setIsLoading(true);
       const content = await fileSystem.readFile(fileHandle);
-      const parsed = markdownParser.parseMarkdown(content);
-
-      if (parsed.config?.columns?.length > 0) {
-        setColumns(parsed.config.columns.map(col => ({
-          id: col.id || col.name,
-          name: col.name,
-        })));
-      }
-
-      const mappedTasks = (parsed.tasks || []).map(task => ({
-        ...task,
-        column: task.status || 'To Do',
-      }));
+      const parsed = markdownParser.parseMarkdown(content, { fileName: currentTaskFileName });
+      const mappedTasks = installBoard(parsed, currentTaskFileName);
 
       setTasks(mappedTasks);
     } catch (error) {
@@ -1013,18 +1017,21 @@ function App() {
   };
 
   const handleSaveTask = (taskData) => {
-    setTasks(prev => {
-      if (!taskData.id) {
-        const maxId = prev.reduce((max, t) => {
-          const match = t.id?.match(/TASK-(\d+)/);
-          if (match) {
-            return Math.max(max, parseInt(match[1], 10));
-          }
-          return max;
-        }, 0);
-        taskData.id = `TASK-${String(maxId + 1).padStart(3, '0')}`;
-      }
+    if (!taskData.id) {
+      // TASK-017: mint SYNCHRONOUSLY against boardMetaRef, before setTasks —
+      // two rapid creates (e.g. a double-click) must not read the same
+      // counter value from a stale `tasks` closure. Mutating the ref here
+      // (not inside the updater) is what makes the second call see the
+      // first call's reservation; the updater below stays a pure function
+      // of `prev`.
+      const meta = boardMetaRef.current;
+      const scopedMax = maxNumInScope(tasks.map(t => t.id), meta.taskPrefix);
+      const next = Math.max(meta.lastTaskId, scopedMax) + 1;
+      meta.lastTaskId = next; // mutate the ref FIRST
+      taskData.id = formatTaskId(meta.taskPrefix, next);
+    }
 
+    setTasks(prev => {
       const existingIndex = prev.findIndex(t => t.id === taskData.id);
       if (existingIndex >= 0) {
         return prev.map((t, i) => i === existingIndex ? taskData : t);

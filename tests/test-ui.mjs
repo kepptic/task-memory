@@ -25,6 +25,7 @@ import {
 } from '../src/utils/taskId.js';
 
 import { markdownParser } from '../src/utils/markdown.js';
+import { TASK_FILE_RE } from '../src/utils/fileSystem.js';
 
 // =============================================================================
 // 1. taskId.js units
@@ -311,4 +312,104 @@ test('markdown: malformed heading (TASK-GR-12X) is not treated as a task', () =>
 `;
   const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks-gr.md' });
   assert.equal(parsed.tasks.length, 0);
+});
+
+// =============================================================================
+// 4. Mint (App.jsx's handleSaveTask reservation algorithm, mirrored here
+//    against the production taskId.js primitives — App.jsx itself is a React
+//    component and out of scope for a DOM-free node:test run)
+// =============================================================================
+
+function mintOnce(metaRef, tasks) {
+  const meta = metaRef.current;
+  const scopedMax = maxNumInScope(tasks.map((t) => t.id), meta.taskPrefix);
+  const next = Math.max(meta.lastTaskId, scopedMax) + 1;
+  meta.lastTaskId = next;
+  return formatTaskId(meta.taskPrefix, next);
+}
+
+test('mint: header(GR,677) -> TASK-GR-678 + counter 678', () => {
+  const metaRef = { current: { taskPrefix: 'GR', lastTaskId: 677 } };
+  const id = mintOnce(metaRef, []);
+  assert.equal(id, 'TASK-GR-678');
+  assert.equal(metaRef.current.lastTaskId, 678);
+});
+
+test('mint: legacy(42) -> TASK-043', () => {
+  const metaRef = { current: { taskPrefix: '', lastTaskId: 42 } };
+  const id = mintOnce(metaRef, []);
+  assert.equal(id, 'TASK-043');
+  assert.equal(metaRef.current.lastTaskId, 43);
+});
+
+test('mint: rapid double-mint against one ref yields distinct ids', () => {
+  const metaRef = { current: { taskPrefix: 'GR', lastTaskId: 677 } };
+  const first = mintOnce(metaRef, []);
+  const second = mintOnce(metaRef, []);
+  assert.equal(first, 'TASK-GR-678');
+  assert.equal(second, 'TASK-GR-679');
+});
+
+// =============================================================================
+// 5. Sibling independence (acceptance criterion 1, proven against production
+//    markdown.js + taskId.js)
+// =============================================================================
+
+test('sibling files: independent prefix + counter scopes', () => {
+  const grContent = `# Kanban Board
+
+<!-- Config: Task Prefix: GR | Last Task ID: 677 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo)
+
+---
+
+## To Do
+
+---
+`;
+  const dgContent = `# Kanban Board
+
+<!-- Config: Task Prefix: DG | Last Task ID: 0 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo)
+
+---
+
+## To Do
+
+---
+`;
+  const grParsed = markdownParser.parseMarkdown(grContent, { fileName: 'tasks-gr.md' });
+  const dgParsed = markdownParser.parseMarkdown(dgContent, { fileName: 'tasks-dg.md' });
+
+  const grMeta = { current: { taskPrefix: grParsed.config.taskPrefix, lastTaskId: grParsed.config.lastTaskId } };
+  const dgMeta = { current: { taskPrefix: dgParsed.config.taskPrefix, lastTaskId: dgParsed.config.lastTaskId } };
+
+  assert.equal(mintOnce(grMeta, []), 'TASK-GR-678');
+  assert.equal(mintOnce(dgMeta, []), 'TASK-DG-1');
+
+  const grMd = markdownParser.generateMarkdown([], { ...grParsed.config, lastTaskId: grMeta.current.lastTaskId });
+  const dgMd = markdownParser.generateMarkdown([], { ...dgParsed.config, lastTaskId: dgMeta.current.lastTaskId });
+
+  assert.match(grMd, /Task Prefix: GR \| Last Task ID: 678/);
+  assert.doesNotMatch(grMd, /Task Prefix: DG/);
+  assert.match(dgMd, /Task Prefix: DG \| Last Task ID: 1/);
+  assert.doesNotMatch(dgMd, /Task Prefix: GR/);
+});
+
+// =============================================================================
+// 6. fileSystem discovery regex
+// =============================================================================
+
+test('fileSystem TASK_FILE_RE: accepts tasks.md/tasks-gr.md/tasks_dg.md, rejects tasks-archive.md/archive.md', () => {
+  assert.ok(TASK_FILE_RE.test('tasks.md'));
+  assert.ok(TASK_FILE_RE.test('tasks-gr.md'));
+  assert.ok(TASK_FILE_RE.test('tasks_dg.md'));
+  assert.ok(!TASK_FILE_RE.test('tasks-archive.md'));
+  assert.ok(!TASK_FILE_RE.test('archive.md'));
 });
