@@ -34,7 +34,7 @@ import OverflowMenu from './components/common/OverflowMenu';
 import { markdownParser } from './utils/markdown';
 import { fileSystem } from './utils/fileSystem';
 import { fileWatcher } from './utils/fileWatcher';
-import { formatTaskId, maxNumInScope, mintNextId } from './utils/taskId';
+import { maxNumInScope, mintNextId } from './utils/taskId';
 
 // Default columns
 const DEFAULT_COLUMNS = [
