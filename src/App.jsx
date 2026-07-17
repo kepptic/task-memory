@@ -34,7 +34,7 @@ import OverflowMenu from './components/common/OverflowMenu';
 import { markdownParser } from './utils/markdown';
 import { fileSystem } from './utils/fileSystem';
 import { fileWatcher } from './utils/fileWatcher';
-import { formatTaskId, maxNumInScope } from './utils/taskId';
+import { formatTaskId, maxNumInScope, mintNextId } from './utils/taskId';
 
 // Default columns
 const DEFAULT_COLUMNS = [
@@ -1023,12 +1023,12 @@ function App() {
       // counter value from a stale `tasks` closure. Mutating the ref here
       // (not inside the updater) is what makes the second call see the
       // first call's reservation; the updater below stays a pure function
-      // of `prev`.
+      // of `prev`. mintNextId itself is pure (src/utils/taskId.js) — the
+      // ref mutation happens here, right after the call, same as before.
       const meta = boardMetaRef.current;
-      const scopedMax = maxNumInScope(tasks.map(t => t.id), meta.taskPrefix);
-      const next = Math.max(meta.lastTaskId, scopedMax) + 1;
-      meta.lastTaskId = next; // mutate the ref FIRST
-      taskData.id = formatTaskId(meta.taskPrefix, next);
+      const { id, nextNum } = mintNextId(meta, tasks.map(t => t.id));
+      meta.lastTaskId = nextNum; // mutate the ref FIRST
+      taskData.id = id;
     }
 
     setTasks(prev => {

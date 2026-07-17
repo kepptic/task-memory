@@ -22,6 +22,7 @@ import {
   formatTaskId,
   maxNumInScope,
   serializeConfigHeader,
+  mintNextId,
 } from '../src/utils/taskId.js';
 
 import { markdownParser } from '../src/utils/markdown.js';
@@ -315,39 +316,38 @@ test('markdown: malformed heading (TASK-GR-12X) is not treated as a task', () =>
 });
 
 // =============================================================================
-// 4. Mint (App.jsx's handleSaveTask reservation algorithm, mirrored here
-//    against the production taskId.js primitives — App.jsx itself is a React
-//    component and out of scope for a DOM-free node:test run)
+// 4. Mint — exercises the REAL src/utils/taskId.js#mintNextId, the exact
+//    function App.jsx's handleSaveTask calls (no mirrored copy — see
+//    src/App.jsx handleSaveTask for the ref-mutation call site). mintNextId
+//    itself is pure; these tests replicate the caller's synchronous
+//    ref-mutation contract (meta.lastTaskId = nextNum, BEFORE the next call)
+//    to prove rapid double-mint safety.
 // =============================================================================
 
-function mintOnce(metaRef, tasks) {
-  const meta = metaRef.current;
-  const scopedMax = maxNumInScope(tasks.map((t) => t.id), meta.taskPrefix);
-  const next = Math.max(meta.lastTaskId, scopedMax) + 1;
-  meta.lastTaskId = next;
-  return formatTaskId(meta.taskPrefix, next);
-}
-
 test('mint: header(GR,677) -> TASK-GR-678 + counter 678', () => {
-  const metaRef = { current: { taskPrefix: 'GR', lastTaskId: 677 } };
-  const id = mintOnce(metaRef, []);
+  const meta = { taskPrefix: 'GR', lastTaskId: 677 };
+  const { id, nextNum } = mintNextId(meta, []);
+  meta.lastTaskId = nextNum;
   assert.equal(id, 'TASK-GR-678');
-  assert.equal(metaRef.current.lastTaskId, 678);
+  assert.equal(meta.lastTaskId, 678);
 });
 
 test('mint: legacy(42) -> TASK-043', () => {
-  const metaRef = { current: { taskPrefix: '', lastTaskId: 42 } };
-  const id = mintOnce(metaRef, []);
+  const meta = { taskPrefix: '', lastTaskId: 42 };
+  const { id, nextNum } = mintNextId(meta, []);
+  meta.lastTaskId = nextNum;
   assert.equal(id, 'TASK-043');
-  assert.equal(metaRef.current.lastTaskId, 43);
+  assert.equal(meta.lastTaskId, 43);
 });
 
-test('mint: rapid double-mint against one ref yields distinct ids', () => {
-  const metaRef = { current: { taskPrefix: 'GR', lastTaskId: 677 } };
-  const first = mintOnce(metaRef, []);
-  const second = mintOnce(metaRef, []);
-  assert.equal(first, 'TASK-GR-678');
-  assert.equal(second, 'TASK-GR-679');
+test('mint: rapid double-mint against one meta yields distinct ids', () => {
+  const meta = { taskPrefix: 'GR', lastTaskId: 677 };
+  const first = mintNextId(meta, []);
+  meta.lastTaskId = first.nextNum;
+  const second = mintNextId(meta, []);
+  meta.lastTaskId = second.nextNum;
+  assert.equal(first.id, 'TASK-GR-678');
+  assert.equal(second.id, 'TASK-GR-679');
 });
 
 // =============================================================================
@@ -387,14 +387,19 @@ test('sibling files: independent prefix + counter scopes', () => {
   const grParsed = markdownParser.parseMarkdown(grContent, { fileName: 'tasks-gr.md' });
   const dgParsed = markdownParser.parseMarkdown(dgContent, { fileName: 'tasks-dg.md' });
 
-  const grMeta = { current: { taskPrefix: grParsed.config.taskPrefix, lastTaskId: grParsed.config.lastTaskId } };
-  const dgMeta = { current: { taskPrefix: dgParsed.config.taskPrefix, lastTaskId: dgParsed.config.lastTaskId } };
+  const grMeta = { taskPrefix: grParsed.config.taskPrefix, lastTaskId: grParsed.config.lastTaskId };
+  const dgMeta = { taskPrefix: dgParsed.config.taskPrefix, lastTaskId: dgParsed.config.lastTaskId };
 
-  assert.equal(mintOnce(grMeta, []), 'TASK-GR-678');
-  assert.equal(mintOnce(dgMeta, []), 'TASK-DG-1');
+  const grMint = mintNextId(grMeta, []);
+  grMeta.lastTaskId = grMint.nextNum;
+  const dgMint = mintNextId(dgMeta, []);
+  dgMeta.lastTaskId = dgMint.nextNum;
 
-  const grMd = markdownParser.generateMarkdown([], { ...grParsed.config, lastTaskId: grMeta.current.lastTaskId });
-  const dgMd = markdownParser.generateMarkdown([], { ...dgParsed.config, lastTaskId: dgMeta.current.lastTaskId });
+  assert.equal(grMint.id, 'TASK-GR-678');
+  assert.equal(dgMint.id, 'TASK-DG-1');
+
+  const grMd = markdownParser.generateMarkdown([], { ...grParsed.config, lastTaskId: grMeta.lastTaskId });
+  const dgMd = markdownParser.generateMarkdown([], { ...dgParsed.config, lastTaskId: dgMeta.lastTaskId });
 
   assert.match(grMd, /Task Prefix: GR \| Last Task ID: 678/);
   assert.doesNotMatch(grMd, /Task Prefix: DG/);

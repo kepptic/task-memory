@@ -255,7 +255,13 @@ async function listTaskFilesInDir(dirHandle) {
       }
     }
   } catch (e) {
-    // entries() may be unavailable in some environments/mocks — fail soft.
+    // entries() may be unavailable in some environments/mocks — fail soft
+    // only for NotFoundError/TypeMismatchError (dir gone/not a directory).
+    // Any other error (e.g. permission failures) is genuine and must not be
+    // silently turned into "no task files" — matches walkToDir's handling.
+    if (e.name !== 'NotFoundError' && e.name !== 'TypeMismatchError') {
+      throw e;
+    }
     return [];
   }
 

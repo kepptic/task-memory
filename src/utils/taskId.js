@@ -116,3 +116,24 @@ export function serializeConfigHeader(prefix, lastId) {
   }
   return `<!-- Config: Last Task ID: ${id} -->`;
 }
+
+/**
+ * Mint the next task id for a scope. Pure — does NOT mutate `meta`; the
+ * caller (App.jsx's handleSaveTask) is responsible for writing `nextNum`
+ * back into its ref SYNCHRONOUSLY (before any state updater runs) so that
+ * two rapid mints against the same ref reserve distinct numbers. Keeping
+ * this function pure is what makes it independently testable — see
+ * tests/test-ui.mjs section 4.
+ *
+ * @param {{ taskPrefix: string, lastTaskId: number }} meta - current
+ *   per-file counter state (e.g. boardMetaRef.current).
+ * @param {string[]} ids - existing task ids in scope (e.g. tasks.map(t => t.id)).
+ * @returns {{ id: string, nextNum: number }}
+ */
+export function mintNextId(meta, ids) {
+  const taskPrefix = meta.taskPrefix || '';
+  const scopedMax = maxNumInScope(ids, taskPrefix);
+  const nextNum = Math.max(meta.lastTaskId, scopedMax) + 1;
+  const id = formatTaskId(taskPrefix, nextNum);
+  return { id, nextNum };
+}
