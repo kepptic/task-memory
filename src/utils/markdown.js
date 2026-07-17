@@ -1,12 +1,16 @@
 // Markdown parsing and generation module
 // Handles conversion between markdown format and task objects
 import DOMPurify from "dompurify";
+import { TASK_ID_CORE, CONFIG_HEADER_RE, resolvePrefix, serializeConfigHeader } from "./taskId.js";
 
 // Parse markdown content into tasks and config
-function parseMarkdown(content) {
+// `opts.fileName` is used ONLY as the fallback source for prefix derivation
+// when the `Task Prefix:` header field is entirely absent (see resolvePrefix).
+function parseMarkdown(content, opts = {}) {
   const tasks = [];
   const config = {
     lastTaskId: 0,
+    taskPrefix: '',
     columns: [],
     categories: [],
     users: [],
@@ -14,10 +18,15 @@ function parseMarkdown(content) {
     tags: [],
   };
 
-  // Parse config comment
-  const configMatch = content.match(/<!-- Config: Last Task ID: (\d+) -->/);
+  // Parse config comment (TASK-017: counter moved from g1 -> g2 now that the
+  // prefix field occupies g1; field-absent (g1 === undefined) is the ONLY
+  // case that consults opts.fileName, per Q2).
+  const configMatch = content.match(CONFIG_HEADER_RE);
   if (configMatch) {
-    config.lastTaskId = parseInt(configMatch[1]);
+    config.lastTaskId = parseInt(configMatch[2], 10);
+    const { prefix, warning } = resolvePrefix(configMatch[1], opts.fileName);
+    config.taskPrefix = prefix;
+    if (warning) console.warn(warning);
   }
 
   // Parse config section
@@ -232,6 +241,29 @@ function deriveColumnId(name) {
     || 'column';
 }
 
+// Shared anchored task-heading iterator (TASK-017). Replaces the old
+// `split(/###\s+TASK-/)` approach, which (a) could split mid-line on any
+// literal "### TASK-" substring appearing inside a description/notes body,
+// and (b) silently dropped prefixed ids (`TASK-GR-678` never matched
+// `/^(\d+)$/`). Anchored to line starts (`^###`, MULTILINE) and bounded by
+// TASK_ID_CORE's tail lookahead, so `TASK-GR-12X` is correctly not a task
+// heading. IDs are returned VERBATIM — never re-padded (a hand-written
+// `TASK-5` round-trips as `TASK-5`, not `TASK-005`). Used by both
+// parseTasksFromSection and parseArchive so this logic lives in one place.
+function iterTaskHeadingBlocks(sectionContent) {
+  const headingRe = new RegExp('^###[ \\t]+(' + TASK_ID_CORE + ')[ \\t]*\\|[ \\t]*(.+)$', 'gm');
+  const matches = [...sectionContent.matchAll(headingRe)];
+  return matches.map((m, i) => {
+    const blockStart = m.index + m[0].length;
+    const blockEnd = i + 1 < matches.length ? matches[i + 1].index : sectionContent.length;
+    return {
+      id: m[1],
+      title: m[2].trim(),
+      body: sectionContent.slice(blockStart, blockEnd),
+    };
+  });
+}
+
 // Parse tasks from a markdown section (reusable for both kanban and archive)
 function parseTasksFromSection(content, sectionName, statusId) {
   const tasksFound = [];
@@ -264,32 +296,11 @@ function parseTasksFromSection(content, sectionName, statusId) {
     return tasksFound;
   }
 
-  // SIMPLE PARSING: Split by ### TASK-
-  const taskBlocks = sectionContent.split(/###\s+TASK-/).slice(1); // Skip first empty element
-
-  taskBlocks.forEach((block) => {
-    // Each block starts with: XXX | Title
-    const lines = block.split("\n");
-    const firstLine = lines[0].trim();
-
-    // Extract ID and title from first line
-    const pipeIndex = firstLine.indexOf("|");
-    if (pipeIndex > 0) {
-      const idPart = firstLine.substring(0, pipeIndex).trim();
-      const titlePart = firstLine.substring(pipeIndex + 1).trim();
-
-      // Check if idPart is a valid number
-      const idMatch = idPart.match(/^(\d+)$/);
-      if (idMatch && titlePart) {
-        const taskId = "TASK-" + idPart.padStart(3, "0");
-        const title = titlePart;
-        const taskContent = lines.slice(1).join("\n");
-
-        const task = parseTask(taskId, title, taskContent, statusId);
-        if (task) {
-          tasksFound.push(task);
-        }
-      }
+  iterTaskHeadingBlocks(sectionContent).forEach(({ id, title, body }) => {
+    if (!title) return;
+    const task = parseTask(id, title, body, statusId);
+    if (task) {
+      tasksFound.push(task);
     }
   });
 
@@ -490,28 +501,12 @@ function parseArchive(content) {
   const archiveSection = content.match(/## ✅ Archives\s+([\s\S]*?)$/);
   if (archiveSection) {
     const archiveContent = archiveSection[1];
-    const taskBlocks = archiveContent.split(/###\s+TASK-/).slice(1);
 
-    taskBlocks.forEach((block) => {
-      const lines = block.split("\n");
-      const firstLine = lines[0].trim();
-      const pipeIndex = firstLine.indexOf("|");
-
-      if (pipeIndex > 0) {
-        const idPart = firstLine.substring(0, pipeIndex).trim();
-        const titlePart = firstLine.substring(pipeIndex + 1).trim();
-        const idMatch = idPart.match(/^(\d+)$/);
-
-        if (idMatch && titlePart) {
-          const taskId = "TASK-" + idPart.padStart(3, "0");
-          const title = titlePart;
-          const taskContent = lines.slice(1).join("\n");
-          const task = parseTask(taskId, title, taskContent, "archived");
-
-          if (task) {
-            archivedTasks.push(task);
-          }
-        }
+    iterTaskHeadingBlocks(archiveContent).forEach(({ id, title, body }) => {
+      if (!title) return;
+      const task = parseTask(id, title, body, "archived");
+      if (task) {
+        archivedTasks.push(task);
       }
     });
   }
@@ -521,7 +516,7 @@ function parseArchive(content) {
 
 // Generate markdown from tasks and config
 function generateMarkdown(tasks, config) {
-  let md = `# Kanban Board\n\n<!-- Config: Last Task ID: ${config.lastTaskId || 0} -->\n\n`;
+  let md = `# Kanban Board\n\n${serializeConfigHeader(config.taskPrefix || '', config.lastTaskId || 0)}\n\n`;
 
   // Ensure config has all required arrays (defensive defaults)
   config.categories = config.categories || [];

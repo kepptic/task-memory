@@ -24,6 +24,8 @@ import {
   serializeConfigHeader,
 } from '../src/utils/taskId.js';
 
+import { markdownParser } from '../src/utils/markdown.js';
+
 // =============================================================================
 // 1. taskId.js units
 // =============================================================================
@@ -162,4 +164,151 @@ test('serializeConfigHeader: legacy vs team form', () => {
     serializeConfigHeader('GR', 677),
     '<!-- Config: Task Prefix: GR | Last Task ID: 677 -->',
   );
+});
+
+// =============================================================================
+// 3. markdown.js round-trips
+// =============================================================================
+
+test('markdown: legacy fixture parse -> generate header byte-stable', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Last Task ID: 42 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | Done (done)
+
+---
+
+## To Do
+
+### TASK-001 | Legacy task
+**Priority**: High | **Category**: Feature | **Status**: todo
+
+A legacy task.
+
+---
+
+## Done
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks.md' });
+  assert.equal(parsed.config.taskPrefix, '');
+  assert.equal(parsed.config.lastTaskId, 42);
+  const regenerated = markdownParser.generateMarkdown(
+    parsed.tasks.map((t) => ({ ...t, status: t.status })),
+    parsed.config,
+  );
+  assert.match(regenerated, /<!-- Config: Last Task ID: 42 -->/);
+});
+
+test('markdown: TASK-5 / TASK-005 / TASK-GR-001 headings round-trip VERBATIM', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Task Prefix: GR | Last Task ID: 1 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | Done (done)
+
+---
+
+## To Do
+
+### TASK-5 | Unpadded legacy
+**Status**: todo
+
+### TASK-005 | Padded legacy
+**Status**: todo
+
+### TASK-GR-001 | Prefixed, zero-padded on disk
+**Status**: todo
+
+---
+
+## Done
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks-gr.md' });
+  const ids = parsed.tasks.map((t) => t.id);
+  assert.ok(ids.includes('TASK-5'), `expected TASK-5 verbatim, got ${JSON.stringify(ids)}`);
+  assert.ok(ids.includes('TASK-005'), `expected TASK-005 verbatim, got ${JSON.stringify(ids)}`);
+  assert.ok(ids.includes('TASK-GR-001'), `expected TASK-GR-001 verbatim, got ${JSON.stringify(ids)}`);
+});
+
+test('markdown: prefixed task is not dropped by parseTasksFromSection (v1 data-loss bug)', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Task Prefix: GR | Last Task ID: 678 -->
+
+## ⚙️ Configuration
+
+**Columns**: In Progress (in-progress) | Done (done)
+
+---
+
+## In Progress
+
+### TASK-GR-678 | Prefixed in-progress task
+**Status**: in-progress
+
+**Subtasks**:
+- [x] one
+- [ ] two
+
+---
+
+## Done
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks-gr.md' });
+  const task = parsed.tasks.find((t) => t.id === 'TASK-GR-678');
+  assert.ok(task, 'TASK-GR-678 should be parsed, not dropped');
+  assert.equal(task.subtasks.length, 2);
+});
+
+test('markdown: config counter g1->g2 regression (lastTaskId is 677, not NaN/0)', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Task Prefix: GR | Last Task ID: 677 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo)
+
+---
+
+## To Do
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks-gr.md' });
+  assert.equal(parsed.config.lastTaskId, 677);
+  assert.equal(parsed.config.taskPrefix, 'GR');
+});
+
+test('markdown: malformed heading (TASK-GR-12X) is not treated as a task', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Task Prefix: GR | Last Task ID: 12 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo)
+
+---
+
+## To Do
+
+### TASK-GR-12X | Not a real task id
+**Status**: todo
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks-gr.md' });
+  assert.equal(parsed.tasks.length, 0);
 });
