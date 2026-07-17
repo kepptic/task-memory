@@ -48,8 +48,8 @@ To change task status:
 
 When creating new tasks:
 
-1. Check `<!-- Config: Last Task ID: XXX -->` in tasks.md
-2. Use next number: `TASK-XXX+1`
+1. Check `<!-- Config: Last Task ID: XXX -->` in tasks.md (or `<!-- Config: Task Prefix: GR | Last Task ID: 677 -->` for team mode with per-dev files)
+2. Use next number: `TASK-XXX+1` (or `TASK-<PREFIX>-<n>+1` for namespaced IDs, without zero-padding)
 3. Update the config comment
 
 ---
@@ -60,6 +60,8 @@ When creating new tasks:
 
 ```markdown
 ### TASK-042 | Short descriptive title
+# or with team namespacing:
+### TASK-GR-78 | Short descriptive title
 
 **Priority**: High | **Category**: Backend | **Status**: todo
 **Assigned**: @username
@@ -117,8 +119,11 @@ This prevents context loss when visual content disappears.
 Always reference task ID in commits:
 
 ```bash
-# Feature
+# Feature (legacy ID)
 git commit -m "feat: Add user authentication (TASK-042)"
+
+# Feature (namespaced ID)
+git commit -m "feat: Add user authentication (TASK-GR-78)"
 
 # Bug fix
 git commit -m "fix: Resolve login error (TASK-043)"

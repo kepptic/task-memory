@@ -225,9 +225,15 @@ file; otherwise the first file in the glob receives the mirror section.
 <!-- Config: Last Task ID: XXX -->
 ```
 
-Read current ID, increment by 1.
+or (for team mode with per-dev files):
 
-**Task Template:**
+```markdown
+<!-- Config: Task Prefix: GR | Last Task ID: 677 -->
+```
+
+Read current ID, increment by 1. If a `Task Prefix:` is present, the next task ID will be `TASK-<PREFIX>-<n>` (e.g., `TASK-GR-678`, not zero-padded). Without a prefix, legacy IDs are used (e.g., `TASK-043`, with 3-digit padding).
+
+**Task Template** (shown here in legacy format; with `Task Prefix: GR` header, use `TASK-GR-XXX`):
 
 ```markdown
 ### TASK-XXX | [Brief Title]

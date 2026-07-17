@@ -1,6 +1,6 @@
 # Kanban Board
 
-<!-- Config: Last Task ID: 16 -->
+<!-- Config: Last Task ID: 18 -->
 
 ## ⚙️ Configuration
 
@@ -47,6 +47,37 @@ Currently the project selector only shows the folder name (e.g., "planning"), ma
 - [ ] Review fileSystem.js project storage structure
 - [ ] Review ProjectSelector.jsx component
 - [ ] Check if we can read files within selected directory
+
+**Notes**:
+
+**Errors Log**:
+
+### TASK-018 | Rebind file watcher on task-file switch
+**Priority**: Medium | **Category**: UI/UX | **Status**: todo
+**Workflow**: Bug Fix | **Complexity**: Standard
+**Created**: 2026-07-17
+**Tags**: #ui #file-watcher #bug
+
+The file watcher doesn't rebind when switching task files in the UI. After switching to a different task file via the task-file switcher, the watcher stays bound to the original file. This causes missed updates when the new file changes.
+
+**Subtasks**:
+- [ ] Review current file watcher setup in `src/utils/fileWatcher.js`
+- [ ] Check `handleTaskFileSwitch` in `src/App.jsx` to see what cleanup happens
+- [ ] Implement watcher unbind on task-file switch
+- [ ] Implement watcher rebind to the new task file
+- [ ] Test file watcher with multiple simultaneous task files
+- [ ] Verify no memory leaks from orphaned watchers
+
+**Technical Notes**:
+- Look at `fileWatcher.js` for watcher lifecycle management
+- `handleTaskFileSwitch` callback receives new task file info
+- May need to track active watcher instance in state
+- Test scenario: open `tasks-gr.md`, switch to `tasks-dg.md`, edit `tasks-dg.md`, verify UI reflects changes
+
+**Pre-Work Checklist**:
+- [ ] Read fileWatcher.js implementation
+- [ ] Review App.jsx handleTaskFileSwitch logic
+- [ ] Identify current watcher lifecycle
 
 **Notes**:
 
@@ -113,6 +144,67 @@ Test task for auto-reorganization. Originally in Done section with Status: todo 
 **Errors Log**:
 
 ## In Progress
+
+### TASK-017 | Team-safe, collision-resistant initials-namespaced task IDs
+**Priority**: High | **Category**: Feature | **Status**: in-progress | **Assigned**: @user
+**Workflow**: Feature | **Complexity**: Complex
+**Created**: 2026-07-17 | **Started**: 2026-07-17
+**Tags**: #feature #multi-dev #ids #backward-compat
+
+Support `TASK-<PREFIX>-<n>` IDs (2–4 uppercase letters + monotonic int) to avoid collisions when multiple devs allocate IDs on separate branches. Legacy unprefixed `TASK-<n>` IDs must remain valid forever (backward compatibility). Canonical regex: `TASK-(?:[A-Z]{2,4}-)?\d+`. Per-file prefix+counter header: `<!-- Config: Task Prefix: GR | Last Task ID: 677 -->`.
+
+**Workflow (per user):** Fable plans → Codex revises & debates with Fable → converge → Sonnet develops → Fable final review → commit.
+
+**Surface (from recon):**
+- `hooks/task-memory-hook.py`: `TASK_HEADING_RE` (L400), `NEXT_SECTION_RE` (L417), note routing (L253/847/949), config template (L764), reorganize/session-start/precompact.
+- `src/App.jsx`: next-ID mint (L1019-1025), regex (L897).
+- `src/utils/markdown.js`: config parse (L18), block split (L268), id reconstruct+padStart (L284/506), serialize (L524).
+- `src/utils/fileSystem.js`: default template (L187).
+- Docs/skills/commands: minting protocol references.
+
+**Subtasks**:
+- [x] Phase 1: Fable devises plan (grounded in recon) → PLAN-fable-v1.md (251 lines)
+- [x] Phase 2: Codex revised (6 BLOCKs, all verified real) → Fable ruled Q1/Q2/Q3 → PLAN-final.md (converged)
+- [ ] Phase 3: Sonnet implements agreed plan (depends: Phase 2)
+- [ ] Phase 4: Fable final review (depends: Phase 3)
+- [ ] Phase 5: Commit with TASK-017 reference (depends: Phase 4)
+**Notes**:
+
+**Errors Log**:
+- 2026-07-17 03:42:35 - Error: [0;31mFailed: 10[0m
+- 2026-07-17 03:42:07 - Error: +**Errors Log**:
+- 2026-07-17 03:41:06 - Error: +        echo -e "
+${YELLOW}SKIP:${NC} tests/test-ui.mjs (node not found on PAT
+- 2026-07-17 03:40:58 - Error: +**Errors Log**:
+- 2026-07-17 03:40:49 - Error: } catch (error) {
+- 2026-07-17 03:40:49 - Error: except (OSError, ValueError):
+- 2026-07-17 03:39:47 - Error: } catch (error) {
+- 2026-07-17 03:36:51 - Error: [0;31mFailed: 10[0m
+- 2026-07-17 03:36:03 - Error: [0;31mFailed: 10[0m
+- 2026-07-17 03:33:58 - Error: [0;31mFailed: 10[0m
+- 2026-07-17 03:33:37 - Error: [0;31mFailed: 11[0m
+- 2026-07-17 03:32:51 - Error: [1;33mTEST:[0m PostToolUse error logging for Bash
+- 2026-07-17 03:32:38 - Error: [0;32m✓ PASS:[0m Error logged
+- 2026-07-17 03:32:31 - Error: [0;31mFailed: 11[0m
+- 2026-07-17 03:31:58 - Error: [0;31mFailed: 10[0m
+- 2026-07-17 03:27:02 - Error: -      <script type="module" crossorigin>(function(){const l=document.createElem
+- 2026-07-17 03:26:49 - Error: [0;31mFailed: 10[0m
+- 2026-07-17 03:26:14 - Error: 156:37  error  Unexpected surrogate pair in character class. Use 'u' flag  no-mi
+- 2026-07-17 03:25:42 - Error: sh: eslint: command not found
+- 2026-07-17 03:25:35 - Error: 156:37  error  Unexpected surrogate pair in character class. Use 'u' flag  no-mi
+- 2026-07-17 03:19:38 - Error: ERR Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/gr/Documents/DevOps
+- 2026-07-17 03:17:00 - Error: 8:- PostToolUse: Research logging (WebFetch/WebSearch), TodoWrite mirror, error 
+- 2026-07-17 03:16:32 - Error: [0;31mFailed: 10[0m
+- 2026-07-17 03:16:19 - Error: [0;31mFailed: 10[0m
+- 2026-07-17 03:16:07 - Error: [0;31mFailed: 10[0m
+- 2026-07-17 03:12:03 - Error: 316:test_post_tool_use_error_logging() {
+- 2026-07-17 03:11:07 - Error: +**Errors Log**:
+- 2026-07-17 03:07:11 - Error: /Users/gr/Documents/DevOps/kepptic/products/open-source/task-memory/src/utils/fi
+- 2026-07-17 03:05:26 - Error: if (e.name !== 'NotFoundError' && e.name !== 'TypeMismatchError') {
+- 2026-07-17 03:05:24 - Error: except (OSError, ValueError):
+- 2026-07-17 03:02:55 - Error: except (OSError, ValueError):
+- 2026-07-17 01:19:42 - Error: zsh: command not found: setTasks
+- 2026-07-17 01:11:46 - Error: - Routes log appends (`WebFetch`, `WebSearch`, `Bash` errors) to whichever
 
 ### TASK-011 | Test Auto-Reorg: To Do→In Progress
 **Priority**: Low | **Category**: Testing | **Status**: todo | **Assigned**: @user

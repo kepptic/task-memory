@@ -35,7 +35,7 @@ Synthesis. Fill in **Patterns**, **Gotchas**, **Decisions** in the notes file. T
 
 ## Status field is authoritative
 
-Change `**Status**: todo` → `**Status**: in-progress` → `**Status**: done`. The UI auto-reorganizes mismatches, but keeping sections in sync improves file readability. Reference the task ID in every commit: `feat: description (TASK-XXX)`.
+Change `**Status**: todo` → `**Status**: in-progress` → `**Status**: done`. The UI auto-reorganizes mismatches, but keeping sections in sync improves file readability. Reference the task ID in every commit: `feat: description (TASK-XXX)` or `feat: description (TASK-GR-78)` for namespaced IDs.
 
 ## See also
 
