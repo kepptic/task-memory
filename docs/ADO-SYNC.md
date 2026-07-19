@@ -72,6 +72,28 @@ of the plugin works; this doc covers only the ADO bridge.
   Status** (+ a warning report); a brand-new card lands in `todo` (+ a
   warning report).
 
+**`state_map` MUST match your project's process template.** ADO rejects any
+state string that isn't one of the process's actual workflow states with
+`value ... is not in the list of supported values` — this fails the whole
+`push`/`promote` call for that task (reported, not thrown; see `push (36)`
+in `tests/test-sync.mjs`). The three built-in Azure DevOps process templates
+use different state names for the same four stages:
+
+```json
+// Agile process template
+"state_map": { "todo": "New", "in-progress": "Active", "awaiting": "Resolved", "done": "Closed" }
+
+// Scrum process template
+"state_map": { "todo": "To Do", "in-progress": "In Progress", "done": "Done" }
+
+// Basic process template
+"state_map": { "todo": "To Do", "in-progress": "Doing", "done": "Done" }
+```
+
+Check your project's process template (Project Settings → Process, or ask
+whoever provisioned it) before filling this in — copying the wrong example
+verbatim is the most likely first-run failure.
+
 Missing the whole `ado` block → every `ado-sync` command prints "ADO sync
 not configured" and exits 0. This is the rollback story: delete the block to
 turn the feature off.
@@ -301,12 +323,69 @@ section) — the normal path dynamically imports the real MCP client
 
 ---
 
+## Known limitations
+
+**WIQL scope (`ado.scope = {"wiql": "..."}`) — result parsing is unverified
+live.** `my-work` and `current-sprint` scopes are confirmed working against
+a real server (see "Live-verified" below); the WIQL scope's `queryByWiql`
+call has only been exercised against `createMockAdoClient`'s plain-JSON
+fixture, and one live run surfaced a `wit_query_by_wiql` result whose text
+did **not** start with valid JSON (it began with a non-JSON envelope marker,
+`<<6fc43062...`) — `queryByWiql` threw "could not parse MCP tool result
+JSON" instead of returning ids.
+
+`src/sync/adoClientMcp.js`'s `queryByWiql` was hardened defensively for
+this (not fixed against a confirmed shape, since the exact live envelope
+still needs verification): if the result text isn't JSON, it now tries to
+salvage work-item ids from the raw text (`extractWorkItemIdsFromText` —
+looks for `"id": <n>` fragments and `/_workitems/edit/<n>` URLs embedded in
+the response). If nothing is salvageable, it throws a clear error naming
+the `wiql` scope and suggesting `my-work`/`current-sprint` instead of the
+generic parse-failure message. **If you rely on `wiql` scope, verify it
+against your own server** — the salvage patterns are a best guess, not a
+confirmed fix, and there's deliberately no test asserting behavior against
+that exact live shape (see the live-ADO integration checklist below, item
+4a).
+
+---
+
+## Live-verified against azure-devops-mcp v2.8.1
+
+The following were confirmed by running the real bridge against a live
+Azure DevOps org/project (dagtechrepo), not just the mock client — each
+correction was a wire-shape mismatch the mock suite and two review rounds
+had no way to catch, since no live server was available during the
+original build:
+
+- **MCP tool domain is `work-items`, not `wit`.** The server is spawned as
+  `npx -y @azure-devops/mcp <org> -d core work work-items` — passing `wit`
+  as the domain flag silently exposes zero matching tools.
+- **`wit_create_work_item`'s `fields` param is an ARRAY of `{name, value}`
+  objects**, not a plain `{ref: value}` object — the server rejects the
+  object form. `adoClientMcp.js`'s `createWorkItem` converts the
+  `{ref: value}` map callers pass into this array shape.
+- **`wit_update_work_item`'s `updates` param is `[{op, path, value}]`** —
+  this shape was already correct from the original build; confirmed
+  unchanged live.
+- **`wit_add_work_item_comment`'s `format` enum is `'Markdown' | 'Html'`
+  (capitalized)** — the server rejects lowercase `'markdown'` with an
+  `invalid_enum_value` error. `adoClientMcp.js`'s `addComment` sends
+  `'Markdown'`.
+
+---
+
 ## Live-ADO integration checklist
 
 The only thing that can't be verified offline (no live ADO project is
 available during development — every other behavior is unit-tested against
 `createMockAdoClient`). Run through this once against a real org/project
 before trusting the bridge in production.
+
+**Status: create/update/comment are now live-verified** (see
+"Live-verified against azure-devops-mcp v2.8.1" above — items 4 and 5 below
+are done). **WIQL scope (item 1a) is the remaining unverified item** — its
+result-parsing was hardened defensively (see "Known limitations" above) but
+not confirmed against a live envelope.
 
 **Prereqs:** `az login` done; an org/project with a few throwaway work
 items; the `ado` config block filled in.
@@ -315,7 +394,15 @@ items; the `ado` config block filled in.
    `pull --dry-run` connects (browser/azcli auth completes) and resolves
    every tool suffix listed in `src/sync/adoClientMcp.js`'s `TOOL_SUFFIXES`
    — if one is missing, the error names the missing suffix; fix that one
-   constant.
+   constant. **✅ Live-verified** — required a fix (MCP domain is
+   `work-items`, not `wit`; see "Live-verified" above).
+   - **1a. WIQL scope (unverified, see "Known limitations" above):** set
+     `ado.scope` to `{"wiql": "..."}` and run `pull --dry-run` (or `status`
+     after a real pull) against a query that returns ≥1 item. Confirm
+     `queryByWiql` returns the expected ids — if it throws the "wiql scope:
+     ... needs live re-verification" error, capture the raw (pre-parse)
+     `wit_query_by_wiql` result text and fix `extractWorkItemIdsFromText` in
+     `adoClientMcp.js` to match the actual envelope shape.
 2. Verify normalized `WorkItem` fields against a real item — `AssignedTo`
    shape, `Priority` presence, `IterationPath` format (the MCP server's JSON
    may differ subtly from what's assumed in `adoClientMcp.js`'s
@@ -324,15 +411,21 @@ items; the `ado` config block filled in.
    comments landed in notes. Re-pull → zero diff (`changed: false`).
 4. **`updateWorkItemFields` payload shape** — flip a state; if the server
    wants a different `updates` encoding than `{op:'replace', path:'/fields/<ref>', value}`,
-   fix only `adoClientMcp.js`'s `updateWorkItemFields`.
+   fix only `adoClientMcp.js`'s `updateWorkItemFields`. **✅ Live-verified**
+   — `{op, path, value}` array confirmed correct against v2.8.1 (see
+   "Live-verified" above); no code change needed here.
 5. Comment push: the `[task-memory]` marker comment appears in ADO;
    re-pushing posts no duplicate; pulling afterward does not re-import the
-   bot's own comment.
+   bot's own comment. **✅ Live-verified** — required a fix (`format:
+   'Markdown'`, capitalized; see "Live-verified" above).
 6. Done flow on a scratch item: summary comment lands, then the state
    transitions to closed — confirm that ordering in the ADO activity log.
 7. Promote a scratch local task (default create) and a second one with
    `--link` to an existing item; confirm both the ADO item's content and
-   the local board rewrite.
+   the local board rewrite. **✅ Live-verified (default create)** — required
+   a fix (`wit_create_work_item.fields` is an array of `{name, value}`, not
+   a plain object; see "Live-verified" above). `--link` still needs a live
+   pass.
 8. Conflict drill: change state in the ADO web UI AND locally, run `push`
    (expect exit code `3`), resolve with `--take-ado`. Also drill
    `--take-ado` against an ADO state your `state_map` doesn't cover —

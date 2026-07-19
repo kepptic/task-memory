@@ -44,7 +44,7 @@ import {
 } from '../src/sync/syncState.js';
 import { pull, push, promote, decidePull, decidePush } from '../src/sync/engine.js';
 import { markdownParser } from '../src/utils/markdown.js';
-import { applyPromoteWrites, LINK_ID_RE, pushExitCode } from '../scripts/ado-sync.mjs';
+import { applyPromoteWrites, LINK_ID_RE, pushExitCode, notesFileId } from '../scripts/ado-sync.mjs';
 
 // =============================================================================
 // config.js — cases 15-19
@@ -1725,6 +1725,94 @@ test('promote (45): the config header (task id counter) is byte-identical after 
   const headerBefore = PROMOTE_BOARD.match(/<!-- Config:.*-->/)[0];
   const headerAfter = result.boardText.match(/<!-- Config:.*-->/)[0];
   assert.equal(headerAfter, headerBefore);
+});
+
+// BUG A (found via live ADO test, TASK-019): scripts/ado-sync.mjs's
+// readNotesFiles used to only load `ADO-<n>.md` files, so `notesFiles`
+// never contained the source task's real `TASK-<id>.md` content —
+// engine.promote's `notesFiles[taskId] || ''` (line ~438) always got '',
+// ensureNotesSkeleton then built a FRESH skeleton, and the source task's
+// real notes were silently dropped on promotion. This regresses that at
+// the engine level (fully offline/mock, per the PLAN's mock boundary): feed
+// promote() a notesFiles map that DOES contain the TASK-<id> entry with
+// real content, exactly like a correctly-populated readNotesFiles would —
+// and assert the promoted notes contain that original content verbatim
+// (plus the "Promoted from" trace header), not a bare regenerated skeleton.
+test('promote (46, BUG A): preserves the source task\'s real notes content, does not regenerate a skeleton', async () => {
+  const client = createMockAdoClient({ nextId: 90100 });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  const realNotes = `# TASK-042 Notes — Promote me
+
+_Created 2026-07-10. Captures context that would otherwise be lost at session end or compaction._
+
+## Summary
+
+This task wires up the widget frobnicator to the legacy sprocket bus.
+
+## Patterns Discovered
+
+- Always debounce the frobnicator input by 150ms or the bus chokes.
+
+## Gotchas
+
+- Don't call sprocket.reset() before frobnicator.init() — it deadlocks.
+
+## Decisions
+
+- Chose polling over webhooks — reason: the sprocket bus has no webhook support.
+
+## Resources
+
+-
+
+## Open Questions
+
+-
+`;
+
+  const result = await promote({
+    boardText: PROMOTE_BOARD,
+    notesFiles: { 'TASK-042': realNotes },
+    syncState: emptySyncState(),
+    config,
+    client,
+    taskId: 'TASK-042',
+    today: '2026-07-19',
+  });
+
+  const newNotes = result.notesFiles['ADO-90100'];
+  assert.ok(newNotes, 'new notes file must exist');
+  // The real, hand-written content must survive verbatim...
+  assert.match(newNotes, /wires up the widget frobnicator to the legacy sprocket bus/);
+  assert.match(newNotes, /Always debounce the frobnicator input by 150ms/);
+  assert.match(newNotes, /Don't call sprocket\.reset\(\) before frobnicator\.init\(\)/);
+  assert.match(newNotes, /Chose polling over webhooks/);
+  // ...with the promotion trace header prepended...
+  assert.match(newNotes, /> Promoted from TASK-042 on 2026-07-19/);
+  // ...and must NOT be the freshly-generated skeleton's placeholder prose
+  // (the bug's symptom: a skeleton has this exact boilerplate line instead
+  // of the real summary).
+  assert.doesNotMatch(newNotes, /One-paragraph answer to: what is this task doing and why\?/);
+  assert.equal(result.notesFiles['TASK-042'], undefined);
+});
+
+// =============================================================================
+// scripts/ado-sync.mjs — notesFileId (BUG A predicate, fully offline)
+// =============================================================================
+
+test('notesFileId: accepts ADO-<n>.md and TASK-<...>.md (legacy + namespaced), rejects non-id filenames', () => {
+  assert.equal(notesFileId('ADO-31.md'), 'ADO-31');
+  assert.equal(notesFileId('TASK-901.md'), 'TASK-901');
+  assert.equal(notesFileId('TASK-GR-3.md'), 'TASK-GR-3');
+  assert.equal(notesFileId('archive.md'), null);
+  assert.equal(notesFileId('notes.md'), null);
+  assert.equal(notesFileId('README.md'), null);
+  // Leading-zero ADO ids and stray extra text must not slip through the
+  // grammar (mirrors ADO_ID_CORE/TASK_ID_RE's tail-boundedness).
+  assert.equal(notesFileId('ADO-031.md'), null);
+  assert.equal(notesFileId('TASK-042-precompact-20260717.md'), null);
+  assert.equal(notesFileId('TASK-042.txt'), null);
 });
 
 // =============================================================================

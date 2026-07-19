@@ -72,12 +72,13 @@ class AdoToolResultError extends Error {
 }
 
 // MCP tool results arrive as { content: [{ type: 'text', text: '<json>' }],
-// isError?: boolean } — parse defensively (§1.3 note b). Finding #16:
-// combine ALL text content blocks (not just content[0] — a valid payload
-// may legitimately be split across multiple text parts, or content[0] may
-// be a non-text block), and check `isError` before trying to parse anything
-// as the expected JSON shape.
-function parseToolResult(result) {
+// isError?: boolean } — extract the text defensively (§1.3 note b). Finding
+// #16: combine ALL text content blocks (not just content[0] — a valid
+// payload may legitimately be split across multiple text parts, or
+// content[0] may be a non-text block). Split out from parseToolResult (BUG
+// B, live test) so queryByWiql can get at the raw combined text itself when
+// it isn't valid JSON, instead of only ever seeing a thrown parse error.
+function extractResultText(result) {
   if (!result || !Array.isArray(result.content)) {
     throw new AdoUnavailableError('unexpected MCP tool result shape (no content array)');
   }
@@ -87,8 +88,14 @@ function parseToolResult(result) {
   if (textParts.length === 0) {
     throw new AdoUnavailableError('unexpected MCP tool result shape (no text content)');
   }
-  const combined = textParts.join('\n');
-  if (result.isError) {
+  return { combined: textParts.join('\n'), isError: !!result.isError };
+}
+
+// Strict form used by every tool except queryByWiql — check `isError`
+// before trying to parse the combined text as the expected JSON shape.
+function parseToolResult(result) {
+  const { combined, isError } = extractResultText(result);
+  if (isError) {
     throw new AdoToolResultError(combined || 'Azure DevOps MCP tool reported an error');
   }
   try {
@@ -96,6 +103,32 @@ function parseToolResult(result) {
   } catch (err) {
     throw new AdoUnavailableError(`could not parse MCP tool result JSON: ${err.message}`);
   }
+}
+
+// BUG B (found via live ADO test, TASK-019): with `ado.scope = {wiql: ...}`,
+// the live server's `wit_query_by_wiql` result text is NOT plain JSON — it
+// was observed starting with a non-JSON envelope marker (`<<6fc43062...`).
+// `my-work` and `current-sprint` scopes parse fine; this is scoped to WIQL
+// only (see docs/ADO-SYNC.md "Known limitations — WIQL scope" — the exact
+// envelope shape needs live re-verification, so this is a best-effort
+// salvage, not a confirmed fix). Look for the id shapes an ADO response is
+// most likely to embed even inside a non-JSON wrapper: `"id": <n>` (a JSON
+// fragment nested in prose/markup), and `/_workitems/edit/<n>` work-item
+// URLs (which normalizeWorkItem/buildWebUrl already produce elsewhere in
+// this file, so the server plausibly emits the same shape here). Returns
+// [] (never throws) if nothing matches — the caller decides what "nothing
+// salvageable" means.
+function extractWorkItemIdsFromText(text) {
+  const ids = new Set();
+  const patterns = [/"id"\s*:\s*(\d+)/gi, /_workitems\/edit\/(\d+)/gi];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(text))) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > 0) ids.add(n);
+    }
+  }
+  return [...ids];
 }
 
 function normalizeAssignedTo(raw) {
@@ -244,6 +277,22 @@ export async function createAdoClient(config) {
     }
   }
 
+  // Same tool-resolution + transport-error normalization as callTool, but
+  // returns the raw { combined, isError } text pair instead of JSON.parse
+  // -ing it (BUG B, live test). The one caller that needs this
+  // (queryByWiql) has to fall back to salvaging ids from non-JSON text,
+  // which callTool's strict parseToolResult doesn't allow for.
+  async function callToolRaw(key, args) {
+    try {
+      const names = await resolveTools();
+      const result = await client.callTool({ name: names[key], arguments: args });
+      return extractResultText(result);
+    } catch (err) {
+      if (err instanceof AdoUnavailableError) throw err;
+      throw new AdoUnavailableError(`Azure DevOps MCP call "${key}" failed: ${err.message}`);
+    }
+  }
+
   const project = config.project;
   const team = config.team || undefined;
 
@@ -277,8 +326,29 @@ export async function createAdoClient(config) {
       return list.map((r) => Number(r.id)).filter((n) => Number.isFinite(n));
     },
 
+    // BUG B (live test): the wiql tool's result text is not reliably plain
+    // JSON — see extractWorkItemIdsFromText above and docs/ADO-SYNC.md
+    // "Known limitations — WIQL scope". Every other scope (my-work,
+    // current-sprint) goes through the strict callTool/parseToolResult path
+    // unchanged; this is the only tool call with a salvage fallback.
     async queryByWiql(wiql) {
-      const data = await callTool('queryByWiql', { project, wiql, top: 200 });
+      const { combined, isError } = await callToolRaw('queryByWiql', { project, wiql, top: 200 });
+      if (isError) {
+        throw new AdoToolResultError(combined || 'Azure DevOps MCP tool reported an error');
+      }
+      let data;
+      try {
+        data = JSON.parse(combined);
+      } catch {
+        const salvaged = extractWorkItemIdsFromText(combined);
+        if (salvaged.length > 0) return salvaged;
+        throw new AdoUnavailableError(
+          'wiql scope: Azure DevOps MCP "queryByWiql" result was not JSON and no work-item ids ' +
+            'could be salvaged from it — this scope needs live re-verification (see ' +
+            'docs/ADO-SYNC.md, "Known limitations — WIQL scope"). Try ado.scope "my-work" or ' +
+            '"current-sprint" instead — both are verified working against a live server.',
+        );
+      }
       const list = Array.isArray(data) ? data : data.workItems || data.value || [];
       return list.map((r) => Number(r.id)).filter((n) => Number.isFinite(n));
     },

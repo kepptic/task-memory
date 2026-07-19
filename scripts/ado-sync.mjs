@@ -44,6 +44,7 @@ import { findBlocks, readField } from '../src/sync/board.js';
 import { parseSyncState, serializeSyncState } from '../src/sync/syncState.js';
 import { createMockAdoClient, AdoUnavailableError } from '../src/sync/adoClient.js';
 import { setQuietLogging } from '../src/utils/markdown.js';
+import { parseAnyId } from '../src/utils/taskId.js';
 
 const CWD = process.cwd();
 const CONFIG_PATH = join(CWD, '.task-memory.json');
@@ -67,14 +68,31 @@ function notesDirFor(rawConfig) {
   return join(CWD, planningDir, 'notes');
 }
 
-const ADO_NOTES_FILE_RE = /^(ADO-[1-9][0-9]*)\.md$/;
+// BUG A (found via live ADO test, TASK-019): this used to be a hand-rolled
+// `/^(ADO-[1-9][0-9]*)\.md$/` that ONLY matched `ADO-<n>.md` — so
+// `readNotesFiles` never loaded `TASK-*.md` notes files. `promote`'s
+// `notesFiles[taskId]` (src/sync/engine.js) came back undefined for every
+// single promotion, so `ensureNotesSkeleton` built a FRESH skeleton and the
+// source task's real notes/context were silently dropped on the floor —
+// verified live: a TASK-901.md with real content promoted to ADO-31.md and
+// came out as a bare skeleton. Widened to accept BOTH `ADO-<n>.md` and any
+// `TASK-<...>.md` (legacy `TASK-<n>` and namespaced `TASK-<PREFIX>-<n>`),
+// reusing the id grammar from src/utils/taskId.js (parseAnyId) instead of a
+// second hand-rolled regex, so this predicate can't drift out of sync with
+// the rest of the codebase's id parsing. Exported so tests can exercise the
+// predicate directly (no filesystem needed).
+export function notesFileId(name) {
+  if (!name.endsWith('.md')) return null;
+  const parsed = parseAnyId(name.slice(0, -3));
+  return parsed ? parsed.raw : null;
+}
 
 function readNotesFiles(dir) {
   const files = {};
   if (!existsSync(dir)) return files;
   for (const name of readdirSync(dir)) {
-    const m = ADO_NOTES_FILE_RE.exec(name);
-    if (m) files[m[1]] = readFileSync(join(dir, name), 'utf8');
+    const id = notesFileId(name);
+    if (id) files[id] = readFileSync(join(dir, name), 'utf8');
   }
   return files;
 }
