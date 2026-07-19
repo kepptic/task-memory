@@ -239,6 +239,14 @@ advanced), so a conflict report's "since" always reflects when the two
 sides actually diverged, not the timestamp of the most recent failed
 reconciliation attempt.
 
+**Known residual limitation** (documented, not fixed in v1): the context-
+and summary-comment hash guards make a *repeated* push idempotent, but a
+*single* `addComment` call is only at-least-once, not exactly-once — if the
+comment lands in ADO but the confirmation response is lost (network blip
+right after the write), `pushedContextHash`/`pushedSummaryHash` never get
+recorded, so the next push retries the same content and can double-post the
+comment.
+
 ---
 
 ## Manual fallback: `--from-json`
