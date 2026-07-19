@@ -3,7 +3,7 @@
 // The REAL adoClient implementation, backed by the official
 // `@modelcontextprotocol/sdk` stdio client talking to the official
 // `microsoft/azure-devops-mcp` server (`npx -y @azure-devops/mcp <org> -d
-// core work wit`), authenticated via the server's own `az login` /
+// core work work-items`), authenticated via the server's own `az login` /
 // browser-OAuth flow — no PAT, no custom REST client (D4).
 //
 // This is the ONLY file in src/sync/ that imports @modelcontextprotocol/sdk,
