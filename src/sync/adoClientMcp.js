@@ -325,7 +325,14 @@ export async function createAdoClient(config) {
     },
 
     async createWorkItem(type, fields) {
-      const data = await callTool('createWorkItem', { project, workItemType: type, fields });
+      // wit_create_work_item wants `fields` as an ARRAY of {name, value}
+      // (verified live against azure-devops-mcp v2.8.1 — the schema rejects a
+      // plain object). Callers pass a {ref: value} map; convert it here.
+      const fieldArray = Object.entries(fields).map(([name, value]) => ({
+        name,
+        value: String(value),
+      }));
+      const data = await callTool('createWorkItem', { project, workItemType: type, fields: fieldArray });
       return normalizeWorkItem(data, config.org, project);
     },
 
@@ -336,7 +343,9 @@ export async function createAdoClient(config) {
     },
 
     async addComment(workItemId, markdownText) {
-      const data = await callTool('addWorkItemComment', { project, workItemId, comment: markdownText, format: 'markdown' });
+      // format enum is 'Markdown' | 'Html' (capitalized) — verified live; the
+      // server rejects lowercase 'markdown' with an invalid_enum_value error.
+      const data = await callTool('addWorkItemComment', { project, workItemId, comment: markdownText, format: 'Markdown' });
       return { id: Number(data.id) };
     },
 
