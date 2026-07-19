@@ -13,6 +13,7 @@
 // via board.js's setField/setBlockHeading/replaceBlockAt, never a full
 // parseMarkdown -> generateMarkdown regeneration.
 
+import { createHash } from 'node:crypto';
 import { markdownParser } from '../utils/markdown.js';
 import {
   findBlocks,
@@ -23,8 +24,12 @@ import {
   insertBlock,
   newAdoBlockText,
 } from './board.js';
-import { ensureNotesSkeleton, appendComments } from './notes.js';
+import { ensureNotesSkeleton, appendComments, extractContext, extractSummary } from './notes.js';
 import { getTaskEntry, setTaskEntry } from './syncState.js';
+
+function sha256Hex(text) {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
 
 function adoIdFor(numericId) {
   return `ADO-${numericId}`;
@@ -300,6 +305,244 @@ export async function pull({ boardText, notesFiles, syncState, config, client, t
         syncedAt: nowIso,
         lastCommentId: newLastCommentId,
       });
+    }
+  }
+
+  return {
+    boardText: currentBoardText,
+    notesFiles: currentNotesFiles,
+    syncState: currentSyncState,
+    changed: currentBoardText !== boardText,
+    report,
+  };
+}
+
+function newPushReport() {
+  return {
+    pushed: [],
+    failed: [],
+    skipped: [],
+    conflicts: [],
+    needsSummary: [],
+    commentsPushed: {},
+    warnings: [],
+  };
+}
+
+function recordCommentPushed(report, id) {
+  report.commentsPushed[id] = (report.commentsPushed[id] || 0) + 1;
+}
+
+/**
+ * engine.push — push local Status changes + notes context + a distilled
+ * done-summary to ADO. See PLAN-ado.md §6.2/§6.3.
+ *
+ * Per-task stage order (a failed stage stops only that task; whatever
+ * landed before the failure stays recorded in syncState — re-running is
+ * safe because both the state compare and the context-comment hash
+ * short-circuit already-landed work):
+ *   1. STATE   — push the mapped ADO state now, UNLESS this is a
+ *                done-transition (deferred to stage 4 so the summary
+ *                comment posts before ADO potentially locks a closed item).
+ *   2. CONTEXT — post a hashed context comment iff the notes context
+ *                changed since the last successful push (idempotent).
+ *   3. SUMMARY — done-transitions only: post the distilled `## Summary` as
+ *                a comment; if the section is empty/placeholder-only, skip
+ *                the comment and report `needsSummary` (state still pushes).
+ *   4. DONE-STATE — done-transitions only: push the mapped done state.
+ *
+ * @param {object} opts
+ * @param {string} opts.boardText
+ * @param {Object<string,string>} opts.notesFiles
+ * @param {object} opts.syncState
+ * @param {object} opts.config
+ * @param {object} opts.client
+ * @param {{dryRun?: boolean, takeLocal?: string[], takeAdo?: string[], onlyIds?: string[]}} [opts.options]
+ * @param {string} [opts.now] - ISO timestamp override (tests)
+ */
+export async function push({ boardText, notesFiles, syncState, config, client, options = {}, now }) {
+  const { dryRun = false, takeLocal = [], takeAdo = [], onlyIds = [] } = options;
+
+  // Gate FIRST, before any other client call or local mutation.
+  await client.ping();
+
+  const allBlocks = findBlocks(boardText).filter((b) => b.kind === 'ado');
+  const candidates = onlyIds.length > 0 ? allBlocks.filter((b) => onlyIds.includes(b.id)) : allBlocks;
+
+  const numericIds = candidates.map((b) => adoNumFromBlockId(b.id)).filter((n) => n !== null);
+  const items = numericIds.length > 0 ? await client.getWorkItemsBatch(numericIds) : [];
+  const itemsById = new Map(items.map((i) => [i.id, i]));
+
+  const report = newPushReport();
+  const doneAdoState = config.stateMap.done;
+
+  let currentBoardText = boardText;
+  let currentNotesFiles = { ...notesFiles };
+  let currentSyncState = syncState;
+  const nowIso = now || new Date().toISOString();
+
+  for (const candidateRef of candidates) {
+    const id = candidateRef.id;
+    const num = adoNumFromBlockId(id);
+    const item = itemsById.get(num);
+    if (!item) {
+      report.skipped.push({ id, reason: 'unknown-in-ado' });
+      continue;
+    }
+
+    const entry = getTaskEntry(currentSyncState, id);
+    const block = findBlocks(currentBoardText).find((b) => b.id === id);
+    const currentLocalStatus = (readField(block.block, 'Status') || '').toLowerCase().trim();
+
+    if (item.title && block.title !== item.title) {
+      report.warnings.push(
+        `local-title-drift: ${id} board title "${block.title}" differs from ADO title ` +
+          `"${item.title}" — will be overwritten on next pull (ADO owns title)`,
+      );
+    }
+
+    let decision;
+    if (takeLocal.includes(id)) {
+      decision = { action: 'push' };
+    } else if (takeAdo.includes(id)) {
+      decision = { action: 'take-ado' };
+    } else {
+      decision = decidePush(entry, item.state, currentLocalStatus);
+    }
+
+    if (decision.action === 'untracked') {
+      report.skipped.push({ id, reason: 'untracked' });
+      continue;
+    }
+    if (decision.action === 'noop') {
+      report.skipped.push({ id, reason: 'no-local-change' });
+      continue;
+    }
+    if (decision.action === 'conflict') {
+      report.conflicts.push({
+        id,
+        localStatus: currentLocalStatus,
+        adoState: item.state,
+        since: entry ? entry.syncedAt : null,
+      });
+      continue;
+    }
+
+    if (decision.action === 'take-ado') {
+      const mappedStatus = config.reverseStateMap[item.state] || currentLocalStatus;
+      if (!dryRun) {
+        const newBlockText = setField(block.block, 'Status', mappedStatus);
+        currentBoardText = replaceBlockAt(currentBoardText, block, newBlockText);
+        currentSyncState = setTaskEntry(currentSyncState, id, {
+          ...(entry || {}),
+          rev: item.rev,
+          adoState: item.state,
+          localStatus: mappedStatus,
+          syncedAt: nowIso,
+        });
+      }
+      report.pushed.push(id);
+      continue;
+    }
+
+    // decision.action === 'push'
+    const targetAdoState = config.stateMap[currentLocalStatus];
+    if (!targetAdoState) {
+      report.skipped.push({ id, reason: 'unmapped-status' });
+      continue;
+    }
+
+    if (dryRun) {
+      report.pushed.push(id);
+      continue;
+    }
+
+    const isDoneTransition = targetAdoState === doneAdoState && (!entry || entry.adoState !== doneAdoState);
+    let taskFailed = false;
+
+    // Stage 1: STATE (skipped for done-transitions — deferred to stage 4).
+    if (!isDoneTransition) {
+      try {
+        const updated = await client.updateWorkItemFields(num, { 'System.State': targetAdoState });
+        currentSyncState = setTaskEntry(currentSyncState, id, {
+          ...(entry || {}),
+          rev: updated.rev,
+          adoState: updated.state,
+          localStatus: currentLocalStatus,
+          syncedAt: nowIso,
+        });
+      } catch (err) {
+        report.failed.push({ id, stage: 'state', error: err.message });
+        taskFailed = true;
+      }
+    }
+
+    // Stage 2: CONTEXT comment (idempotent via content hash).
+    if (!taskFailed) {
+      const notesText = currentNotesFiles[id] || '';
+      const context = extractContext(notesText);
+      const entryNow = getTaskEntry(currentSyncState, id) || entry || {};
+      if (context) {
+        const hash = sha256Hex(context);
+        if (hash !== (entryNow.pushedContextHash || '')) {
+          try {
+            const { id: commentId } = await client.addComment(
+              num,
+              `[task-memory] context update ${hash.slice(0, 8)}\n\n${context}`,
+            );
+            currentSyncState = setTaskEntry(currentSyncState, id, {
+              ...entryNow,
+              pushedContextHash: hash,
+              pushedCommentIds: [...(entryNow.pushedCommentIds || []), commentId],
+            });
+            recordCommentPushed(report, id);
+          } catch (err) {
+            report.failed.push({ id, stage: 'context', error: err.message });
+            taskFailed = true;
+          }
+        }
+      }
+    }
+
+    // Stage 3: SUMMARY (done-transitions only). Missing/placeholder summary
+    // is reported but does NOT fail the task — stage 4 still runs.
+    if (!taskFailed && isDoneTransition) {
+      const notesText = currentNotesFiles[id] || '';
+      const summary = extractSummary(notesText);
+      if (!summary) {
+        report.needsSummary.push(id);
+      } else {
+        try {
+          const summaryLines = [`[task-memory] done summary`, '', summary];
+          if (config.repoUrl) summaryLines.push('', `${config.repoUrl} (notes/${id}.md)`);
+          await client.addComment(num, summaryLines.join('\n'));
+          recordCommentPushed(report, id);
+        } catch (err) {
+          report.failed.push({ id, stage: 'summary', error: err.message });
+          taskFailed = true;
+        }
+      }
+    }
+
+    // Stage 4: DONE-STATE (deferred state push for done-transitions).
+    if (!taskFailed && isDoneTransition) {
+      try {
+        const updated = await client.updateWorkItemFields(num, { 'System.State': doneAdoState });
+        currentSyncState = setTaskEntry(currentSyncState, id, {
+          ...(getTaskEntry(currentSyncState, id) || entry || {}),
+          rev: updated.rev,
+          adoState: updated.state,
+          localStatus: currentLocalStatus,
+          syncedAt: nowIso,
+        });
+      } catch (err) {
+        report.failed.push({ id, stage: 'done-state', error: err.message });
+        taskFailed = true;
+      }
+    }
+
+    if (!taskFailed) {
+      report.pushed.push(id);
     }
   }
 

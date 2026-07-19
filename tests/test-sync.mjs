@@ -37,7 +37,7 @@ import {
   setTaskEntry,
   removeTaskEntry,
 } from '../src/sync/syncState.js';
-import { pull, decidePull, decidePush } from '../src/sync/engine.js';
+import { pull, push, decidePull, decidePush } from '../src/sync/engine.js';
 
 // =============================================================================
 // config.js — cases 15-19
@@ -733,4 +733,311 @@ test('pull (31): unavailable client -> AdoUnavailableError, zero writes, zero ca
   );
   assert.equal(client.calls.length, 1);
   assert.equal(client.calls[0].method, 'ping');
+});
+
+// =============================================================================
+// engine.push — cases 32-38
+// =============================================================================
+
+test('push (32): local todo->in-progress pushes mapped state, syncState re-baselined', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-400 | Item
+**Status**: in-progress
+
+`)}`;
+  const client = createMockAdoClient({
+    workItems: { 400: { id: 400, rev: 1, title: 'Item', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-400', { rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const result = await push({ boardText, notesFiles: {}, syncState, config, client, now: '2026-07-19T00:00:00Z' });
+
+  const stateCalls = client.calls.filter((c) => c.method === 'updateWorkItemFields');
+  assert.equal(stateCalls.length, 1);
+  assert.deepEqual(stateCalls[0].args, [400, { 'System.State': 'Active' }]);
+  assert.deepEqual(result.report.pushed, ['ADO-400']);
+  const entry = getTaskEntry(result.syncState, 'ADO-400');
+  assert.equal(entry.adoState, 'Active');
+  assert.equal(entry.localStatus, 'in-progress');
+  assert.equal(entry.rev, 2); // mock bumps rev on update
+});
+
+test('push (33): no local change -> zero write calls, reported no-local-change', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-401 | Item
+**Status**: in-progress
+
+`)}`;
+  const client = createMockAdoClient({ workItems: { 401: { id: 401, rev: 1, title: 'Item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-401', { rev: 1, adoState: 'Active', localStatus: 'in-progress', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const result = await push({ boardText, notesFiles: {}, syncState, config, client });
+
+  assert.equal(client.calls.filter((c) => c.method === 'updateWorkItemFields' || c.method === 'addComment').length, 0);
+  assert.deepEqual(result.report.skipped, [{ id: 'ADO-401', reason: 'no-local-change' }]);
+});
+
+test('push (34): context comment posts once with marker+hash; idempotent when forced again unchanged', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-402 | Item
+**Status**: in-progress
+
+`)}`;
+  let notes = buildNotesSkeleton('ADO-402', 'Item', '2026-07-01');
+  notes = notes.replace(
+    '_One-paragraph answer to: what is this task doing and why?_',
+    '_One-paragraph answer to: what is this task doing and why?_',
+  ) + '\nSome extra local context worth pushing.\n';
+  const client = createMockAdoClient({ workItems: { 402: { id: 402, rev: 1, title: 'Item', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-402', { rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const first = await push({ boardText, notesFiles: { 'ADO-402': notes }, syncState, config, client });
+  const commentCalls1 = client.calls.filter((c) => c.method === 'addComment');
+  assert.equal(commentCalls1.length, 1);
+  assert.match(commentCalls1[0].args[1], /^\[task-memory\] context update [0-9a-f]{8}\n\n/);
+
+  // Force a second push pass (bypassing decidePush's noop shortcut) with
+  // identical notes content — the context-hash guard must still prevent a
+  // second comment.
+  const second = await push({
+    boardText: first.boardText,
+    notesFiles: first.notesFiles,
+    syncState: first.syncState,
+    config,
+    client,
+    options: { takeLocal: ['ADO-402'] },
+  });
+  const commentCalls2 = client.calls.filter((c) => c.method === 'addComment');
+  assert.equal(commentCalls2.length, 1); // no NEW comment posted
+  assert.equal(second.report.pushed.includes('ADO-402'), true);
+});
+
+test('push (35a): done flow posts the verbatim Summary section, then pushes state to done', async () => {
+  const boardText = `${BASE_BOARD.replace('## Done\n', `## Done
+
+### ADO-403 | Item
+**Status**: done
+
+`)}`;
+  const notes = buildNotesSkeleton('ADO-403', 'Item', '2026-07-01').replace(
+    '_One-paragraph answer to: what is this task doing and why?_',
+    'Wired up the sync engine push path.',
+  );
+  const client = createMockAdoClient({ workItems: { 403: { id: 403, rev: 1, title: 'Item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' }, repo_url: 'https://github.com/kepptic/task-memory' });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-403', { rev: 1, adoState: 'Active', localStatus: 'in-progress', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const result = await push({ boardText, notesFiles: { 'ADO-403': notes }, syncState, config, client });
+
+  const commentCall = client.calls.find((c) => c.method === 'addComment' && /done summary/.test(c.args[1]));
+  const stateCalls = client.calls.filter((c) => c.method === 'updateWorkItemFields');
+  assert.ok(commentCall, 'done-summary comment posted');
+  assert.match(commentCall.args[1], /Wired up the sync engine push path\./);
+  assert.match(commentCall.args[1], /https:\/\/github\.com\/kepptic\/task-memory \(notes\/ADO-403\.md\)/);
+  assert.equal(stateCalls.length, 1);
+  assert.deepEqual(stateCalls[0].args, [403, { 'System.State': 'Closed' }]);
+
+  const commentIdx = client.calls.indexOf(commentCall);
+  const stateIdx = client.calls.indexOf(stateCalls[0]);
+  assert.ok(commentIdx < stateIdx, 'summary comment posts BEFORE the closing state transition');
+
+  assert.equal(getTaskEntry(result.syncState, 'ADO-403').adoState, 'Closed');
+  assert.deepEqual(result.report.pushed, ['ADO-403']);
+});
+
+test('push (35b): missing Summary -> state still pushed, needs-summary reported, no summary comment', async () => {
+  const boardText = `${BASE_BOARD.replace('## Done\n', `## Done
+
+### ADO-404 | Item
+**Status**: done
+
+`)}`;
+  const notes = buildNotesSkeleton('ADO-404', 'Item', '2026-07-01'); // placeholder-only Summary
+  const client = createMockAdoClient({ workItems: { 404: { id: 404, rev: 1, title: 'Item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-404', { rev: 1, adoState: 'Active', localStatus: 'in-progress', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const result = await push({ boardText, notesFiles: { 'ADO-404': notes }, syncState, config, client });
+
+  const summaryComment = client.calls.find((c) => c.method === 'addComment' && /done summary/.test(c.args[1]));
+  assert.equal(summaryComment, undefined);
+  const stateCalls = client.calls.filter((c) => c.method === 'updateWorkItemFields');
+  assert.equal(stateCalls.length, 1);
+  assert.deepEqual(stateCalls[0].args, [404, { 'System.State': 'Closed' }]);
+  assert.deepEqual(result.report.needsSummary, ['ADO-404']);
+  assert.deepEqual(result.report.pushed, ['ADO-404']);
+});
+
+test('push (36): unmapped local status is skipped + reported, no calls made', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-405 | Item
+**Status**: awaiting
+
+`)}`;
+  const client = createMockAdoClient({ workItems: { 405: { id: 405, rev: 1, title: 'Item', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' }, state_map: { todo: 'New', 'in-progress': 'Active', done: 'Closed' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-405', { rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const result = await push({ boardText, notesFiles: {}, syncState, config, client });
+
+  assert.equal(client.calls.filter((c) => c.method === 'updateWorkItemFields' || c.method === 'addComment').length, 0);
+  assert.deepEqual(result.report.skipped, [{ id: 'ADO-405', reason: 'unmapped-status' }]);
+});
+
+test('push (37): partial failure — task1 lands, task2 fails+reports, task3 still attempted; rerun pushes only task2', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-501 | Task one
+**Status**: in-progress
+
+### ADO-502 | Task two
+**Status**: in-progress
+
+### ADO-503 | Task three
+**Status**: in-progress
+
+`)}`;
+  const workItems = {
+    501: { id: 501, rev: 1, title: 'Task one', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' },
+    502: { id: 502, rev: 1, title: 'Task two', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' },
+    503: { id: 503, rev: 1, title: 'Task three', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' },
+  };
+  const client = createMockAdoClient({
+    workItems,
+    fail: { updateWorkItemFields: { after: 2, error: 'injected ADO failure' } },
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  let syncState = emptySyncState();
+  for (const id of ['ADO-501', 'ADO-502', 'ADO-503']) {
+    syncState = setTaskEntry(syncState, id, { rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+  }
+
+  const result = await push({ boardText, notesFiles: {}, syncState, config, client });
+
+  assert.deepEqual(result.report.pushed.sort(), ['ADO-501', 'ADO-503']);
+  assert.equal(result.report.failed.length, 1);
+  assert.equal(result.report.failed[0].id, 'ADO-502');
+  assert.equal(result.report.failed[0].stage, 'state');
+
+  assert.equal(getTaskEntry(result.syncState, 'ADO-501').adoState, 'Active');
+  assert.equal(getTaskEntry(result.syncState, 'ADO-502').adoState, 'New'); // unchanged — failed call never landed
+  assert.equal(getTaskEntry(result.syncState, 'ADO-503').adoState, 'Active');
+
+  // Rerun against a healthy client: only task 2 still has a local change to push.
+  const rerunClient = createMockAdoClient({ workItems });
+  const rerun = await push({ boardText: result.boardText, notesFiles: result.notesFiles, syncState: result.syncState, config, client: rerunClient });
+  assert.deepEqual(rerun.report.pushed, ['ADO-502']);
+});
+
+test('push (38): untracked ADO card (no prior syncState entry) -> reported untracked, no writes', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-600 | Never synced before
+**Status**: in-progress
+
+`)}`;
+  const client = createMockAdoClient({ workItems: { 600: { id: 600, rev: 1, title: 'Never synced before', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  const result = await push({ boardText, notesFiles: {}, syncState: emptySyncState(), config, client });
+
+  assert.equal(client.calls.filter((c) => c.method === 'updateWorkItemFields' || c.method === 'addComment').length, 0);
+  assert.deepEqual(result.report.skipped, [{ id: 'ADO-600', reason: 'untracked' }]);
+});
+
+// =============================================================================
+// conflict — cases 39-41
+// =============================================================================
+
+test('conflict (39): both sides changed -> pull leaves Status, push makes zero mutating calls; comments still flow', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-700 | Conflicted item
+**Status**: done
+
+`)}`;
+  const pullClient = createMockAdoClient({
+    workItems: { 700: { id: 700, rev: 3, title: 'Conflicted item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+    comments: { 700: [{ id: 1, author: 'Alice', createdDate: '2026-07-19T00:00:00Z', text: 'ADO-side note' }] },
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  // Last known baseline: ado 'New', local 'todo'. Since then ADO moved to
+  // 'Active' (adoChanged) AND local moved to 'done' (localChanged) -> conflict.
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-700', { rev: 2, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const pullResult = await pull({ boardText, notesFiles: {}, syncState, config, client: pullClient, today: '2026-07-19' });
+  assert.equal(pullResult.report.conflicts.length, 1);
+  assert.equal(pullResult.report.conflicts[0].id, 'ADO-700');
+  const blockAfterPull = findBlocks(pullResult.boardText).find((b) => b.id === 'ADO-700');
+  assert.equal(readField(blockAfterPull.block, 'Status'), 'done'); // board leaves local Status as-is
+  assert.ok(pullResult.notesFiles['ADO-700'].includes('ADO-side note')); // comments still flow in
+
+  const pushClient = createMockAdoClient({
+    workItems: { 700: { id: 700, rev: 3, title: 'Conflicted item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+  });
+  const pushResult = await push({
+    boardText: pullResult.boardText,
+    notesFiles: pullResult.notesFiles,
+    syncState: pullResult.syncState,
+    config,
+    client: pushClient,
+  });
+  assert.equal(pushResult.report.conflicts.length, 1);
+  assert.equal(
+    pushClient.calls.filter((c) => c.method === 'updateWorkItemFields' || c.method === 'addComment').length,
+    0,
+  );
+});
+
+test('conflict (40): --take-local forces the push through a conflict and re-baselines', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-701 | Item
+**Status**: done
+
+`)}`;
+  const client = createMockAdoClient({ workItems: { 701: { id: 701, rev: 3, title: 'Item', state: 'Removed', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-701', { rev: 2, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const plain = await push({ boardText, notesFiles: {}, syncState, config, client });
+  assert.equal(plain.report.conflicts.length, 1);
+
+  const forced = await push({ boardText, notesFiles: {}, syncState, config, client, options: { takeLocal: ['ADO-701'] } });
+  assert.deepEqual(forced.report.pushed, ['ADO-701']);
+  assert.equal(forced.report.conflicts.length, 0);
+  const entry = getTaskEntry(forced.syncState, 'ADO-701');
+  assert.equal(entry.adoState, 'Closed'); // state_map.done
+  assert.equal(entry.localStatus, 'done');
+});
+
+test('conflict (41): --take-ado force-applies ADO state locally and re-baselines, without writing TO ado', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-702 | Item
+**Status**: done
+
+`)}`;
+  const client = createMockAdoClient({ workItems: { 702: { id: 702, rev: 3, title: 'Item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-702', { rev: 2, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const result = await push({ boardText, notesFiles: {}, syncState, config, client, options: { takeAdo: ['ADO-702'] } });
+
+  assert.equal(
+    client.calls.filter((c) => c.method === 'updateWorkItemFields' || c.method === 'addComment').length,
+    0,
+  );
+  const block = findBlocks(result.boardText).find((b) => b.id === 'ADO-702');
+  assert.equal(readField(block.block, 'Status'), 'in-progress'); // Active -> in-progress, mapped locally
+  const entry = getTaskEntry(result.syncState, 'ADO-702');
+  assert.equal(entry.adoState, 'Active');
+  assert.equal(entry.localStatus, 'in-progress');
 });
