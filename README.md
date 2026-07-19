@@ -37,7 +37,7 @@ For teams working on separate branches, use per-dev task files (`planning/tasks-
 
 ### Azure DevOps Integration (Optional)
 
-Connect task-memory to Azure DevOps for team workflows. Add an `ado` block to `.task-memory.json`, and task items keyed to ADO work items (`### ADO-12345`, `notes/ADO-12345.md`) sync bidirectionally — pull items and comments, push status and notes context. Local `TASK-<PREFIX>-<n>` ids remain available offline. See [ADO Sync guide](docs/ADO-SYNC.md) for full setup and command reference.
+Connect task-memory to Azure DevOps for team workflows. Add an `ado` block to `.task-memory.json`, and task items keyed to ADO work items (`### ADO-12345`, `notes/ADO-12345.md`) sync bidirectionally — pull items and comments, push status and notes context. Local `TASK-<PREFIX>-<n>` ids remain available offline. `/tm-init` can scaffold the `ado` block for you interactively (Question 5). Prerequisites: `npm install` (gets `@modelcontextprotocol/sdk`), Node 20+, and either an `az login` session or interactive browser OAuth for the correct ADO tenant — see [ADO Sync guide](docs/ADO-SYNC.md) for full setup and command reference.
 
 ### Install in Claude Code (Recommended)
 

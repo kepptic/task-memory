@@ -5,6 +5,16 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.2] - 2026-07-19
+
+### Added
+
+- `/tm-init` now has an optional **Azure DevOps sync** step: opt in during setup and it scaffolds the `.task-memory.json` `ado` block (org, project, and a `state_map` matched to your project's process template — Agile/Scrum/Basic), then prints the prerequisites and first-run commands.
+
+### Changed
+
+- `docs/ADO-SYNC.md` setup hardened from live experience: adds the `npm install` prerequisite (the bridge needs `@modelcontextprotocol/sdk`) and Node 20+, and rewrites the auth guidance to present Azure CLI login and interactive browser OAuth as two equal paths — with the wrong-tenant failure (`Identity ... has not been materialized`) and its recovery called out. The MCP server itself still needs no install (fetched via `npx` on demand).
+
 ## [3.6.1] - 2026-07-19
 
 ### Fixed
