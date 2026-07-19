@@ -5,6 +5,13 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.1] - 2026-07-19
+
+### Fixed
+
+- Azure DevOps WIQL scope: parse `wit_query_by_wiql` results through the MCP server's randomized untrusted-content fence (`<<token>> [UNTRUSTED ...] <<token>> {json} <</token>>`) — extract work-item ids from the embedded JSON. Live-verified against azure-devops-mcp v2.8.1. (`my-work` and `current-sprint` scopes were unaffected.)
+- Live-integration fixes found running the bridge against a real Azure DevOps org: MCP domain is `work-items` (not `wit`); `wit_create_work_item` `fields` is an array of `{name,value}`; `wit_add_work_item_comment` `format` is capitalized (`Markdown`/`Html`); `promote` now preserves the source task's notes/context (the notes-file loader previously only matched `ADO-*.md`).
+
 ## [3.6.0] - 2026-07-19
 
 ### Added
