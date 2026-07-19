@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "lint": "eslint src/**/*.{js,jsx}",
     "test:ui": "node tests/test-ui.mjs",
+    "test:watcher": "node tests/test-watcher.mjs",
     "test:sync": "node tests/test-sync.mjs",
     "sync:ado": "node scripts/ado-sync.mjs"
   },

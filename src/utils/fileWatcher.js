@@ -275,12 +275,28 @@ async function checkForExternalChanges(fileHandle, callbacks) {
 }
 
 // Start file watcher
+// Always (re)binds to the given fileHandle/callbacks. If a watcher is
+// already running (e.g. the user switched task files), the previous
+// interval is cleared first so we never end up polling a stale handle
+// or leaking a second interval (TASK-018).
 function startFileWatcher(fileHandle, callbacks) {
-  if (fileWatcherInterval) return; // Already running
+  if (fileWatcherInterval) {
+    clearInterval(fileWatcherInterval);
+    fileWatcherInterval = null;
+  }
+
+  // Reset modified-time tracking so the new handle gets a clean baseline
+  // on its first poll instead of comparing against the previous file's
+  // lastModified timestamp.
+  lastCheckedModified = 0;
 
   console.log("👁️ Starting file watcher (checking every 2 seconds)...");
   fileWatcherInterval = setInterval(() => {
-    checkForExternalChanges(fileHandle, callbacks);
+    // Returning the promise is a no-op for the real browser/Node timer
+    // (setInterval ignores callback return values) but lets tests that
+    // stub setInterval await a "tick" and observe the poll actually
+    // completing, instead of racing its internal awaits.
+    return checkForExternalChanges(fileHandle, callbacks);
   }, 2000);
 }
 

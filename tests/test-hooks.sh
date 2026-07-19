@@ -1482,6 +1482,41 @@ run_js_ui_tests() {
 }
 
 # =============================================================================
+# JS file-watcher suite (TASK-018) — node:test regression coverage for the
+# watcher-rebind bug: switching task files must rebind fileWatcher's polling
+# interval to the new handle (no leaked interval, old handle stops being
+# polled). Guarded behind `command -v node`; skips cleanly (not a failure) on
+# a machine without node on PATH. Also runnable standalone via
+# `node tests/test-watcher.mjs` or `npm run test:watcher`.
+# =============================================================================
+
+run_js_watcher_tests() {
+    if ! command -v node >/dev/null 2>&1; then
+        echo -e "\n${YELLOW}SKIP:${NC} tests/test-watcher.mjs (node not found on PATH — watcher suite not run)"
+        return
+    fi
+
+    log_test "JS watcher: node tests/test-watcher.mjs (fileWatcher.js rebind-on-switch)"
+
+    local js_output js_exit
+    js_output=$(node "$SCRIPT_DIR/test-watcher.mjs" 2>&1)
+    js_exit=$?
+
+    local js_pass js_fail
+    js_pass=$(echo "$js_output" | grep -oE '^ℹ pass [0-9]+' | grep -oE '[0-9]+' || true)
+    js_fail=$(echo "$js_output" | grep -oE '^ℹ fail [0-9]+' | grep -oE '[0-9]+' || true)
+    js_pass=${js_pass:-0}
+    js_fail=${js_fail:-0}
+
+    if [ "$js_exit" -eq 0 ] && [ "$js_fail" -eq 0 ]; then
+        log_pass "JS watcher suite green ($js_pass passed)"
+    else
+        log_fail "JS watcher suite has failures ($js_fail failed / $js_pass passed)"
+        echo "$js_output" | grep -E '^not ok|✖' | head -20
+    fi
+}
+
+# =============================================================================
 # Run Tests
 # =============================================================================
 
@@ -1555,6 +1590,9 @@ test_ado_stamping_bash
 
 # JS UI suite (taskId.js / markdown.js / fileSystem.js) — guarded, see below
 run_js_ui_tests
+
+# JS file-watcher suite (rebind-on-switch, TASK-018) — guarded, see below
+run_js_watcher_tests
 
 # Teardown
 teardown_test_env
