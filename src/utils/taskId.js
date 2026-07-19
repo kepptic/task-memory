@@ -155,7 +155,12 @@ export function mintNextId(meta, ids) {
 // groups, tail-bounded so `ADO-12X` never parses as `ADO-12`. Leading zeros
 // are rejected at the grammar level ([1-9][0-9]*) so one work item has
 // exactly one valid spelling — `ADO-012` is plain text, not a task heading.
-export const ADO_ID_CORE = 'ADO-[1-9][0-9]*(?![0-9A-Za-z])';
+// Codex review (finding #14): the tail lookahead also excludes `-` (not just
+// alnum) so `### ADO-12-foo` never matches `ADO-12` with `-foo` glued on as
+// a bogus title-less continuation — it's plain text, same treatment as a
+// malformed `TASK-GR-12X`. TASK_ID_CORE is intentionally NOT touched here
+// (bit-identical guard, TASK-017) — this asymmetry is deliberate.
+export const ADO_ID_CORE = 'ADO-[1-9][0-9]*(?![0-9A-Za-z-])';
 
 // Anchored parse form: g1 = numeric tail (no leading zeros).
 export const ADO_ID_RE = /^ADO-([1-9][0-9]*)$/;

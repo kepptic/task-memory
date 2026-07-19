@@ -106,8 +106,14 @@ function cloneWorkItem(item) {
  * @param {number} [fixture.nextId] - id minted by createWorkItem (default 90000)
  * @param {number} [fixture.nextCommentId] - id minted by addComment (default 500)
  * @param {object} [fixture.fail] - per-method failure injection:
- *   { methodName: { after: N, error: 'msg' } } throws AdoUnavailableError on
- *   the Nth call to that method.
+ *   { methodName: { after: N, error: 'msg', unavailable?: boolean } } throws
+ *   on the Nth call to that method. Throws `AdoUnavailableError` by default
+ *   (`unavailable` omitted or `true`) — matching a transport/auth death, the
+ *   uniform failure mode every other adoClient method already documents.
+ *   Pass `unavailable: false` to instead throw a plain `Error`, modeling an
+ *   ADO-SIDE rejection of that one call (validation, permissions, ...) that
+ *   should NOT be treated as "the whole connection died" by callers that
+ *   distinguish the two (engine.push's mid-push abort, finding #4).
  * @param {boolean} [fixture.unavailable] - true => every method (incl. ping)
  *   throws AdoUnavailableError immediately, zero mutation, zero downstream calls.
  * @returns {object} adoClient — see interface comment above. Also exposes
@@ -145,6 +151,9 @@ export function createMockAdoClient(fixture = {}) {
     callCounts[method] = (callCounts[method] || 0) + 1;
     const rule = state.fail[method];
     if (rule && callCounts[method] === rule.after) {
+      if (rule.unavailable === false) {
+        throw new Error(rule.error || `mock injected failure: ${method}`);
+      }
       throw new AdoUnavailableError(rule.error || `mock injected failure: ${method}`);
     }
   }

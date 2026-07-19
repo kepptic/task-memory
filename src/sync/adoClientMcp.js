@@ -57,15 +57,42 @@ function buildWebUrl(org, project, id) {
   return `https://dev.azure.com/${org}/${encodeURIComponent(project)}/_workitems/edit/${id}`;
 }
 
-// MCP tool results arrive as { content: [{ type: 'text', text: '<json>' }] }
-// — parse defensively (§1.3 note b).
+// Codex review finding #16: a domain-level MCP tool error (e.g. "work item
+// 999 does not exist") arrives as a NORMAL (non-thrown) tool result with
+// `isError: true` — it is NOT a transport/auth failure. This is the ONLY
+// signal getWorkItem (finding #8) treats as "not found / no access" and
+// returns null for; every other failure mode (a thrown SDK error, a
+// malformed result shape, unparsable JSON) is a genuine AdoUnavailableError
+// that must propagate, never get swallowed into null.
+class AdoToolResultError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'AdoToolResultError';
+  }
+}
+
+// MCP tool results arrive as { content: [{ type: 'text', text: '<json>' }],
+// isError?: boolean } — parse defensively (§1.3 note b). Finding #16:
+// combine ALL text content blocks (not just content[0] — a valid payload
+// may legitimately be split across multiple text parts, or content[0] may
+// be a non-text block), and check `isError` before trying to parse anything
+// as the expected JSON shape.
 function parseToolResult(result) {
-  const first = result && Array.isArray(result.content) ? result.content[0] : null;
-  if (!first || typeof first.text !== 'string') {
+  if (!result || !Array.isArray(result.content)) {
+    throw new AdoUnavailableError('unexpected MCP tool result shape (no content array)');
+  }
+  const textParts = result.content
+    .filter((c) => c && c.type === 'text' && typeof c.text === 'string')
+    .map((c) => c.text);
+  if (textParts.length === 0) {
     throw new AdoUnavailableError('unexpected MCP tool result shape (no text content)');
   }
+  const combined = textParts.join('\n');
+  if (result.isError) {
+    throw new AdoToolResultError(combined || 'Azure DevOps MCP tool reported an error');
+  }
   try {
-    return JSON.parse(first.text);
+    return JSON.parse(combined);
   } catch (err) {
     throw new AdoUnavailableError(`could not parse MCP tool result JSON: ${err.message}`);
   }
@@ -78,10 +105,19 @@ function normalizeAssignedTo(raw) {
 }
 
 function normalizeWorkItem(raw, org, project) {
-  const fields = raw.fields || raw;
-  const id = raw.id ?? fields['System.Id'];
+  const fields = (raw && raw.fields) || raw || {};
+  const id = raw ? (raw.id ?? fields['System.Id']) : undefined;
+  const numericId = Number(id);
+  // Codex review finding #16: validate the one field every downstream
+  // caller unconditionally relies on (adoNumFromBlockId/setBlockHeading
+  // keys everything off `id`) — a malformed/unexpected MCP response shape
+  // must surface as AdoUnavailableError, not silently produce `id: NaN`
+  // that then corrupts board text or syncState downstream.
+  if (!raw || !Number.isFinite(numericId) || numericId <= 0) {
+    throw new AdoUnavailableError(`malformed Azure DevOps work item response (missing/invalid id): ${JSON.stringify(raw)}`);
+  }
   return {
-    id: Number(id),
+    id: numericId,
     rev: Number(raw.rev ?? fields['System.Rev'] ?? 0),
     title: fields['System.Title'] || '',
     state: fields['System.State'] || '',
@@ -89,7 +125,7 @@ function normalizeWorkItem(raw, org, project) {
     assignee: normalizeAssignedTo(fields['System.AssignedTo']),
     iterationPath: fields['System.IterationPath'] || '',
     priority: fields['Microsoft.VSTS.Common.Priority'] ?? null,
-    url: raw.url || buildWebUrl(org, project, id),
+    url: raw.url || buildWebUrl(org, project, numericId),
   };
 }
 
@@ -141,16 +177,40 @@ export async function createAdoClient(config) {
   try {
     await client.connect(transport);
   } catch (err) {
+    // Codex review finding #16: a failed connect can still have spawned the
+    // subprocess (transport) and/or partially initialized the client — leaving
+    // either open on the failure path leaks a process/handle. Best-effort
+    // close both before rethrowing; a secondary failure here must never mask
+    // the original (and more informative) connect error.
+    try {
+      await client.close?.();
+    } catch {
+      // ignore
+    }
+    try {
+      await transport.close?.();
+    } catch {
+      // ignore
+    }
     throw new AdoUnavailableError(
       `could not start/connect to the Azure DevOps MCP server (is \`npx -y @azure-devops/mcp\` ` +
         `installed and are you \`az login\`'ed?): ${err.message}`,
     );
   }
 
+  // Codex review finding #8: resolveTools() must ALWAYS raise
+  // AdoUnavailableError on any failure (a raw `client.listTools()` SDK
+  // error must not escape as a generic Error) — every entry point below
+  // (ping, and callTool) relies on that uniform contract.
   let toolNameBySuffix;
   async function resolveTools() {
     if (toolNameBySuffix) return toolNameBySuffix;
-    const { tools } = await client.listTools();
+    let tools;
+    try {
+      ({ tools } = await client.listTools());
+    } catch (err) {
+      throw new AdoUnavailableError(`could not list Azure DevOps MCP tools: ${err.message}`);
+    }
     const map = {};
     for (const [key, suffix] of Object.entries(TOOL_SUFFIXES)) {
       const match = tools.find((t) => t.name === suffix || t.name.endsWith(`_${suffix}`) || t.name.endsWith(suffix));
@@ -166,14 +226,21 @@ export async function createAdoClient(config) {
     return map;
   }
 
+  // Codex review finding #8: resolveTools() is called INSIDE this try block
+  // (not before it, as a separate un-caught `await` ahead of the try) so a
+  // raw transport error surfacing from tool discovery is normalized to
+  // AdoUnavailableError exactly like a raw error from the tool CALL itself
+  // — previously a `resolveTools()` failure here bypassed this catch
+  // entirely and could reach the CLI as a generic "unexpected error" (exit
+  // 1) instead of the "ADO unreachable" contract (exit 2).
   async function callTool(key, args) {
-    const names = await resolveTools();
     try {
+      const names = await resolveTools();
       const result = await client.callTool({ name: names[key], arguments: args });
       return parseToolResult(result);
     } catch (err) {
-      if (err instanceof AdoUnavailableError) throw err;
-      throw new AdoUnavailableError(`Azure DevOps MCP call "${names[key]}" failed: ${err.message}`);
+      if (err instanceof AdoUnavailableError || err instanceof AdoToolResultError) throw err;
+      throw new AdoUnavailableError(`Azure DevOps MCP call "${key}" failed: ${err.message}`);
     }
   }
 
@@ -217,12 +284,21 @@ export async function createAdoClient(config) {
     },
 
     async getWorkItem(id) {
+      // Codex review finding #8: the previous bare `catch { return null }`
+      // treated EVERY failure — including a dead transport or a malformed
+      // response — as "not found", masking real outages behind a false
+      // "not found" from `promote --link`. Only AdoToolResultError (a
+      // genuine MCP-tool-level error response — the shape a missing/
+      // inaccessible work item actually surfaces as) resolves to null;
+      // everything else (AdoUnavailableError from callTool/parseToolResult/
+      // normalizeWorkItem) propagates per the adoClient.js contract.
       try {
         const data = await callTool('getWorkItem', { project, id, fields: REQUESTED_FIELDS });
         if (!data) return null;
         return normalizeWorkItem(data, config.org, project);
-      } catch {
-        return null; // "does not exist / no access" per adoClient.js contract
+      } catch (err) {
+        if (err instanceof AdoToolResultError) return null;
+        throw err;
       }
     },
 

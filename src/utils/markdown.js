@@ -3,6 +3,24 @@
 import DOMPurify from "dompurify";
 import { ANY_ID_CORE, CONFIG_HEADER_RE, resolvePrefix, serializeConfigHeader } from "./taskId.js";
 
+// TASK-019 (Codex review finding #13): quiet-logger toggle. parseMarkdown/
+// parseTask normally emit human-readable progress lines (console.log/warn)
+// for the UI's dev console — useful there, but they corrupt `ado-sync
+// ... --json` output, whose entire stdout contract is "parseable JSON,
+// nothing else". Defaults to false so the UI's logging behavior is
+// UNCHANGED; only scripts/ado-sync.mjs calls setQuietLogging(true), and only
+// when --json was passed.
+let quietLogging = false;
+export function setQuietLogging(enabled) {
+  quietLogging = !!enabled;
+}
+function qlog(...args) {
+  if (!quietLogging) console.log(...args);
+}
+function qwarn(...args) {
+  if (!quietLogging) console.warn(...args);
+}
+
 // Parse markdown content into tasks and config
 // `opts.fileName` is used ONLY as the fallback source for prefix derivation
 // when the `Task Prefix:` header field is entirely absent (see resolvePrefix).
@@ -26,7 +44,7 @@ function parseMarkdown(content, opts = {}) {
     config.lastTaskId = parseInt(configMatch[2], 10);
     const { prefix, warning } = resolvePrefix(configMatch[1], opts.fileName);
     config.taskPrefix = prefix;
-    if (warning) console.warn(warning);
+    if (warning) qwarn(warning);
   }
 
   // Parse config section
@@ -168,10 +186,10 @@ function parseMarkdown(content, opts = {}) {
   }
 
   // Parse tasks from configured columns
-  console.log('📊 Parsing tasks from columns:', config.columns.map(c => `${c.name}(${c.id})`).join(', '));
+  qlog('📊 Parsing tasks from columns:', config.columns.map(c => `${c.name}(${c.id})`).join(', '));
   config.columns.forEach((column) => {
     const columnTasks = parseTasksFromSection(content, column.name, column.id);
-    console.log(`📋 Column "${column.name}" (id: ${column.id}): found ${columnTasks.length} tasks`);
+    qlog(`📋 Column "${column.name}" (id: ${column.id}): found ${columnTasks.length} tasks`);
     tasks.push(...columnTasks);
   });
 
@@ -189,7 +207,7 @@ function parseMarkdown(content, opts = {}) {
       orphanedTasks.forEach((task) => {
         task.status = defaultColumn; // Move to first column
         task._wasOrphaned = true; // Mark for potential notification
-        console.log(`🔄 Rescued orphaned task ${task.id} from "${section.name}" to "${defaultColumn}"`);
+        qlog(`🔄 Rescued orphaned task ${task.id} from "${section.name}" to "${defaultColumn}"`);
       });
       tasks.push(...orphanedTasks);
     }
@@ -390,19 +408,19 @@ function parseTask(id, title, content, status) {
     // Accept any status value - it will be used to move the task to the correct section
     const parsedStatus = statusMatch[1].toLowerCase().trim();
 
-    console.log(
+    qlog(
       `🔍 Task ${id}: current section='${status}', parsed Status field='${parsedStatus}'`,
     );
 
     // If the status doesn't match the section we're in, mark it for reorganization
     if (parsedStatus !== status) {
-      console.log(
+      qlog(
         `✨ Task ${id} marked for reorganization: will move from '${status}' to '${parsedStatus}'`,
       );
       task._needsReorganization = true;
       task.status = parsedStatus; // Use the parsed status
     } else {
-      console.log(`✓ Task ${id} already in correct section '${status}'`);
+      qlog(`✓ Task ${id} already in correct section '${status}'`);
     }
   }
 
@@ -894,6 +912,7 @@ export const markdownParser = {
   scheduleStatusReorganization,
   deriveColumnId,
   normalizeForComparison,
+  setQuietLogging,
 };
 
 export {

@@ -26,6 +26,7 @@ import {
 } from './board.js';
 import { ensureNotesSkeleton, appendComments, extractContext, extractSummary } from './notes.js';
 import { getTaskEntry, setTaskEntry } from './syncState.js';
+import { AdoUnavailableError } from './adoClient.js';
 
 function sha256Hex(text) {
   return createHash('sha256').update(text, 'utf8').digest('hex');
@@ -161,7 +162,16 @@ export async function pull({ boardText, notesFiles, syncState, config, client, t
 
   const scopeIds = await resolveScopeIds(config, client);
 
-  const boardBlocksAtStart = findBlocks(boardText);
+  // Parsed once, up front, so every findBlocks/insertBlock call below shares
+  // the SAME configured column id map (finding #2) — a default/explicit
+  // column's id can legitimately differ from what deriveColumnId would
+  // re-derive from its display name (e.g. "todo" vs "to-do"), so section
+  // attribution and insertion MUST be resolved against `columns`, not
+  // against the header text alone.
+  const { config: boardConfig } = markdownParser.parseMarkdown(boardText, {});
+  const columns = boardConfig.columns;
+
+  const boardBlocksAtStart = findBlocks(boardText, columns);
   const boardAdoIds = boardBlocksAtStart
     .filter((b) => b.kind === 'ado')
     .map((b) => adoNumFromBlockId(b.id))
@@ -178,9 +188,6 @@ export async function pull({ boardText, notesFiles, syncState, config, client, t
       report.unknown.push(adoIdFor(num));
     }
   }
-
-  const { config: boardConfig } = markdownParser.parseMarkdown(boardText, {});
-  const columns = boardConfig.columns;
 
   let currentBoardText = boardText;
   let currentNotesFiles = { ...notesFiles };
@@ -221,13 +228,13 @@ export async function pull({ boardText, notesFiles, syncState, config, client, t
     if (!mappedStatus) {
       report.warnings.push(
         `unknown ADO state "${item.state}" for ${id} — ` +
-          (findBlocks(currentBoardText).some((b) => b.id === id)
+          (findBlocks(currentBoardText, columns).some((b) => b.id === id)
             ? 'existing card\'s Status left unchanged'
             : 'new card defaulted to todo'),
       );
     }
 
-    const blocks = findBlocks(currentBoardText);
+    const blocks = findBlocks(currentBoardText, columns);
     const existingBlock = blocks.find((b) => b.id === id);
 
     if (!existingBlock) {
@@ -291,10 +298,15 @@ export async function pull({ boardText, notesFiles, syncState, config, client, t
       // Never re-baseline adoState/localStatus on conflict — comments still
       // flow (already applied above), but state stays exactly as last known
       // so the conflict is reported again next run until explicitly resolved.
+      // `syncedAt` is intentionally NOT bumped either (Codex review finding
+      // #11) — it must keep recording the last SUCCESSFUL reconciliation, so
+      // the conflict report's "since <timestamp>" reflects when the two
+      // sides actually diverged, not the most recent failed attempt to
+      // reconcile them. lastCommentId still advances — comments are
+      // append-only and can never conflict.
       currentSyncState = setTaskEntry(currentSyncState, id, {
         ...entry,
         lastCommentId: newLastCommentId,
-        syncedAt: nowIso,
       });
     } else {
       currentSyncState = setTaskEntry(currentSyncState, id, {
@@ -354,7 +366,8 @@ function insertPromotedHeader(notesText, headerLine) {
 export async function promote({ boardText, notesFiles, syncState, config, client, taskId, options = {}, today }) {
   await client.ping();
 
-  const taskBlock = findBlocks(boardText).find((b) => b.id === taskId && b.kind === 'task');
+  const { config: boardConfig } = markdownParser.parseMarkdown(boardText, {});
+  const taskBlock = findBlocks(boardText, boardConfig.columns).find((b) => b.id === taskId && b.kind === 'task');
   if (!taskBlock) {
     throw new Error(`promote: task id "${taskId}" not found on the board`);
   }
@@ -410,7 +423,16 @@ export async function promote({ boardText, notesFiles, syncState, config, client
   const newSyncState = setTaskEntry(syncState, newId, {
     rev: item.rev,
     adoState: item.state,
-    localStatus: taskBlock.sectionId || parsedTask.status,
+    // Codex review finding #10: baseline from the parsed **Status** FIELD
+    // (parsedTask.status — authoritative per this project's "Status field
+    // wins over section" rule, and what parseTask already resolves to when
+    // the field is present), never from the derived section id. Using
+    // sectionId here meant a card under "## To Do" (derived id "to-do")
+    // would record localStatus "to-do" while its own **Status** field (and
+    // therefore push/pull's conflict comparisons) said "todo" — a spurious
+    // mismatch that manifests as an immediate false local change/conflict
+    // on the very next sync.
+    localStatus: parsedTask.status,
     syncedAt: nowIso,
     lastCommentId: 0,
     promotedFrom: taskId,
@@ -480,7 +502,12 @@ export async function push({ boardText, notesFiles, syncState, config, client, o
   // Gate FIRST, before any other client call or local mutation.
   await client.ping();
 
-  const allBlocks = findBlocks(boardText).filter((b) => b.kind === 'ado');
+  // Parsed once, up front, so section attribution stays in lockstep with
+  // pull()/promote() (finding #2 — see the comment there).
+  const { config: boardConfig } = markdownParser.parseMarkdown(boardText, {});
+  const columns = boardConfig.columns;
+
+  const allBlocks = findBlocks(boardText, columns).filter((b) => b.kind === 'ado');
   const candidates = onlyIds.length > 0 ? allBlocks.filter((b) => onlyIds.includes(b.id)) : allBlocks;
 
   const numericIds = candidates.map((b) => adoNumFromBlockId(b.id)).filter((n) => n !== null);
@@ -495,6 +522,15 @@ export async function push({ boardText, notesFiles, syncState, config, client, o
   let currentSyncState = syncState;
   const nowIso = now || new Date().toISOString();
 
+  // Finding #4: once the MCP transport itself dies mid-push (an
+  // AdoUnavailableError raised by any stage AFTER the initial ping() gate —
+  // i.e. after at least one remote write may already have landed), stop
+  // attempting further candidates rather than hammering a dead connection
+  // task after task. Whatever landed before the failure is already recorded
+  // in syncState (every stage only advances it after a confirmed response),
+  // so this is never reported as a clean no-op — see cmdPush's exit code 4.
+  let mcpDown = false;
+
   for (const candidateRef of candidates) {
     const id = candidateRef.id;
     const num = adoNumFromBlockId(id);
@@ -505,7 +541,7 @@ export async function push({ boardText, notesFiles, syncState, config, client, o
     }
 
     const entry = getTaskEntry(currentSyncState, id);
-    const block = findBlocks(currentBoardText).find((b) => b.id === id);
+    const block = findBlocks(currentBoardText, columns).find((b) => b.id === id);
     const currentLocalStatus = (readField(block.block, 'Status') || '').toLowerCase().trim();
 
     if (item.title && block.title !== item.title) {
@@ -525,25 +561,44 @@ export async function push({ boardText, notesFiles, syncState, config, client, o
     }
 
     if (decision.action === 'untracked') {
+      // Push requires a prior pull baseline — with no entry at all we don't
+      // even know whether comments would double-post something pull hasn't
+      // seen yet, so this is the one decision that skips EVERYTHING.
       report.skipped.push({ id, reason: 'untracked' });
       continue;
     }
+
     if (decision.action === 'noop') {
+      // Codex review finding #3/D2: report the state no-op, but do NOT
+      // `continue` — a context-only local edit (notes changed, Status
+      // didn't) must still be able to push its comment below.
       report.skipped.push({ id, reason: 'no-local-change' });
-      continue;
     }
+
     if (decision.action === 'conflict') {
+      // Never write EITHER side's state — but (finding #3/D2) comments are
+      // an append-only merge that can never conflict, so don't `continue`;
+      // fall through to the shared context-comment stage below.
       report.conflicts.push({
         id,
         localStatus: currentLocalStatus,
         adoState: item.state,
         since: entry ? entry.syncedAt : null,
       });
-      continue;
     }
 
     if (decision.action === 'take-ado') {
-      const mappedStatus = config.reverseStateMap[item.state] || currentLocalStatus;
+      const mappedStatus = config.reverseStateMap[item.state];
+      if (!mappedStatus) {
+        // Codex review finding #12: an ADO state absent from state_map's
+        // reverse map must NEVER silently fall back to "leave local Status
+        // as-is" while still reporting the conflict as resolved — that
+        // re-baselines syncState (so the conflict never resurfaces) without
+        // ever actually applying ADO's value anywhere. Require the state
+        // map fixed, or --take-local instead.
+        report.skipped.push({ id, reason: 'take-ado-unmapped-ado-state' });
+        continue;
+      }
       if (!dryRun) {
         const newBlockText = setField(block.block, 'Status', mappedStatus);
         currentBoardText = replaceBlockAt(currentBoardText, block, newBlockText);
@@ -556,26 +611,39 @@ export async function push({ boardText, notesFiles, syncState, config, client, o
         });
       }
       report.pushed.push(id);
-      continue;
+      if (dryRun) continue;
+      // fall through — comments still flow after a take-ado resolution too.
     }
 
-    // decision.action === 'push'
-    const targetAdoState = config.stateMap[currentLocalStatus];
-    if (!targetAdoState) {
-      report.skipped.push({ id, reason: 'unmapped-status' });
-      continue;
+    const isPushDecision = decision.action === 'push';
+    let targetAdoState = null;
+    if (isPushDecision) {
+      targetAdoState = config.stateMap[currentLocalStatus];
+      if (!targetAdoState) {
+        report.skipped.push({ id, reason: 'unmapped-status' });
+        continue;
+      }
+      if (dryRun) {
+        report.pushed.push(id);
+        continue;
+      }
     }
 
     if (dryRun) {
-      report.pushed.push(id);
+      // Only noop/conflict can still be here in dry-run mode (take-ado and
+      // push both `continue`d above) — compute-and-report only, touch
+      // nothing.
       continue;
     }
 
-    const isDoneTransition = targetAdoState === doneAdoState && (!entry || entry.adoState !== doneAdoState);
     let taskFailed = false;
+    const isDoneTransition =
+      isPushDecision && targetAdoState === doneAdoState && (!entry || entry.adoState !== doneAdoState);
 
-    // Stage 1: STATE (skipped for done-transitions — deferred to stage 4).
-    if (!isDoneTransition) {
+    // Stage 1: STATE — only for a genuine 'push' resolution, and deferred
+    // to stage 4 for a done-transition (so the summary comment lands before
+    // ADO can lock a closed item out from under it).
+    if (isPushDecision && !isDoneTransition) {
       try {
         const updated = await client.updateWorkItemFields(num, { 'System.State': targetAdoState });
         currentSyncState = setTaskEntry(currentSyncState, id, {
@@ -586,12 +654,16 @@ export async function push({ boardText, notesFiles, syncState, config, client, o
           syncedAt: nowIso,
         });
       } catch (err) {
-        report.failed.push({ id, stage: 'state', error: err.message });
+        report.failed.push({ id, stage: 'state', error: err.message, unavailable: err instanceof AdoUnavailableError });
         taskFailed = true;
+        if (err instanceof AdoUnavailableError) mcpDown = true;
       }
     }
 
-    // Stage 2: CONTEXT comment (idempotent via content hash).
+    // Stage 2: CONTEXT comment (idempotent via content hash) — runs for
+    // noop/conflict/take-ado/push alike (finding #3/D2): comments are
+    // append-only and can never conflict, so the STATE write is the only
+    // thing ever suppressed above.
     if (!taskFailed) {
       const notesText = currentNotesFiles[id] || '';
       const context = extractContext(notesText);
@@ -611,8 +683,9 @@ export async function push({ boardText, notesFiles, syncState, config, client, o
             });
             recordCommentPushed(report, id);
           } catch (err) {
-            report.failed.push({ id, stage: 'context', error: err.message });
+            report.failed.push({ id, stage: 'context', error: err.message, unavailable: err instanceof AdoUnavailableError });
             taskFailed = true;
+            if (err instanceof AdoUnavailableError) mcpDown = true;
           }
         }
       }
@@ -620,20 +693,42 @@ export async function push({ boardText, notesFiles, syncState, config, client, o
 
     // Stage 3: SUMMARY (done-transitions only). Missing/placeholder summary
     // is reported but does NOT fail the task — stage 4 still runs.
+    //
+    // Codex review finding #5: record `pushedSummaryHash` (+ the comment
+    // id, alongside pushedCommentIds) the moment the post is CONFIRMED, and
+    // check it before posting again. Without this, a done-state failure at
+    // stage 4 (comment landed, state transition didn't) means the very next
+    // push re-extracts the same `## Summary` and posts it a second time —
+    // this hash-guard makes that retry idempotent exactly like the
+    // context-comment guard above, instead of double-posting.
     if (!taskFailed && isDoneTransition) {
       const notesText = currentNotesFiles[id] || '';
       const summary = extractSummary(notesText);
+      const entryNow = getTaskEntry(currentSyncState, id) || entry || {};
       if (!summary) {
         report.needsSummary.push(id);
       } else {
-        try {
-          const summaryLines = [`[task-memory] done summary`, '', summary];
-          if (config.repoUrl) summaryLines.push('', `${config.repoUrl} (notes/${id}.md)`);
-          await client.addComment(num, summaryLines.join('\n'));
-          recordCommentPushed(report, id);
-        } catch (err) {
-          report.failed.push({ id, stage: 'summary', error: err.message });
-          taskFailed = true;
+        const summaryHash = sha256Hex(summary);
+        if (entryNow.pushedSummaryHash === summaryHash) {
+          // Already posted this exact summary in a prior run (whose failure
+          // must therefore have happened at stage 4, not here) — do not
+          // double-post; proceed straight to retrying the state transition.
+        } else {
+          try {
+            const summaryLines = [`[task-memory] done summary`, '', summary];
+            if (config.repoUrl) summaryLines.push('', `${config.repoUrl} (notes/${id}.md)`);
+            const { id: commentId } = await client.addComment(num, summaryLines.join('\n'));
+            currentSyncState = setTaskEntry(currentSyncState, id, {
+              ...entryNow,
+              pushedSummaryHash: summaryHash,
+              pushedCommentIds: [...(entryNow.pushedCommentIds || []), commentId],
+            });
+            recordCommentPushed(report, id);
+          } catch (err) {
+            report.failed.push({ id, stage: 'summary', error: err.message, unavailable: err instanceof AdoUnavailableError });
+            taskFailed = true;
+            if (err instanceof AdoUnavailableError) mcpDown = true;
+          }
         }
       }
     }
@@ -650,14 +745,17 @@ export async function push({ boardText, notesFiles, syncState, config, client, o
           syncedAt: nowIso,
         });
       } catch (err) {
-        report.failed.push({ id, stage: 'done-state', error: err.message });
+        report.failed.push({ id, stage: 'done-state', error: err.message, unavailable: err instanceof AdoUnavailableError });
         taskFailed = true;
+        if (err instanceof AdoUnavailableError) mcpDown = true;
       }
     }
 
-    if (!taskFailed) {
+    if (!taskFailed && isPushDecision) {
       report.pushed.push(id);
     }
+
+    if (mcpDown) break;
   }
 
   return {

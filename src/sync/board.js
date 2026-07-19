@@ -19,6 +19,37 @@ const NEXT_SECTION_SRC = '^(?:###[ \\t]+' + ANY_ID_CORE + '|##[ \\t])';
 const SECTION_HEADING_RE = /^##[ \t]+(.+?)[ \t]*$/gm;
 
 /**
+ * Resolve a `## <header text>` section heading to its canonical column id,
+ * preferring the CONFIGURED column's explicit id over a freshly-derived one
+ * (Codex review finding #2). markdown.js's default/explicit column config
+ * can give a column an id that does NOT equal `deriveColumnId(name)` — e.g.
+ * the stock default column is `{ name: "📝 To Do", id: "todo" }`, but
+ * `deriveColumnId("📝 To Do")` is `"to-do"`. Blindly re-deriving the id from
+ * the header text (as this file used to) silently disagrees with the
+ * configured id, so `insertBlock(boardText, 'todo', ...)` could never find
+ * the existing "## To Do" section and would create a duplicate one at EOF.
+ *
+ * Matching is done by comparing CANONICAL NAMES (deriveColumnId of both the
+ * header text and each configured column's name/originalHeader) — never by
+ * comparing ids directly — because a hand-written explicit id
+ * (`**Columns**: Waiting (blocked)`) is deliberately allowed to differ from
+ * the derived form. Falls back to the raw derived id when no configured
+ * column matches (ad-hoc/orphaned sections keep working exactly as before).
+ *
+ * @param {string} headerText - the `## ` heading's text (already trimmed)
+ * @param {{id: string, name?: string, originalHeader?: string}[]} columns
+ * @returns {string}
+ */
+export function resolveSectionId(headerText, columns = []) {
+  const canonical = deriveColumnId(headerText);
+  for (const col of columns || []) {
+    const colCanonical = deriveColumnId(col.originalHeader || col.name || '');
+    if (colCanonical === canonical) return col.id;
+  }
+  return canonical;
+}
+
+/**
  * @typedef {Object} Block
  * @property {string} id
  * @property {'ado'|'task'} kind
@@ -34,13 +65,18 @@ const SECTION_HEADING_RE = /^##[ \t]+(.+?)[ \t]*$/gm;
  * like the Python hook's NEXT_SECTION_RE: the next `### <any-id>` heading OR
  * the next `## ` section heading, whichever comes first.
  * @param {string} boardText
+ * @param {{id: string, name?: string, originalHeader?: string}[]} [columns] -
+ *   parsed column config (markdownParser.parseMarkdown(...).config.columns).
+ *   Optional for backward compatibility, but callers that care about
+ *   accurate `sectionId` attribution against a board with default/explicit
+ *   column ids should always pass it (see resolveSectionId, finding #2).
  * @returns {Block[]}
  */
-export function findBlocks(boardText) {
+export function findBlocks(boardText, columns = []) {
   const headingMatches = [...boardText.matchAll(HEADING_RE)];
   const sectionHeadings = [...boardText.matchAll(SECTION_HEADING_RE)].map((m) => ({
     index: m.index,
-    id: deriveColumnId(m[1].trim()),
+    id: resolveSectionId(m[1].trim(), columns),
   }));
 
   const nextSectionRe = new RegExp(NEXT_SECTION_SRC, 'gm');
@@ -90,7 +126,17 @@ function fieldRegex(name) {
   // eats the space that separates the value from a following " | " — a
   // real bug in an earlier version of this function that silently
   // corrupted formatting (`2 | **Status**` -> `2| **Status**`) on every edit.
-  return new RegExp('(\\*\\*' + name + '\\*\\*:[ \\t]*)([^|\\r\\n]*?)(?=[ \\t]*(?:\\||$))', 'm');
+  //
+  // Codex review (finding #9): the leading `(?:^|(?<=\| ))` anchor requires
+  // the field marker to sit at the START of a metadata line or immediately
+  // after the canonical ` | ` cohabitation separator — never mid-sentence.
+  // Without it, a description/body paragraph that happens to mention e.g.
+  // "**ADO**: see the ticket" in prose would be misread as the ADO metadata
+  // field (and overwritten by setField, or used as an insertion anchor by
+  // the sibling logic below). It's a zero-width lookbehind, so group
+  // numbering for readField/setField (group 1 = "**Name**: ", group 2 =
+  // value) is unchanged.
+  return new RegExp('(?:^|(?<=\\| ))(\\*\\*' + name + '\\*\\*:[ \\t]*)([^|\\r\\n]*?)(?=[ \\t]*(?:\\||$))', 'm');
 }
 
 /**
@@ -125,7 +171,12 @@ export function setField(block, name, value) {
   const group = FIELD_GROUPS[name] || [name];
   for (const sibling of group) {
     if (sibling === name) continue;
-    const sibRe = new RegExp('^([^\\r\\n]*\\*\\*' + sibling + '\\*\\*:[^\\r\\n]*)$', 'm');
+    // Same line-start/canonical-separator anchor as fieldRegex (finding
+    // #9) — `(?:^|\| )` must immediately precede the sibling's marker, so a
+    // prose line that happens to contain "**Sprint**:" mid-sentence is
+    // never mistaken for the real metadata line and corrupted by an
+    // appended " | **Name**: value".
+    const sibRe = new RegExp('^([^\\r\\n]*?(?:^|\\| )\\*\\*' + sibling + '\\*\\*:[^\\r\\n]*)$', 'm');
     const sibMatch = sibRe.exec(block);
     if (sibMatch) {
       const lineStart = sibMatch.index;
@@ -184,15 +235,18 @@ function titleCaseFromId(id) {
 
 /**
  * Append `blockText` at the end of the `## ` section whose canonical id
- * (deriveColumnId) matches `sectionId`. If no such section exists, creates
- * `## <Title Case>` at end-of-file and reports it (surgical — never touches
- * any other section).
+ * (resolveSectionId — the CONFIGURED column id, not a blindly re-derived
+ * one; see finding #2) matches `sectionId`. If no such section exists,
+ * creates `## <Title Case>` at end-of-file and reports it (surgical — never
+ * touches any other section).
  *
  * @param {string} boardText
  * @param {string} sectionId
  * @param {string} blockText - full block text INCLUDING its `### id | title` heading
  * @param {{id: string, name?: string, originalHeader?: string}[]} [columns] -
- *   parsed column config (for the display name when creating a missing section)
+ *   parsed column config — used BOTH to match `sectionId` against existing
+ *   `## ` headers (resolveSectionId) and for the display name when creating
+ *   a missing section.
  * @returns {{ boardText: string, created: boolean, warning: string|null }}
  */
 export function insertBlock(boardText, sectionId, blockText, columns = []) {
@@ -200,7 +254,7 @@ export function insertBlock(boardText, sectionId, blockText, columns = []) {
     index: m.index,
     matchEnd: m.index + m[0].length,
     name: m[1].trim(),
-    id: deriveColumnId(m[1].trim()),
+    id: resolveSectionId(m[1].trim(), columns),
   }));
 
   const ensuredBlockText = blockText.endsWith('\n') ? blockText : blockText + '\n';
