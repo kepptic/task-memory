@@ -37,6 +37,7 @@ import {
   setTaskEntry,
   removeTaskEntry,
 } from '../src/sync/syncState.js';
+import { pull, decidePull, decidePush } from '../src/sync/engine.js';
 
 // =============================================================================
 // config.js — cases 15-19
@@ -452,4 +453,284 @@ test('syncState: parse/serialize round-trip, migrate on missing/garbage input', 
 
   const removed = removeTaskEntry(state, 'ADO-12345');
   assert.equal(getTaskEntry(removed, 'ADO-12345'), null);
+});
+
+// =============================================================================
+// engine.js — decidePull / decidePush conflict rule (§6.3), direct unit tests
+// (not separately numbered in PLAN-ado.md §9.2; full flows covered by
+// pull/push/conflict integration cases below)
+// =============================================================================
+
+test('decidePull: entry absent -> apply-ado (first sync, nothing to conflict with)', () => {
+  assert.deepEqual(decidePull(null, 'Active', 'todo'), { action: 'apply-ado' });
+});
+
+test('decidePull: ado changed, local unchanged -> apply-ado; neither changed -> noop; both changed -> conflict', () => {
+  const entry = { adoState: 'New', localStatus: 'todo' };
+  assert.equal(decidePull(entry, 'Active', 'todo').action, 'apply-ado');
+  assert.equal(decidePull(entry, 'New', 'todo').action, 'noop');
+  assert.equal(decidePull(entry, 'Active', 'in-progress').action, 'conflict');
+});
+
+test('decidePush: entry absent -> untracked; local-only change -> push; ado-only change -> noop; both -> conflict', () => {
+  assert.equal(decidePush(null, 'New', 'todo').action, 'untracked');
+  const entry = { adoState: 'New', localStatus: 'todo' };
+  assert.equal(decidePush(entry, 'New', 'in-progress').action, 'push'); // local changed, ado didn't
+  assert.equal(decidePush(entry, 'Active', 'todo').action, 'noop'); // ado changed, local didn't -> nothing to push (that's pull's job)
+  assert.equal(decidePush(entry, 'New', 'todo').action, 'noop'); // neither changed
+  assert.equal(decidePush(entry, 'Active', 'in-progress').action, 'conflict'); // both changed
+});
+
+// =============================================================================
+// engine.pull — cases 24-31
+// =============================================================================
+
+const BASE_BOARD = `# Kanban Board
+
+<!-- Config: Last Task ID: 0 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+
+---
+
+## To Do
+
+## In Progress
+
+## Done
+
+`;
+
+function baseConfig(overrides = {}) {
+  return loadAdoConfig({ ado: { org: 'kepptic', project: 'task-memory', ...overrides } }).config;
+}
+
+test('pull (24): empty board + 2 current-sprint items -> 2 blocks in correct sections, notes skeletons + comments, syncState written', async () => {
+  const client = createMockAdoClient({
+    iterations: [{ id: 'iter1', name: 'Sprint 1', path: 'proj\\Sprint 1', timeFrame: 'current' }],
+    iterationItems: { iter1: [101, 102] },
+    workItems: {
+      101: { id: 101, rev: 1, title: 'First synced item', state: 'New', type: 'Task', assignee: '', iterationPath: 'proj\\Sprint 1', priority: null, url: 'https://dev.azure.com/o/p/_workitems/edit/101' },
+      102: { id: 102, rev: 1, title: 'Second synced item', state: 'Active', type: 'Task', assignee: 'Alice', iterationPath: 'proj\\Sprint 1', priority: 2, url: 'https://dev.azure.com/o/p/_workitems/edit/102' },
+    },
+    comments: { 101: [{ id: 1, author: 'Alice', createdDate: '2026-07-01T00:00:00Z', text: 'Initial note' }], 102: [] },
+  });
+  const config = baseConfig({ scope: 'current-sprint' });
+
+  const result = await pull({ boardText: BASE_BOARD, notesFiles: {}, syncState: emptySyncState(), config, client, today: '2026-07-19' });
+
+  const blocks = findBlocks(result.boardText);
+  const b101 = blocks.find((b) => b.id === 'ADO-101');
+  const b102 = blocks.find((b) => b.id === 'ADO-102');
+  assert.ok(b101 && b102, 'both items materialized as blocks');
+  assert.equal(b101.sectionId, 'to-do'); // New -> todo
+  assert.equal(b102.sectionId, 'in-progress'); // Active -> in-progress
+
+  assert.deepEqual(result.report.created.sort(), ['ADO-101', 'ADO-102']);
+  assert.deepEqual(result.report.notesCreated.sort(), ['ADO-101', 'ADO-102']);
+  assert.equal(result.report.commentsAppended['ADO-101'], 1);
+  assert.ok(result.notesFiles['ADO-101'].includes('Alice'));
+  assert.ok(result.notesFiles['ADO-101'].includes('Initial note'));
+
+  const entry101 = getTaskEntry(result.syncState, 'ADO-101');
+  assert.equal(entry101.adoState, 'New');
+  assert.equal(entry101.localStatus, 'todo');
+  assert.equal(entry101.lastCommentId, 1);
+  const entry102 = getTaskEntry(result.syncState, 'ADO-102');
+  assert.equal(entry102.localStatus, 'in-progress');
+});
+
+test('pull (25): re-pull with no ADO changes -> changed:false, board byte-identical', async () => {
+  const fixture = {
+    iterations: [{ id: 'iter1', name: 'Sprint 1', path: 'p\\S1', timeFrame: 'current' }],
+    iterationItems: { iter1: [201] },
+    workItems: { 201: { id: 201, rev: 1, title: 'Stable item', state: 'New', type: 'Task', assignee: '', iterationPath: 'p\\S1', priority: null, url: 'https://x/201' } },
+    comments: { 201: [] },
+  };
+  const config = baseConfig({ scope: 'current-sprint' });
+
+  const first = await pull({ boardText: BASE_BOARD, notesFiles: {}, syncState: emptySyncState(), config, client: createMockAdoClient(fixture), today: '2026-07-19' });
+  assert.equal(first.changed, true);
+
+  const second = await pull({
+    boardText: first.boardText,
+    notesFiles: first.notesFiles,
+    syncState: first.syncState,
+    config,
+    client: createMockAdoClient(fixture),
+    today: '2026-07-19',
+  });
+
+  assert.equal(second.changed, false);
+  assert.equal(second.boardText, first.boardText);
+  assert.deepEqual(second.report.created, []);
+  assert.deepEqual(second.report.unchanged, ['ADO-201']);
+});
+
+test('pull (26): ADO state change updates Status in place; block body byte-identical elsewhere', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-102 | Existing synced item
+**Priority**: 2 | **Status**: in-progress | **Assigned**: Alice
+**Created**: 2026-07-01
+**Sprint**: Sprint 1 | **ADO**: https://dev.azure.com/org/proj/_workitems/edit/102
+
+Some description text.
+
+**Subtasks**:
+- [x] one
+- [ ] two
+
+`)}`;
+
+  const client = createMockAdoClient({
+    workItems: {
+      102: { id: 102, rev: 5, title: 'Existing synced item', state: 'Closed', type: 'Task', assignee: 'Alice', iterationPath: 'Sprint 1', priority: 2, url: 'https://dev.azure.com/org/proj/_workitems/edit/102' },
+    },
+    comments: { 102: [] },
+  });
+  const config = baseConfig({ scope: { wiql: 'irrelevant' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-102', {
+    rev: 4, adoState: 'Active', localStatus: 'in-progress', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0,
+  });
+
+  const result = await pull({ boardText, notesFiles: {}, syncState, config, client, today: '2026-07-19' });
+
+  const block = findBlocks(result.boardText).find((b) => b.id === 'ADO-102');
+  assert.equal(readField(block.block, 'Status'), 'done');
+  assert.ok(block.block.includes('Some description text.'));
+  assert.ok(block.block.includes('- [x] one'));
+  assert.ok(block.block.includes('- [ ] two'));
+
+  const stripStatus = (s) => s.replace(/\*\*Status\*\*:[ \t]*[^|\r\n]*/, '**Status**:');
+  const originalBlock = findBlocks(boardText).find((b) => b.id === 'ADO-102').block;
+  assert.equal(stripStatus(block.block), stripStatus(originalBlock));
+  assert.deepEqual(result.report.updated, ['ADO-102']);
+});
+
+test('pull (27): new comment appended once, [task-memory]-marked comment skipped, lastCommentId advances', async () => {
+  const client = createMockAdoClient({
+    workItems: { 300: { id: 300, rev: 1, title: 'Commented item', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+    comments: {
+      300: [
+        { id: 1, author: 'Alice', createdDate: '2026-07-01T00:00:00Z', text: 'first (already seen)' },
+        { id: 2, author: 'ado-sync-bot', createdDate: '2026-07-19T00:00:00Z', text: '[task-memory] context update abcd1234\n\npushed context' },
+        { id: 3, author: 'Alice', createdDate: '2026-07-19T01:00:00Z', text: 'Please review' },
+      ],
+    },
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-300', {
+    rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 1,
+  });
+  const notesFiles = { 'ADO-300': '# ADO-300 Notes — Commented item\n\n## Summary\n\ncontent\n' };
+
+  const result = await pull({ boardText: BASE_BOARD, notesFiles, syncState, config, client, today: '2026-07-19' });
+
+  const notes = result.notesFiles['ADO-300'];
+  assert.ok(notes.includes('Please review'));
+  assert.ok(!notes.includes('[task-memory] context update'));
+  assert.equal(result.report.commentsAppended['ADO-300'], 1);
+  assert.equal(getTaskEntry(result.syncState, 'ADO-300').lastCommentId, 3); // advances past the skipped marker comment too
+});
+
+test('pull (28): board with legacy TASK + prefixed TASK + ADO card -> only the ADO card is touched', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### TASK-042 | Legacy local task
+**Status**: in-progress
+
+**Subtasks**:
+- [ ] untouched
+
+### TASK-GR-9 | Prefixed local task
+**Status**: in-progress
+
+### ADO-500 | Synced item
+**Status**: todo
+
+`)}`;
+
+  const client = createMockAdoClient({
+    workItems: { 500: { id: 500, rev: 2, title: 'Synced item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+    comments: { 500: [] },
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  const result = await pull({ boardText, notesFiles: {}, syncState: emptySyncState(), config, client, today: '2026-07-19' });
+
+  const before = findBlocks(boardText);
+  const after = findBlocks(result.boardText);
+  assert.equal(after.find((b) => b.id === 'TASK-042').block, before.find((b) => b.id === 'TASK-042').block);
+  assert.equal(after.find((b) => b.id === 'TASK-GR-9').block, before.find((b) => b.id === 'TASK-GR-9').block);
+  assert.equal(readField(after.find((b) => b.id === 'ADO-500').block, 'Status'), 'in-progress');
+  assert.deepEqual(result.report.updated, ['ADO-500']);
+});
+
+test('pull (29): hand-written ADO-777 not in ADO -> reported unknown, block untouched', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-777 | Hand-typed, ADO doesn't know about it
+**Status**: in-progress
+
+`)}`;
+  const client = createMockAdoClient({ workItems: {}, comments: {} });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  const result = await pull({ boardText, notesFiles: {}, syncState: emptySyncState(), config, client, today: '2026-07-19' });
+
+  assert.deepEqual(result.report.unknown, ['ADO-777']);
+  const before = findBlocks(boardText).find((b) => b.id === 'ADO-777').block;
+  const after = findBlocks(result.boardText).find((b) => b.id === 'ADO-777').block;
+  assert.equal(after, before);
+});
+
+test('pull (30a): unknown ADO state on a NEW item -> lands todo + warning reported', async () => {
+  const client = createMockAdoClient({
+    workItems: { 900: { id: 900, rev: 1, title: 'Weird state item', state: 'SomeCustomState', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+    comments: { 900: [] },
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  const result = await pull({ boardText: BASE_BOARD, notesFiles: {}, syncState: emptySyncState(), config, client, today: '2026-07-19' });
+
+  const block = findBlocks(result.boardText).find((b) => b.id === 'ADO-900');
+  assert.equal(block.sectionId, 'to-do');
+  assert.equal(readField(block.block, 'Status'), 'todo');
+  assert.ok(result.report.warnings.some((w) => /unknown ADO state/.test(w) && /ADO-900/.test(w)));
+});
+
+test('pull (30b): unknown ADO state on an EXISTING item -> Status left unchanged + warning reported', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-901 | Existing item
+**Status**: in-progress
+
+`)}`;
+  const client = createMockAdoClient({
+    workItems: { 901: { id: 901, rev: 2, title: 'Existing item', state: 'SomeCustomState', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+    comments: { 901: [] },
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-901', { rev: 1, adoState: 'Active', localStatus: 'in-progress', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const result = await pull({ boardText, notesFiles: {}, syncState, config, client, today: '2026-07-19' });
+
+  const block = findBlocks(result.boardText).find((b) => b.id === 'ADO-901');
+  assert.equal(readField(block.block, 'Status'), 'in-progress');
+  assert.ok(result.report.warnings.some((w) => /unknown ADO state/.test(w) && /ADO-901/.test(w)));
+});
+
+test('pull (31): unavailable client -> AdoUnavailableError, zero writes, zero calls after ping', async () => {
+  const client = createMockAdoClient({ unavailable: true });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  await assert.rejects(
+    () => pull({ boardText: BASE_BOARD, notesFiles: {}, syncState: emptySyncState(), config, client, today: '2026-07-19' }),
+    AdoUnavailableError,
+  );
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0].method, 'ping');
 });

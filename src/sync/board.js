@@ -84,8 +84,13 @@ const FIELD_GROUPS = {
 
 function fieldRegex(name) {
   // Value runs until the next ' | ' field separator, end of line, or EOF —
-  // mirrors the read conventions already used across markdown.js.
-  return new RegExp('(\\*\\*' + name + '\\*\\*:[ \\t]*)([^|\\r\\n]*)');
+  // mirrors the read conventions already used across markdown.js. Group 2
+  // is non-greedy with a lookahead (rather than consuming) any trailing
+  // whitespace before the boundary, so setField's replacement span never
+  // eats the space that separates the value from a following " | " — a
+  // real bug in an earlier version of this function that silently
+  // corrupted formatting (`2 | **Status**` -> `2| **Status**`) on every edit.
+  return new RegExp('(\\*\\*' + name + '\\*\\*:[ \\t]*)([^|\\r\\n]*?)(?=[ \\t]*(?:\\||$))', 'm');
 }
 
 /**
@@ -99,8 +104,9 @@ export function readField(block, name) {
 
 /**
  * Set a `**Name**: value` field in a block, editing only that field's value
- * span if it already exists (rest of the line/block is byte-identical).
- * If absent, appends onto a sibling field's line (same FIELD_GROUPS
+ * span if it already exists (rest of the line/block — including whatever
+ * whitespace/separators surround the value — is byte-identical). If
+ * absent, appends onto a sibling field's line (same FIELD_GROUPS
  * cohabitation as generateMarkdown), or — if no sibling exists either —
  * inserts a brand-new line immediately after the heading line.
  */
@@ -108,6 +114,9 @@ export function setField(block, name, value) {
   const existing = fieldRegex(name);
   const m = existing.exec(block);
   if (m) {
+    // m[0] ends exactly at the end of the value (group 2) — the lookahead
+    // is zero-width, so any trailing whitespace before '|'/EOL is left
+    // untouched in `after`.
     const before = block.slice(0, m.index);
     const after = block.slice(m.index + m[0].length);
     return before + m[1] + value + after;
@@ -140,10 +149,29 @@ export function setField(block, name, value) {
  * full board text. `blockRef` is one of findBlocks()'s returned objects.
  */
 export function setHeading(boardText, blockRef, newId, newTitle) {
-  const lineEnd = boardText.indexOf('\n', blockRef.start);
-  const end = lineEnd === -1 ? boardText.length : lineEnd;
-  const newHeadingLine = `### ${newId} | ${newTitle}`;
-  return boardText.slice(0, blockRef.start) + newHeadingLine + boardText.slice(end);
+  return replaceBlockAt(boardText, blockRef, setBlockHeading(blockRef.block, newId, newTitle));
+}
+
+/**
+ * Rewrite just the heading line of a standalone block string (the string
+ * returned as `.block` by findBlocks — heading line + body). Pure,
+ * operates without needing the surrounding board text; used by the sync
+ * engine to build up a fully-edited block before splicing it back in once
+ * via replaceBlockAt.
+ */
+export function setBlockHeading(blockText, newId, newTitle) {
+  const lineEnd = blockText.indexOf('\n');
+  const end = lineEnd === -1 ? blockText.length : lineEnd;
+  return `### ${newId} | ${newTitle}` + blockText.slice(end);
+}
+
+/**
+ * Splice a fully-edited block's text back into the board at the position
+ * recorded by `blockRef` (from findBlocks). Everything outside
+ * [blockRef.start, blockRef.end) is untouched.
+ */
+export function replaceBlockAt(boardText, blockRef, newBlockText) {
+  return boardText.slice(0, blockRef.start) + newBlockText + boardText.slice(blockRef.end);
 }
 
 function titleCaseFromId(id) {
