@@ -16,6 +16,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as pathJoin } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { loadAdoConfig, invertStateMap, normalizeOrgName, DEFAULT_STATE_MAP } from '../src/sync/config.js';
 import { createMockAdoClient, AdoUnavailableError } from '../src/sync/adoClient.js';
@@ -1144,4 +1149,145 @@ test('promote (45): the config header (task id counter) is byte-identical after 
   const headerBefore = PROMOTE_BOARD.match(/<!-- Config:.*-->/)[0];
   const headerAfter = result.boardText.match(/<!-- Config:.*-->/)[0];
   assert.equal(headerAfter, headerBefore);
+});
+
+// =============================================================================
+// CLI e2e — cases 46-48 (spawns scripts/ado-sync.mjs with --from-json —
+// full offline end-to-end, zero network, zero MCP)
+// =============================================================================
+
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const CLI_SCRIPT = pathJoin(REPO_ROOT, 'scripts', 'ado-sync.mjs');
+const FIXTURES_DIR = pathJoin(REPO_ROOT, 'tests', 'fixtures', 'ado');
+
+function setupTempProject({ tasksMd, adoConfig, syncState, notes = {} }) {
+  const dir = mkdtempSync(pathJoin(tmpdir(), 'ado-sync-cli-'));
+  mkdirSync(pathJoin(dir, 'planning', 'notes'), { recursive: true });
+  writeFileSync(pathJoin(dir, '.task-memory.json'), JSON.stringify({ ado: adoConfig }, null, 2));
+  writeFileSync(pathJoin(dir, 'planning', 'tasks.md'), tasksMd);
+  if (syncState) {
+    writeFileSync(pathJoin(dir, 'planning', '.ado-sync.json'), JSON.stringify(syncState, null, 2));
+  }
+  for (const [id, text] of Object.entries(notes)) {
+    writeFileSync(pathJoin(dir, 'planning', 'notes', `${id}.md`), text);
+  }
+  return dir;
+}
+
+function runCli(dir, args) {
+  try {
+    const stdout = execFileSync('node', [CLI_SCRIPT, ...args], { cwd: dir, encoding: 'utf8' });
+    return { code: 0, stdout, stderr: '' };
+  } catch (err) {
+    return { code: err.status, stdout: err.stdout?.toString() || '', stderr: err.stderr?.toString() || '' };
+  }
+}
+
+test('CLI (46): pull writes 3 files atomically; --dry-run writes none', async () => {
+  const dir = setupTempProject({
+    tasksMd: BASE_BOARD,
+    adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } },
+  });
+  try {
+    const tasksPath = pathJoin(dir, 'planning', 'tasks.md');
+    const notesPath = pathJoin(dir, 'planning', 'notes', 'ADO-1001.md');
+    const syncStatePath = pathJoin(dir, 'planning', '.ado-sync.json');
+
+    // --dry-run first: nothing should land.
+    const dryRun = runCli(dir, ['pull', '--dry-run', '--from-json', pathJoin(FIXTURES_DIR, 'pull-basic.json')]);
+    assert.equal(dryRun.code, 0);
+    assert.equal(readFileSync(tasksPath, 'utf8'), BASE_BOARD);
+    assert.equal(existsSync(notesPath), false);
+    assert.equal(existsSync(syncStatePath), false);
+
+    // Real run: all 3 files land.
+    const real = runCli(dir, ['pull', '--from-json', pathJoin(FIXTURES_DIR, 'pull-basic.json')]);
+    assert.equal(real.code, 0);
+    assert.ok(readFileSync(tasksPath, 'utf8').includes('ADO-1001'));
+    assert.equal(existsSync(notesPath), true);
+    assert.ok(readFileSync(notesPath, 'utf8').includes('ADO-1001 Notes'));
+    assert.equal(existsSync(syncStatePath), true);
+    const syncState = JSON.parse(readFileSync(syncStatePath, 'utf8'));
+    assert.ok(syncState.tasks['ADO-1001']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CLI (47): exit codes 0 (ok), 2 (ADO unreachable, clean no-op), 3 (conflicts pending)', async () => {
+  // 0 — clean pull.
+  const okDir = setupTempProject({ tasksMd: BASE_BOARD, adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } } });
+  try {
+    const result = runCli(okDir, ['pull', '--from-json', pathJoin(FIXTURES_DIR, 'pull-basic.json')]);
+    assert.equal(result.code, 0);
+  } finally {
+    rmSync(okDir, { recursive: true, force: true });
+  }
+
+  // 2 — ADO unreachable, zero files touched.
+  const unavailableDir = setupTempProject({ tasksMd: BASE_BOARD, adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } } });
+  try {
+    const tasksPath = pathJoin(unavailableDir, 'planning', 'tasks.md');
+    const result = runCli(unavailableDir, ['pull', '--from-json', pathJoin(FIXTURES_DIR, 'unavailable.json')]);
+    assert.equal(result.code, 2);
+    assert.equal(readFileSync(tasksPath, 'utf8'), BASE_BOARD);
+    assert.equal(existsSync(pathJoin(unavailableDir, 'planning', '.ado-sync.json')), false);
+  } finally {
+    rmSync(unavailableDir, { recursive: true, force: true });
+  }
+
+  // 3 — push conflict pending.
+  const conflictTasksMd = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-2001 | Conflicted item
+**Status**: done
+
+`)}`;
+  const conflictDir = setupTempProject({
+    tasksMd: conflictTasksMd,
+    adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } },
+    syncState: { version: 1, tasks: { 'ADO-2001': { rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 } } },
+  });
+  try {
+    const result = runCli(conflictDir, ['push', '--from-json', pathJoin(FIXTURES_DIR, 'conflict.json')]);
+    assert.equal(result.code, 3);
+  } finally {
+    rmSync(conflictDir, { recursive: true, force: true });
+  }
+});
+
+test('CLI (48): status runs fully offline, with no client at all (no --from-json)', async () => {
+  const dir = setupTempProject({
+    tasksMd: `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-3001 | Untracked item
+**Status**: in-progress
+
+`)}`,
+    adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } },
+  });
+  try {
+    const result = runCli(dir, ['status', '--json']);
+    assert.equal(result.code, 0);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.items.length, 1);
+    assert.equal(payload.items[0].id, 'ADO-3001');
+    assert.equal(payload.items[0].status, 'untracked');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CLI: ADO sync not configured -> exit 0, clean message', async () => {
+  const dir = mkdtempSync(pathJoin(tmpdir(), 'ado-sync-cli-'));
+  try {
+    mkdirSync(pathJoin(dir, 'planning'), { recursive: true });
+    writeFileSync(pathJoin(dir, '.task-memory.json'), JSON.stringify({ planning_dir: 'planning' }, null, 2));
+    writeFileSync(pathJoin(dir, 'planning', 'tasks.md'), BASE_BOARD);
+    const result = runCli(dir, ['pull']);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /not configured/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

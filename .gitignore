@@ -40,7 +40,13 @@ task-memory.html
 
 # Test output
 tests/output/
-tests/fixtures/
+# tests/fixtures/ is otherwise scratch space that test-hooks.sh populates/
+# tears down at runtime, EXCEPT tests/fixtures/ado/ — committed ADO sync
+# fixtures (TASK-019). Use tests/fixtures/* (not a bare trailing-slash
+# pattern) so the negation below can actually un-ignore that subdirectory —
+# git won't descend into an excluded directory to apply negations inside it.
+tests/fixtures/*
+!tests/fixtures/ado
 *.test.log
 
 # Build artifacts — plugin archives

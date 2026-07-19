@@ -1,0 +1,16 @@
+{
+  "workItems": {
+    "1001": {
+      "id": 1001,
+      "rev": 1,
+      "title": "CLI pulled item",
+      "state": "New",
+      "type": "Task",
+      "assignee": "",
+      "iterationPath": "",
+      "priority": null,
+      "url": "https://dev.azure.com/o/p/_workitems/edit/1001"
+    }
+  },
+  "comments": { "1001": [] }
+}
