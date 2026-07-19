@@ -169,7 +169,7 @@ export async function createAdoClient(config) {
 
   const transport = new StdioClientTransport({
     command: 'npx',
-    args: ['-y', '@azure-devops/mcp', config.org, '-d', 'core', 'work', 'wit'],
+    args: ['-y', '@azure-devops/mcp', config.org, '-d', 'core', 'work', 'work-items'],
   });
 
   const client = new Client({ name: 'task-memory-ado-sync', version: '1.0.0' }, { capabilities: {} });
