@@ -1362,6 +1362,54 @@ EOF
     assert_contains "$output" "No in-progress tasks" "Malformed ADO heading produced no parsed task"
 }
 
+test_ado_hyphen_continuation_not_boundary() {
+    log_test "TASK-019 (Codex review finding #14): a bare '### ADO-12-foo' line (no title/pipe) inside a block body is NOT read as a new task boundary"
+
+    cat > "$FIXTURES_DIR/planning/tasks.md" << 'EOF'
+# Kanban Board
+
+<!-- Config: Last Task ID: 000 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+
+---
+
+## To Do
+
+---
+
+## In Progress
+
+### ADO-777 | Real task with a stray hyphen-glued mention in its body
+**Status**: in-progress
+
+Notes mention ADO-12-foo inline, and even a stray markdown H3 line:
+### ADO-12-foo
+which must NOT be read as a new task boundary — ADO_ID_CORE's tail lookahead
+excludes a following "-", so this whole line fails to match TASK_HEADING_RE
+at all and stays inside THIS block.
+
+**Subtasks**:
+- [x] one
+- [ ] two
+- [ ] three
+
+---
+
+## Done
+
+---
+EOF
+
+    local output
+    output=$(echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1) || true
+
+    assert_contains "$output" "ADO-777" "Real task still recognized"
+    assert_contains "$output" "[1/3]" "Subtask count is the FULL block's (1/3) — not truncated at the bogus '### ADO-12-foo' line"
+}
+
 test_ado_notes_skeleton() {
     log_test "TASK-019: SessionStart creates a notes skeleton for an ADO work-item id"
 
@@ -1501,6 +1549,7 @@ test_ado_reorg
 test_ado_stop_block
 test_ado_precompact
 test_ado_malformed_heading_ignored
+test_ado_hyphen_continuation_not_boundary
 test_ado_notes_skeleton
 test_ado_stamping_bash
 

@@ -17,7 +17,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join as pathJoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +43,8 @@ import {
   removeTaskEntry,
 } from '../src/sync/syncState.js';
 import { pull, push, promote, decidePull, decidePush } from '../src/sync/engine.js';
+import { markdownParser } from '../src/utils/markdown.js';
+import { applyPromoteWrites, LINK_ID_RE } from '../scripts/ado-sync.mjs';
 
 // =============================================================================
 // config.js — cases 15-19
@@ -262,6 +264,37 @@ test('findBlocks: sectionId attribution across multiple sections', () => {
   assert.equal(blocks.find((b) => b.id === 'ADO-2').sectionId, 'done');
 });
 
+test('findBlocks (Codex review finding #14): a bare "### ADO-12-foo" line (no " | " separator) inside a block body is NOT mistaken for a section boundary', () => {
+  // markdown.js's own heading regex requires a " | " separator, so this
+  // specific bug can't manifest there — but board.js's NEXT_SECTION_SRC
+  // (used to BOUND a block, independent of the primary heading match)
+  // deliberately does NOT require the pipe, so it needs its own tail-
+  // boundary discipline. Before the fix, ADO_ID_CORE's lookahead excluded
+  // only alnum tails, so "ADO-12" (glued to "-foo" with no space/pipe)
+  // still matched as a spurious NEXT_SECTION boundary, truncating the real
+  // block early and swallowing its own heading + everything after it into
+  // "orphaned" text outside any recognized block.
+  const board = `## In Progress
+
+### ADO-500 | Real block
+**Status**: in-progress
+
+Some notes mention ADO-12-foo inline, and even a stray markdown H3 line:
+### ADO-12-foo
+which must NOT be read as a new task boundary.
+
+- [ ] subtask still inside this block
+
+## Done
+`;
+  const blocks = findBlocks(board);
+  assert.equal(blocks.length, 1, 'only the one real "### ADO-500 | ..." heading is a block');
+  const block = blocks[0];
+  assert.ok(block.block.includes('### ADO-12-foo'), 'the bogus line stays INSIDE the real block, not split off');
+  assert.ok(block.block.includes('- [ ] subtask still inside this block'));
+  assert.ok(!block.block.includes('## Done'), 'still correctly bounded by the real "## Done" section heading');
+});
+
 test('setField: edits only the target field value, rest of block byte-identical', () => {
   const block = `### ADO-12345 | Some title
 **Priority**: High | **Status**: todo | **Assigned**: @user
@@ -296,6 +329,88 @@ test('setField: inserts a brand-new line when neither the field nor a sibling ex
   const updated = setField(block, 'Sprint', 'Sprint 50');
   assert.equal(readField(updated, 'Sprint'), 'Sprint 50');
   assert.equal(readField(updated, 'Status'), 'todo');
+});
+
+test('readField/setField (finding #9): a prose mention of "**ADO**:"/"**Sprint**:" mid-sentence is NOT mistaken for metadata', () => {
+  const block = `### ADO-88 | Some title
+**Status**: in-progress
+
+This references **ADO**: 1234 in prose, not as a metadata field. Also
+mentions **Sprint**: nonsense inline, which must not be read as the Sprint
+field either.
+`;
+  // readField must not find these prose mentions — the real fields are
+  // simply absent.
+  assert.equal(readField(block, 'ADO'), null);
+  assert.equal(readField(block, 'Sprint'), null);
+
+  // setField must not overwrite the prose line in place; it must append a
+  // brand-new metadata line instead (no sibling exists either, since Sprint
+  // is also prose-only).
+  const updated = setField(block, 'ADO', 'https://dev.azure.com/o/p/_workitems/edit/88');
+  assert.equal(readField(updated, 'ADO'), 'https://dev.azure.com/o/p/_workitems/edit/88');
+  assert.ok(
+    updated.includes('This references **ADO**: 1234 in prose, not as a metadata field.'),
+    'prose paragraph must be byte-identical, not clobbered',
+  );
+});
+
+test('readField/setField (finding #9): a field at true line-start, or right after the canonical " | " separator, IS recognized', () => {
+  const block = `### ADO-89 | Title
+**Priority**: High | **Status**: todo | **Assigned**: @user
+**Sprint**: Sprint 41 | **ADO**: https://dev.azure.com/o/p/_workitems/edit/89
+`;
+  assert.equal(readField(block, 'Priority'), 'High'); // line-start
+  assert.equal(readField(block, 'Assigned'), '@user'); // after " | "
+  assert.equal(readField(block, 'Sprint'), 'Sprint 41'); // line-start (own line)
+  assert.equal(readField(block, 'ADO'), 'https://dev.azure.com/o/p/_workitems/edit/89'); // after " | "
+});
+
+test('setField (finding #9): sibling-line insertion is not fooled by a prose line that merely CONTAINS the sibling name', () => {
+  const block = `### ADO-90 | Title
+**Status**: todo
+
+Notes mentioning **Sprint**: something, purely descriptive prose.
+`;
+  // No real Sprint field and no real ADO field exist — setField('ADO', ...)
+  // must NOT treat the prose line as a Sprint sibling to append onto; it
+  // must fall back to inserting a brand-new line after the heading.
+  const updated = setField(block, 'ADO', 'https://dev.azure.com/o/p/_workitems/edit/90');
+  assert.equal(readField(updated, 'ADO'), 'https://dev.azure.com/o/p/_workitems/edit/90');
+  assert.ok(
+    updated.includes('Notes mentioning **Sprint**: something, purely descriptive prose.'),
+    'prose line must be byte-identical, not appended onto',
+  );
+});
+
+test('setField (exact field-line byte round-trip): every other line, including whitespace, is byte-identical', () => {
+  const block = `### ADO-91 | Title with   odd   spacing
+**Priority**: 2 | **Status**: todo | **Assigned**: @user, @other
+**Created**: 2026-07-01 | **Started**: 2026-07-02
+**Sprint**: Sprint 41 | **ADO**: https://dev.azure.com/o/p/_workitems/edit/91
+**Tags**: #foo #bar
+
+Some description text with **bold** and *italic* markdown, and a line that
+ends in trailing spaces.
+
+**Subtasks**:
+- [x] one
+- [ ] two
+`;
+  const updated = setField(block, 'Status', 'in-progress');
+  const linesBefore = block.split('\n');
+  const linesAfter = updated.split('\n');
+  assert.equal(linesAfter.length, linesBefore.length);
+  for (let i = 0; i < linesBefore.length; i++) {
+    if (linesBefore[i].includes('**Status**:')) {
+      assert.match(linesAfter[i], /\*\*Status\*\*: in-progress/);
+      // rest of that line (Priority/Assigned) is untouched
+      assert.ok(linesAfter[i].startsWith('**Priority**: 2 | '));
+      assert.ok(linesAfter[i].endsWith('**Assigned**: @user, @other'));
+    } else {
+      assert.equal(linesAfter[i], linesBefore[i], `line ${i} must be byte-identical`);
+    }
+  }
 });
 
 test('setHeading: rewrites only the heading line, body byte-identical', () => {
@@ -354,6 +469,45 @@ test('insertBlock: creates a missing section at EOF and reports it', () => {
   assert.ok(warning && /in-progress/.test(warning));
   assert.match(boardText, /## In Progress/);
   assert.ok(boardText.includes('### ADO-99 | New item'));
+});
+
+test('insertBlock (finding #2): explicit/default column id ("todo") differing from the derived header id ("to-do") resolves correctly — no duplicate section', () => {
+  // Mirrors the STOCK default board's column config (markdown.js's
+  // hardcoded default): the emoji display name "📝 To Do" derives to
+  // "to-do" via deriveColumnId, but the configured id is "todo". Before the
+  // fix, insertBlock/findBlocks blindly re-derived the section's id from
+  // its header text and could never match sectionId "todo" against a
+  // "## 📝 To Do" header — creating a duplicate section at EOF every time.
+  const columns = [
+    { name: '📝 To Do', id: 'todo', originalHeader: '📝 To Do' },
+    { name: '🚀 In Progress', id: 'in-progress', originalHeader: '🚀 In Progress' },
+    { name: '✅ Done', id: 'done', originalHeader: '✅ Done' },
+  ];
+  const board = `## 📝 To Do
+
+## 🚀 In Progress
+
+## ✅ Done
+
+`;
+  const { boardText, created, warning } = insertBlock(board, 'todo', '### ADO-99 | New item\n**Status**: todo\n', columns);
+  assert.equal(created, false, 'must find the existing "## 📝 To Do" section, not create a new one');
+  assert.equal(warning, null);
+  assert.equal((boardText.match(/^## 📝 To Do$/gm) || []).length, 1, 'no duplicate "## 📝 To Do" section');
+  assert.ok(boardText.includes('### ADO-99 | New item'));
+
+  const blocks = findBlocks(boardText, columns);
+  assert.equal(blocks.find((b) => b.id === 'ADO-99').sectionId, 'todo');
+});
+
+test('insertBlock (finding #2): hand-written explicit column id differing from its own name-derived id ("Waiting" -> "blocked") resolves by canonical name, not id', () => {
+  const columns = [{ name: 'Waiting', id: 'blocked', originalHeader: 'Waiting' }];
+  const board = `## Waiting
+
+`;
+  const { boardText, created } = insertBlock(board, 'blocked', '### ADO-1 | Item\n**Status**: blocked\n', columns);
+  assert.equal(created, false);
+  assert.equal((boardText.match(/^## Waiting$/gm) || []).length, 1);
 });
 
 test('newAdoBlockText: matches the template shape', () => {
@@ -526,12 +680,24 @@ test('pull (24): empty board + 2 current-sprint items -> 2 blocks in correct sec
 
   const result = await pull({ boardText: BASE_BOARD, notesFiles: {}, syncState: emptySyncState(), config, client, today: '2026-07-19' });
 
-  const blocks = findBlocks(result.boardText);
+  // Codex review finding #2: sectionId must be resolved against the
+  // CONFIGURED column id ("todo"), not a freshly re-derived one ("to-do") —
+  // pass `columns` through so this assertion actually exercises the same
+  // resolution insertBlock used while placing the block, instead of masking
+  // the bug behind a columns-less findBlocks() call. (`config` here is the
+  // ado.* sync config — board column config comes from the BOARD's own
+  // markdown parse, not the ADO config block.)
+  const boardColumns = markdownParser.parseMarkdown(result.boardText, {}).config.columns;
+  const blocks = findBlocks(result.boardText, boardColumns);
   const b101 = blocks.find((b) => b.id === 'ADO-101');
   const b102 = blocks.find((b) => b.id === 'ADO-102');
   assert.ok(b101 && b102, 'both items materialized as blocks');
-  assert.equal(b101.sectionId, 'to-do'); // New -> todo
+  assert.equal(b101.sectionId, 'todo'); // New -> todo
   assert.equal(b102.sectionId, 'in-progress'); // Active -> in-progress
+  // No duplicate "## To Do" section was created (the bug this guards
+  // against: insertBlock re-deriving "to-do" from the header text, failing
+  // to match the configured id "todo", and creating a second section at EOF).
+  assert.equal((result.boardText.match(/^## To Do$/gm) || []).length, 1);
 
   assert.deepEqual(result.report.created.sort(), ['ADO-101', 'ADO-102']);
   assert.deepEqual(result.report.notesCreated.sort(), ['ADO-101', 'ADO-102']);
@@ -728,6 +894,42 @@ test('pull (30b): unknown ADO state on an EXISTING item -> Status left unchanged
   assert.ok(result.report.warnings.some((w) => /unknown ADO state/.test(w) && /ADO-901/.test(w)));
 });
 
+test('pull (finding #11): a conflict does NOT bump syncedAt — it keeps recording the last SUCCESSFUL reconciliation baseline', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-950 | Conflicted item
+**Status**: done
+
+`)}`;
+  const ORIGINAL_SYNCED_AT = '2026-07-01T00:00:00Z';
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-950', {
+    rev: 2, adoState: 'New', localStatus: 'todo', syncedAt: ORIGINAL_SYNCED_AT, lastCommentId: 0,
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  // First conflicted pull.
+  const client1 = createMockAdoClient({
+    workItems: { 950: { id: 950, rev: 3, title: 'Conflicted item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+    comments: { 950: [] },
+  });
+  const first = await pull({ boardText, notesFiles: {}, syncState, config, client: client1, today: '2026-07-19' });
+  assert.equal(first.report.conflicts.length, 1);
+  assert.equal(getTaskEntry(first.syncState, 'ADO-950').syncedAt, ORIGINAL_SYNCED_AT, 'unchanged after the FIRST failed reconciliation attempt');
+
+  // Second conflicted pull, same still-unresolved conflict (re-run the next
+  // day, say) — syncedAt must STILL be the original baseline, not the most
+  // recent failed attempt, so the report's "since" always reflects when the
+  // two sides actually diverged.
+  const client2 = createMockAdoClient({
+    workItems: { 950: { id: 950, rev: 4, title: 'Conflicted item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+    comments: { 950: [] },
+  });
+  const second = await pull({ boardText: first.boardText, notesFiles: first.notesFiles, syncState: first.syncState, config, client: client2, today: '2026-07-20' });
+  assert.equal(second.report.conflicts.length, 1);
+  assert.equal(second.report.conflicts[0].since, ORIGINAL_SYNCED_AT);
+  assert.equal(getTaskEntry(second.syncState, 'ADO-950').syncedAt, ORIGINAL_SYNCED_AT, 'still unchanged after a SECOND failed reconciliation attempt');
+});
+
 test('pull (31): unavailable client -> AdoUnavailableError, zero writes, zero calls after ping', async () => {
   const client = createMockAdoClient({ unavailable: true });
   const config = baseConfig({ scope: { wiql: 'x' } });
@@ -784,6 +986,55 @@ test('push (33): no local change -> zero write calls, reported no-local-change',
 
   assert.equal(client.calls.filter((c) => c.method === 'updateWorkItemFields' || c.method === 'addComment').length, 0);
   assert.deepEqual(result.report.skipped, [{ id: 'ADO-401', reason: 'no-local-change' }]);
+});
+
+test('push (context-only, finding #3/D2): no Status change but notes context changed -> zero STATE calls, one context comment', async () => {
+  // Companion to (33) above — that test has an EMPTY notesFiles fixture, so
+  // it can't distinguish "noop correctly skips comments too" from "noop
+  // never even tries". This test gives ADO-406 real, non-placeholder notes
+  // context while Status stays unchanged, so decidePush resolves 'noop' —
+  // the fix (finding #3) means the context comment must still post.
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-406 | Item
+**Status**: in-progress
+
+`)}`;
+  const notes = buildNotesSkeleton('ADO-406', 'Item', '2026-07-01') + '\nContext-only edit: no Status change here.\n';
+  const client = createMockAdoClient({ workItems: { 406: { id: 406, rev: 1, title: 'Item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-406', { rev: 1, adoState: 'Active', localStatus: 'in-progress', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const result = await push({ boardText, notesFiles: { 'ADO-406': notes }, syncState, config, client });
+
+  assert.equal(client.calls.filter((c) => c.method === 'updateWorkItemFields').length, 0);
+  const commentCalls = client.calls.filter((c) => c.method === 'addComment');
+  assert.equal(commentCalls.length, 1);
+  assert.match(commentCalls[0].args[1], /Context-only edit: no Status change here\./);
+  assert.deepEqual(result.report.skipped, [{ id: 'ADO-406', reason: 'no-local-change' }]); // state is STILL a no-op
+  assert.equal(result.report.commentsPushed['ADO-406'], 1);
+  assert.equal(result.report.pushed.includes('ADO-406'), false); // 'pushed' means a state push happened; this one didn't
+  assert.equal(getTaskEntry(result.syncState, 'ADO-406').pushedContextHash?.length, 64); // sha256 hex recorded
+});
+
+test('push (finding #3/D2, dry-run guard): noop with pushable context in --dry-run mode makes ZERO client calls', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-407 | Item
+**Status**: in-progress
+
+`)}`;
+  const notes = buildNotesSkeleton('ADO-407', 'Item', '2026-07-01') + '\nWould-be-pushed context.\n';
+  const client = createMockAdoClient({ workItems: { 407: { id: 407, rev: 1, title: 'Item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-407', { rev: 1, adoState: 'Active', localStatus: 'in-progress', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const result = await push({ boardText, notesFiles: { 'ADO-407': notes }, syncState, config, client, options: { dryRun: true } });
+
+  // ping() + the read-only getWorkItemsBatch() needed to compute the
+  // decision — dry-run must never call addComment/updateWorkItemFields.
+  assert.deepEqual(client.calls.map((c) => c.method), ['ping', 'getWorkItemsBatch']);
+  assert.equal(result.report.commentsPushed['ADO-407'], undefined);
 });
 
 test('push (34): context comment posts once with marker+hash; idempotent when forced again unchanged', async () => {
@@ -879,6 +1130,103 @@ test('push (35b): missing Summary -> state still pushed, needs-summary reported,
   assert.deepEqual(result.report.pushed, ['ADO-404']);
 });
 
+test('push (finding #5): done-state failure after a confirmed summary post -> retry does NOT double-post the summary', async () => {
+  const boardText = `${BASE_BOARD.replace('## Done\n', `## Done
+
+### ADO-408 | Item
+**Status**: done
+
+`)}`;
+  const notes = buildNotesSkeleton('ADO-408', 'Item', '2026-07-01').replace(
+    '_One-paragraph answer to: what is this task doing and why?_',
+    'Summary that must post exactly once even if the done-state push fails.',
+  );
+  const workItems = { 408: { id: 408, rev: 1, title: 'Item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } };
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-408', { rev: 1, adoState: 'Active', localStatus: 'in-progress', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  // First run: summary comment lands (stage 3), then the done-state write
+  // (stage 4) fails — an ADO-side rejection, not a transport death.
+  const failingClient = createMockAdoClient({
+    workItems,
+    fail: { updateWorkItemFields: { after: 1, error: 'ADO rejected the close transition', unavailable: false } },
+  });
+  const first = await push({ boardText, notesFiles: { 'ADO-408': notes }, syncState, config, client: failingClient });
+
+  const summaryCallsFirst = failingClient.calls.filter((c) => c.method === 'addComment' && /done summary/.test(c.args[1]));
+  assert.equal(summaryCallsFirst.length, 1, 'summary posted exactly once on the first (partially-failed) run');
+  assert.equal(first.report.failed.length, 1);
+  assert.equal(first.report.failed[0].stage, 'done-state');
+  assert.equal(first.report.pushed.includes('ADO-408'), false); // task did not fully land
+
+  const entryAfterFirst = getTaskEntry(first.syncState, 'ADO-408');
+  assert.ok(entryAfterFirst.pushedSummaryHash, 'summary hash recorded immediately after the confirmed post');
+  assert.equal(entryAfterFirst.adoState, 'Active'); // done-state never landed — still the pre-transition value
+
+  // Second run (retry) against a healthy client: the state must transition,
+  // but the summary must NOT be re-posted (hash guard).
+  const healthyClient = createMockAdoClient({ workItems });
+  const second = await push({
+    boardText: first.boardText,
+    notesFiles: first.notesFiles,
+    syncState: first.syncState,
+    config,
+    client: healthyClient,
+  });
+
+  const summaryCallsSecond = healthyClient.calls.filter((c) => c.method === 'addComment' && /done summary/.test(c.args[1]));
+  assert.equal(summaryCallsSecond.length, 0, 'retry must not double-post the summary comment');
+  const stateCallsSecond = healthyClient.calls.filter((c) => c.method === 'updateWorkItemFields');
+  assert.deepEqual(stateCallsSecond.map((c) => c.args), [[408, { 'System.State': 'Closed' }]]);
+  assert.deepEqual(second.report.pushed, ['ADO-408']);
+  assert.equal(getTaskEntry(second.syncState, 'ADO-408').adoState, 'Closed');
+});
+
+test('push (finding #4): AdoUnavailableError mid-push aborts remaining candidates and is reported distinctly from an ADO-side rejection', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-511 | Task one
+**Status**: in-progress
+
+### ADO-512 | Task two
+**Status**: in-progress
+
+### ADO-513 | Task three
+**Status**: in-progress
+
+`)}`;
+  const workItems = {
+    511: { id: 511, rev: 1, title: 'Task one', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' },
+    512: { id: 512, rev: 1, title: 'Task two', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' },
+    513: { id: 513, rev: 1, title: 'Task three', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' },
+  };
+  // Default (unavailable:true) — a genuine transport/auth death, not a
+  // per-item ADO-side rejection.
+  const client = createMockAdoClient({
+    workItems,
+    fail: { updateWorkItemFields: { after: 2, error: 'connection reset' } },
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  let syncState = emptySyncState();
+  for (const id of ['ADO-511', 'ADO-512', 'ADO-513']) {
+    syncState = setTaskEntry(syncState, id, { rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+  }
+
+  const result = await push({ boardText, notesFiles: {}, syncState, config, client });
+
+  assert.deepEqual(result.report.pushed, ['ADO-511']); // landed before the transport died
+  assert.equal(result.report.failed.length, 1);
+  assert.equal(result.report.failed[0].id, 'ADO-512');
+  assert.equal(result.report.failed[0].unavailable, true);
+  // Task three was NEVER attempted — the transport is dead, no point
+  // hammering it with more calls (unlike the ADO-side-rejection case in
+  // test (37), where task three IS still attempted).
+  assert.equal(client.calls.some((c) => c.args && c.args[0] === 513), false);
+  assert.equal(getTaskEntry(result.syncState, 'ADO-511').adoState, 'Active');
+  assert.equal(getTaskEntry(result.syncState, 'ADO-512').adoState, 'New'); // unchanged — failed call never landed
+  assert.equal(getTaskEntry(result.syncState, 'ADO-513').adoState, 'New'); // never even attempted
+});
+
 test('push (36): unmapped local status is skipped + reported, no calls made', async () => {
   const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
 
@@ -914,9 +1262,13 @@ test('push (37): partial failure — task1 lands, task2 fails+reports, task3 sti
     502: { id: 502, rev: 1, title: 'Task two', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' },
     503: { id: 503, rev: 1, title: 'Task three', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' },
   };
+  // unavailable:false — an ADO-SIDE rejection of this one call (e.g. a
+  // validation error), NOT a transport/auth death. engine.push only aborts
+  // remaining candidates for a genuine AdoUnavailableError (finding #4);
+  // see the companion "AdoUnavailableError mid-push" test below for that case.
   const client = createMockAdoClient({
     workItems,
-    fail: { updateWorkItemFields: { after: 2, error: 'injected ADO failure' } },
+    fail: { updateWorkItemFields: { after: 2, error: 'injected ADO failure', unavailable: false } },
   });
   const config = baseConfig({ scope: { wiql: 'x' } });
   let syncState = emptySyncState();
@@ -930,6 +1282,7 @@ test('push (37): partial failure — task1 lands, task2 fails+reports, task3 sti
   assert.equal(result.report.failed.length, 1);
   assert.equal(result.report.failed[0].id, 'ADO-502');
   assert.equal(result.report.failed[0].stage, 'state');
+  assert.equal(result.report.failed[0].unavailable, false); // ADO-side rejection, not a transport death
 
   assert.equal(getTaskEntry(result.syncState, 'ADO-501').adoState, 'Active');
   assert.equal(getTaskEntry(result.syncState, 'ADO-502').adoState, 'New'); // unchanged — failed call never landed
@@ -961,7 +1314,7 @@ test('push (38): untracked ADO card (no prior syncState entry) -> reported untra
 // conflict — cases 39-41
 // =============================================================================
 
-test('conflict (39): both sides changed -> pull leaves Status, push makes zero mutating calls; comments still flow', async () => {
+test('conflict (39): both sides changed -> pull leaves Status, push makes zero STATE calls; context comment still flows (D2)', async () => {
   const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
 
 ### ADO-700 | Conflicted item
@@ -995,10 +1348,15 @@ test('conflict (39): both sides changed -> pull leaves Status, push makes zero m
     client: pushClient,
   });
   assert.equal(pushResult.report.conflicts.length, 1);
-  assert.equal(
-    pushClient.calls.filter((c) => c.method === 'updateWorkItemFields' || c.method === 'addComment').length,
-    0,
-  );
+  // The STATE field is never touched while conflicted — Codex review
+  // finding #3/D2: comments are an append-only merge that can never
+  // conflict, so the context comment (non-empty: the pulled notes file
+  // still carries the skeleton's Patterns/Gotchas/Decisions sections) DOES
+  // flow, even though the Status conflict blocks the state write.
+  assert.equal(pushClient.calls.filter((c) => c.method === 'updateWorkItemFields').length, 0);
+  const commentCalls = pushClient.calls.filter((c) => c.method === 'addComment');
+  assert.equal(commentCalls.length, 1);
+  assert.match(commentCalls[0].args[1], /^\[task-memory\] context update [0-9a-f]{8}\n\n/);
 });
 
 test('conflict (40): --take-local forces the push through a conflict and re-baselines', async () => {
@@ -1047,6 +1405,34 @@ test('conflict (41): --take-ado force-applies ADO state locally and re-baselines
   assert.equal(entry.localStatus, 'in-progress');
 });
 
+test('conflict (finding #12): --take-ado on an ADO state absent from the reverse state_map is rejected, never fabricates a resolution', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-703 | Item
+**Status**: done
+
+`)}`;
+  // 'Resolved' has no entry in state_map (todo/in-progress/done only) —
+  // reverseStateMap['Resolved'] is undefined.
+  const client = createMockAdoClient({ workItems: { 703: { id: 703, rev: 3, title: 'Item', state: 'Resolved', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } } });
+  const config = baseConfig({ scope: { wiql: 'x' }, state_map: { todo: 'New', 'in-progress': 'Active', done: 'Closed' } });
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-703', { rev: 2, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+
+  const result = await push({ boardText, notesFiles: {}, syncState, config, client, options: { takeAdo: ['ADO-703'] } });
+
+  // Board Status untouched — no fabricated "in-progress" or unchanged
+  // "done" silently reported as resolved.
+  const block = findBlocks(result.boardText).find((b) => b.id === 'ADO-703');
+  assert.equal(readField(block.block, 'Status'), 'done');
+  assert.deepEqual(result.report.skipped, [{ id: 'ADO-703', reason: 'take-ado-unmapped-ado-state' }]);
+  assert.equal(result.report.pushed.includes('ADO-703'), false);
+  // syncState must NOT be re-baselined — the conflict is still genuinely
+  // unresolved and must resurface on the next push/status.
+  const entry = getTaskEntry(result.syncState, 'ADO-703');
+  assert.equal(entry.adoState, 'New');
+  assert.equal(entry.localStatus, 'todo');
+});
+
 // =============================================================================
 // engine.promote — cases 42-45
 // =============================================================================
@@ -1063,6 +1449,33 @@ Some description text.
 - [ ] two
 
 `)}`;
+
+test('promote (finding #10): localStatus baselines from the parsed Status FIELD, not the (possibly stale) physical section', async () => {
+  // The card physically sits under "## To Do" (section id "todo") but its
+  // own **Status** field says "in-progress" — a stale-placement scenario
+  // the UI's auto-fix reorganization would normally correct on load, but
+  // promote() reads the raw board text directly. The Status field is
+  // authoritative (project rule: "Status field is authoritative") — the
+  // pre-fix code used `taskBlock.sectionId || parsedTask.status`, which
+  // always preferred the (stale) section over the field whenever sectionId
+  // was truthy, silently baselining the WRONG value and setting up an
+  // immediate false conflict on the very next sync.
+  const staleBoard = `${BASE_BOARD.replace('## To Do\n', `## To Do
+
+### TASK-043 | Stale section, field says otherwise
+**Status**: in-progress
+
+`)}`;
+  const client = createMockAdoClient({ nextId: 91000 });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  const result = await promote({
+    boardText: staleBoard, notesFiles: {}, syncState: emptySyncState(), config, client, taskId: 'TASK-043', today: '2026-07-19',
+  });
+
+  const entry = getTaskEntry(result.syncState, 'ADO-91000');
+  assert.equal(entry.localStatus, 'in-progress'); // from the **Status** field, not the "todo" section
+});
 
 test('promote (42): default create -> createWorkItem args, heading rewritten, notes renamed w/ trace header, syncState promotedFrom', async () => {
   const client = createMockAdoClient({
@@ -1249,7 +1662,11 @@ test('CLI (47): exit codes 0 (ok), 2 (ADO unreachable, clean no-op), 3 (conflict
     syncState: { version: 1, tasks: { 'ADO-2001': { rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 } } },
   });
   try {
-    const result = runCli(conflictDir, ['push', '--from-json', pathJoin(FIXTURES_DIR, 'conflict.json')]);
+    // finding #1: --from-json + push requires --dry-run (push is mutating;
+    // --from-json is a read-only escape hatch). decidePush's conflict
+    // detection runs identically regardless of dryRun, so exit code 3 is
+    // still exercised faithfully here.
+    const result = runCli(conflictDir, ['push', '--dry-run', '--from-json', pathJoin(FIXTURES_DIR, 'conflict.json')]);
     assert.equal(result.code, 3);
   } finally {
     rmSync(conflictDir, { recursive: true, force: true });
@@ -1273,6 +1690,236 @@ test('CLI (48): status runs fully offline, with no client at all (no --from-json
     assert.equal(payload.items.length, 1);
     assert.equal(payload.items[0].id, 'ADO-3001');
     assert.equal(payload.items[0].status, 'untracked');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CLI (finding #1): --from-json rejected for a real push (no --dry-run), board untouched', async () => {
+  const dir = setupTempProject({
+    tasksMd: `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-4001 | Item
+**Status**: in-progress
+
+`)}`,
+    adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } },
+    syncState: { version: 1, tasks: { 'ADO-4001': { rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 } } },
+  });
+  try {
+    const tasksPath = pathJoin(dir, 'planning', 'tasks.md');
+    const before = readFileSync(tasksPath, 'utf8');
+    const result = runCli(dir, ['push', '--from-json', pathJoin(FIXTURES_DIR, 'pull-basic.json')]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /--from-json.*push.*--dry-run/s);
+    assert.equal(readFileSync(tasksPath, 'utf8'), before, 'board must be untouched');
+    assert.equal(existsSync(pathJoin(dir, 'planning', '.ado-sync.json')) && readFileSync(pathJoin(dir, 'planning', '.ado-sync.json'), 'utf8'), JSON.stringify({ version: 1, tasks: { 'ADO-4001': { rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 } } }, null, 2));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CLI (finding #1): --from-json IS allowed for push when --dry-run is also passed', async () => {
+  const dir = setupTempProject({
+    tasksMd: `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-4002 | Item
+**Status**: in-progress
+
+`)}`,
+    adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } },
+    syncState: { version: 1, tasks: { 'ADO-4002': { rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 } } },
+  });
+  try {
+    const result = runCli(dir, ['push', '--dry-run', '--from-json', pathJoin(FIXTURES_DIR, 'pull-basic.json')]);
+    assert.notEqual(result.code, 1, `expected a non-rejection exit code, got 1: ${result.stderr}`);
+    assert.doesNotMatch(result.stderr, /--from-json/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CLI (finding #1): --from-json rejected for promote unconditionally (no dry-run form exists)', async () => {
+  const dir = setupTempProject({
+    tasksMd: PROMOTE_BOARD,
+    adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } },
+  });
+  try {
+    const tasksPath = pathJoin(dir, 'planning', 'tasks.md');
+    const before = readFileSync(tasksPath, 'utf8');
+    const result = runCli(dir, ['promote', 'TASK-042', '--from-json', pathJoin(FIXTURES_DIR, 'pull-basic.json')]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /--from-json.*promote/s);
+    assert.equal(readFileSync(tasksPath, 'utf8'), before, 'board must be untouched');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CLI (finding #7): --link argument validation rejects non-positive-integer forms before any client call or board mutation', async () => {
+  for (const bad of ['abc', '0', '123junk', '-5', '1.5']) {
+    const dir = setupTempProject({ tasksMd: PROMOTE_BOARD, adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } } });
+    try {
+      const tasksPath = pathJoin(dir, 'planning', 'tasks.md');
+      const before = readFileSync(tasksPath, 'utf8');
+      const result = runCli(dir, ['promote', 'TASK-042', '--link', bad]);
+      assert.equal(result.code, 1, `--link ${bad} should be rejected`);
+      assert.match(result.stderr, /--link/);
+      assert.equal(readFileSync(tasksPath, 'utf8'), before, `board must be untouched for --link ${bad}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('LINK_ID_RE (finding #7): well-formed positive-integer forms pass; everything else (that the rejection CLI test already proves fails) does not', () => {
+  // A direct, offline check of the exported validator itself — the CLI-level
+  // rejection cases are covered by the "--link argument validation" test
+  // above; a POSITIVE CLI-level case can't be driven further offline since
+  // promote() unconditionally rejects --from-json (finding #1) and always
+  // needs a real client past this validation step, so this checks the same
+  // regex the CLI actually gates on rather than paying for a real (network-
+  // dependent, multi-second) MCP client-spawn attempt just to prove a
+  // one-line regex accepts "555".
+  for (const good of ['1', '9', '555', '90000', '999999999']) {
+    assert.ok(LINK_ID_RE.test(good), `expected --link ${good} to pass validation`);
+  }
+  for (const bad of ['abc', '0', '123junk', '-5', '1.5', '', '01']) {
+    assert.ok(!LINK_ID_RE.test(bad), `expected --link ${bad} to be rejected`);
+  }
+});
+
+test('CLI (finding #13): --json output is pure JSON, no interleaved parseMarkdown/parseTask console noise', async () => {
+  const dir = setupTempProject({
+    tasksMd: BASE_BOARD, // has an explicit **Columns** config line -> triggers parseMarkdown's column-parsing qlog() calls if not silenced
+    adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } },
+  });
+  try {
+    const result = runCli(dir, ['pull', '--json', '--from-json', pathJoin(FIXTURES_DIR, 'pull-basic.json')]);
+    assert.equal(result.code, 0);
+    let parsed;
+    assert.doesNotThrow(() => {
+      parsed = JSON.parse(result.stdout);
+    }, `stdout was not pure JSON:\n${result.stdout}`);
+    assert.ok(parsed.created || parsed.unchanged || parsed.updated, 'parsed a real pull report shape');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('markdown.js (finding #13): setQuietLogging suppresses parseMarkdown/parseTask console output without changing the UI default', () => {
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (...a) => logs.push(a);
+  try {
+    markdownParser.setQuietLogging(true);
+    markdownParser.parseMarkdown(BASE_BOARD, {});
+    assert.equal(logs.length, 0, 'quiet mode: zero console.log calls');
+
+    markdownParser.setQuietLogging(false);
+    markdownParser.parseMarkdown(BASE_BOARD, {});
+    assert.ok(logs.length > 0, 'default (UI) mode: logging behavior unchanged');
+  } finally {
+    console.log = originalLog;
+    markdownParser.setQuietLogging(false); // never leak the toggle into other tests
+  }
+});
+
+test('CLI (finding #6, crash-safety): pull writes sync-state LAST as the commit marker — a failure at an earlier stage never leaves it falsely claiming success', async () => {
+  const dir = setupTempProject({
+    tasksMd: BASE_BOARD,
+    adoConfig: { org: 'kepptic', project: 'task-memory', scope: { wiql: 'x' } },
+  });
+  const notesDir = pathJoin(dir, 'planning', 'notes');
+  try {
+    const tasksPath = pathJoin(dir, 'planning', 'tasks.md');
+    const notesPath = pathJoin(notesDir, 'ADO-1001.md');
+    const syncStatePath = pathJoin(dir, 'planning', '.ado-sync.json');
+    // Obstruct the NOTES write (the stage right before sync-state in
+    // cmdPull's sequence: board -> notes -> sync-state) by revoking write
+    // permission on the notes directory — it still exists and is readable
+    // (so the earlier readNotesFiles() call is untouched), but creating the
+    // new ADO-1001.md file in it fails with EACCES. Board (a sibling write,
+    // BEFORE notes) should still land; sync-state (AFTER notes) must never
+    // be reached at all — that's the "pragmatic" (not fully transactional)
+    // crash-safety documented in docs/ADO-SYNC.md: earlier writes are not
+    // rolled back, but the commit marker can never be left claiming success
+    // when the run didn't actually complete.
+    chmodSync(notesDir, 0o555);
+
+    const result = runCli(dir, ['pull', '--from-json', pathJoin(FIXTURES_DIR, 'pull-basic.json')]);
+    assert.equal(result.code, 1, 'unexpected fs error, not a clean run');
+    assert.ok(readFileSync(tasksPath, 'utf8').includes('ADO-1001'), 'board write landed (happens before notes/sync-state)');
+    assert.equal(existsSync(notesPath), false, 'notes write never landed (permission denied)');
+    assert.equal(existsSync(syncStatePath), false, 'sync-state (the commit marker) was never reached, let alone written');
+
+    // Retrying after fixing the obstruction recovers cleanly — idempotent,
+    // since the board already reflects the pulled ADO-1001 block.
+    chmodSync(notesDir, 0o755);
+    const retry = runCli(dir, ['pull', '--from-json', pathJoin(FIXTURES_DIR, 'pull-basic.json')]);
+    assert.equal(retry.code, 0);
+    assert.equal(existsSync(notesPath), true);
+    assert.ok(JSON.parse(readFileSync(syncStatePath, 'utf8')).tasks['ADO-1001']);
+  } finally {
+    chmodSync(notesDir, 0o755); // restore before recursive cleanup, or rmSync itself can fail
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('applyPromoteWrites (finding #6, crash-safety): never unlinks the old notes file before sync-state (the commit marker) is durable', async () => {
+  // promote() unconditionally rejects --from-json (finding #1), so a
+  // CLI-subprocess version of this test would need a real MCP client just
+  // to reach the write logic under test — slow and network-dependent,
+  // against this whole module's "zero network, zero MCP" test principle.
+  // Instead: compute a REAL result via promote() + the offline mock client
+  // (exactly like promote() cases 42-45 above), then test applyPromoteWrites
+  // — the CLI's pure filesystem write-ordering logic — directly against it.
+  const client = createMockAdoClient({ nextId: 92000 });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  const oldNotesText = '# TASK-042 Notes — Promote me\n\n## Summary\n\nOriginal notes content that must never be lost.\n';
+  const result = await promote({
+    boardText: PROMOTE_BOARD,
+    notesFiles: { 'TASK-042': oldNotesText },
+    syncState: emptySyncState(),
+    config,
+    client,
+    taskId: 'TASK-042',
+    today: '2026-07-19',
+  });
+
+  const dir = mkdtempSync(pathJoin(tmpdir(), 'ado-sync-promote-writes-'));
+  try {
+    const notesDir = pathJoin(dir, 'planning', 'notes');
+    mkdirSync(notesDir, { recursive: true });
+    writeFileSync(pathJoin(notesDir, 'TASK-042.md'), oldNotesText);
+    const taskFilePath = pathJoin(dir, 'planning', 'tasks.md');
+    writeFileSync(taskFilePath, PROMOTE_BOARD);
+    const syncStatePath = pathJoin(dir, 'planning', '.ado-sync.json');
+    // Pre-create a DIRECTORY at the sync-state path so the FINAL write (the
+    // durable commit marker) fails — simulating a crash/error at the last
+    // step, after the board + new notes file have already landed but
+    // BEFORE the old notes file would be permanently removed.
+    mkdirSync(syncStatePath, { recursive: true });
+
+    assert.throws(() => applyPromoteWrites(notesDir, taskFilePath, syncStatePath, 'TASK-042', result));
+
+    // Board and the NEW notes file did land (writes before sync-state).
+    assert.ok(readFileSync(taskFilePath, 'utf8').includes('ADO-92000'));
+    assert.equal(existsSync(pathJoin(notesDir, 'ADO-92000.md')), true);
+    // The original notes content must still be recoverable somewhere on
+    // disk — either the old file itself, or the renamed tmp copy — NEVER
+    // silently deleted while the commit marker never landed.
+    const dirEntries = readdirSync(notesDir);
+    const survivor = dirEntries.find((n) => n === 'TASK-042.md' || n.startsWith('TASK-042.md.tmp-promoted-'));
+    assert.ok(survivor, `old notes content must survive somewhere; found: ${dirEntries.join(', ')}`);
+    const survivorText = readFileSync(pathJoin(notesDir, survivor), 'utf8');
+    assert.match(survivorText, /Original notes content that must never be lost\./);
+
+    // Recovery: fix the obstruction and re-apply — completes cleanly, and
+    // the (already-renamed) tmp copy gets cleaned up.
+    rmSync(syncStatePath, { recursive: true, force: true });
+    applyPromoteWrites(notesDir, taskFilePath, syncStatePath, 'TASK-042', result);
+    assert.ok(JSON.parse(readFileSync(syncStatePath, 'utf8')).tasks['ADO-92000']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -513,6 +513,24 @@ test('ANY_ID_CORE: matches both kinds, rejects malformed tails', () => {
   assert.ok(!re.test('ADO-12X'));
 });
 
+test('ADO_ID_CORE (Codex review finding #14): tail boundary also excludes "-", so a glued hyphen continuation is never partially matched', () => {
+  // Full-string anchoring (^...$, used by the two tests above) can't
+  // distinguish "rejects the whole string" from "matches a truncated
+  // prefix of it" — both fail re.test() the same way. Anchor only at the
+  // START (mirrors how this core gets embedded, unanchored-at-tail, into
+  // heading/NEXT_SECTION regexes in board.js and the Python hook) to prove
+  // ADO-12 is not matched as a truncated prefix of "ADO-12-foo".
+  const startAnchored = new RegExp('^' + ADO_ID_CORE);
+  assert.equal(startAnchored.exec('ADO-12-foo'), null, 'must not match "ADO-12" out of "ADO-12-foo"');
+  assert.equal(startAnchored.exec('ADO-12-13'), null, 'must not match "ADO-12" out of a hyphenated range-looking string');
+  // Sanity: the exclusion is specifically about the tail, not the id itself
+  // — a real id followed by non-alnum, non-hyphen punctuation still matches
+  // as a prefix (e.g. embedded in prose: "(ADO-12)", "ADO-12,", "ADO-12.").
+  assert.ok(startAnchored.exec('ADO-12)'));
+  assert.ok(startAnchored.exec('ADO-12,'));
+  assert.ok(startAnchored.exec('ADO-12 done'));
+});
+
 // -----------------------------------------------------------------------------
 // P1 (markdown.js): cases 11-14
 // -----------------------------------------------------------------------------
