@@ -182,14 +182,45 @@ export function appendComments(notesText, comments) {
   return { text, appendedMaxId };
 }
 
+// A line counts as skeleton boilerplate — and is ignored when deciding
+// whether a notes file has any real content to push — if it's blank, a
+// heading (`#`/`##`), an untouched instructional placeholder (the italic
+// `_Reusable techniques…_` / `_Pitfalls…_` / etc. lines buildNotesSkeleton
+// writes under every section), or an empty bullet stub (`-` with nothing
+// after it). Matched by shape, not by exact string/length, so this stays
+// robust to wording tweaks in buildNotesSkeleton and to legacy skeletons
+// written by hooks/task-memory-hook.py's _create_notes_skeleton().
+function isSkeletonBoilerplateLine(line) {
+  const t = line.trim();
+  if (!t) return true;
+  if (t.startsWith('#')) return true;
+  if (/^_.*_$/.test(t)) return true;
+  if (t === '-') return true;
+  return false;
+}
+
 /**
  * Local "context" for push (D7 / §6.2 step 4): the notes file minus the
  * ADO Comments section minus the Summary section, trimmed.
+ *
+ * Rejects an untouched skeleton the same way extractSummary rejects a
+ * placeholder-only Summary (Fable review B2): `pull` creates a full
+ * Patterns/Gotchas/Decisions/Resources/Open Questions skeleton for every
+ * newly-tracked item, and without this guard that boilerplate reads as
+ * "real local context" — engine.push then posts it as a
+ * `[task-memory] context update <hash>` comment on EVERY item on first
+ * push (a 50-item sprint -> 50 junk comments in the shared ADO project).
+ * Returns '' (falsy, same as "nothing to push") when every remaining line
+ * is boilerplate; returns the full trimmed text (including headings)
+ * as soon as ANY line has real content.
  */
 export function extractContext(notesText) {
   let text = removeSection(notesText, ADO_COMMENTS_HEADING);
   text = removeSection(text, SUMMARY_HEADING);
-  return text.trim();
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  const hasRealContent = trimmed.split('\n').some((line) => !isSkeletonBoilerplateLine(line));
+  return hasRealContent ? trimmed : '';
 }
 
 /**

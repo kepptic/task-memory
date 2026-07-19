@@ -199,19 +199,34 @@ async function cmdPush(args, config, taskFilePath, dir) {
       writeAtomic(SYNC_STATE_PATH, serializeSyncState(result.syncState));
     }
 
-    // Codex review finding #4: a mid-push transport failure (or any other
-    // stage failure) after ≥1 remote write may already have landed is
-    // neither "0 ok" nor "2 ADO unreachable, clean no-op" — it's a genuine
-    // partial success that needs a retry. Only report clean success (0)
-    // when nothing failed; conflicts (3) take priority over plain failures
-    // (4) since they need an explicit --take-local/--take-ado decision
-    // rather than a blind re-run.
-    if (result.report.conflicts.length > 0) return 3;
-    if (result.report.failed.length > 0) return 4;
-    return 0;
+    return pushExitCode(result.report);
   } finally {
     await safeClose(client);
   }
+}
+
+// Codex review finding #4: a mid-push transport failure (or any other stage
+// failure) after >=1 remote write may already have landed is neither "0 ok"
+// nor "2 ADO unreachable, clean no-op" — it's a genuine partial success that
+// needs a retry. Only report clean success (0) when nothing failed;
+// conflicts (3) take priority over plain failures (4) since they need an
+// explicit --take-local/--take-ado decision rather than a blind re-run.
+//
+// Pulled out as its own named, exported function (Fable review follow-up)
+// so this mapping is directly unit-testable: engine.push's mid-push abort
+// behavior itself is already covered by tests/test-sync.mjs's "push
+// (finding #4)" case, but nothing exercised the 3-line decision cmdPush
+// makes from that report. cmdPush can't easily be driven end-to-end here —
+// a real (non-dry-run) `push` rejects `--from-json` (see
+// validateFromJsonUsage) since it's a mutating command, and SYNC_STATE_PATH
+// above is bound to `process.cwd()` at module-import time, so calling
+// cmdPush directly from the test process would target THIS repo's real
+// planning/.ado-sync.json — not a throwaway temp dir. Testing the pure
+// mapping function directly gets the coverage without either hazard.
+export function pushExitCode(report) {
+  if (report.conflicts.length > 0) return 3;
+  if (report.failed.length > 0) return 4;
+  return 0;
 }
 
 // Codex review finding #7: `--link` used a bare `parseInt`, which silently

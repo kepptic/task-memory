@@ -271,7 +271,6 @@ export async function pull({ boardText, notesFiles, syncState, config, client, t
       decision = decidePull(entry, item.state, currentLocalStatus);
     }
 
-    let finalLocalStatus = currentLocalStatus;
     if (decision.action === 'conflict') {
       report.conflicts.push({
         id,
@@ -279,8 +278,6 @@ export async function pull({ boardText, notesFiles, syncState, config, client, t
         adoState: item.state,
         since: entry ? entry.syncedAt : null,
       });
-    } else if (decision.action === 'apply-ado') {
-      finalLocalStatus = mappedStatus;
     }
 
     const applyStatus = decision.action === 'apply-ado' ? mappedStatus : null;
@@ -308,13 +305,38 @@ export async function pull({ boardText, notesFiles, syncState, config, client, t
         ...entry,
         lastCommentId: newLastCommentId,
       });
-    } else {
+    } else if (decision.action === 'apply-ado') {
+      // Genuine reconciliation — ADO's state was just applied onto the
+      // board (applyStatus === mappedStatus above), so this is the one case
+      // where advancing the baseline is correct: both sides are now known
+      // to agree.
       currentSyncState = setTaskEntry(currentSyncState, id, {
         ...(entry || {}),
         rev: item.rev,
         adoState: item.state,
-        localStatus: finalLocalStatus,
+        localStatus: mappedStatus,
         syncedAt: nowIso,
+        lastCommentId: newLastCommentId,
+      });
+    } else {
+      // noop (Fable review B1 — silent data loss): either decidePull found
+      // neither side changed since the last sync, or `mappedStatus` is
+      // falsy (unknown ADO state — the unmapped-state variant never even
+      // attempted a reconciliation, see the warning pushed above). In BOTH
+      // cases the board's local Status may have moved since the last sync
+      // — reconciling a *local* edit against ADO is push's job, not
+      // pull's. Re-baselining adoState/localStatus here to the current
+      // board/ADO values would silently mark a pending local edit as
+      // "already synced": push's decidePush() diffs the board against
+      // THIS entry, so it would then see no local change and never send
+      // the edit to ADO — forever, with no error or warning anywhere.
+      // Preserve the existing synced baseline exactly; only lastCommentId
+      // (append-only, can never conflict) and rev (a fast-path hint only,
+      // never compared — see syncState.js's header comment) are allowed
+      // to advance.
+      currentSyncState = setTaskEntry(currentSyncState, id, {
+        ...(entry || {}),
+        rev: item.rev,
         lastCommentId: newLastCommentId,
       });
     }
