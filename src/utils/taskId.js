@@ -7,6 +7,11 @@
 // the same grammar (TASK_ID_CORE) — it never mints and never reads the
 // per-file `Task Prefix:` header; keep the two in sync by hand if this file
 // changes.
+//
+// TASK-019 added a second id kind, `ADO-<n>` (Azure DevOps work items —
+// minted only by ADO, never by this codebase; see ADO_ID_CORE below). The
+// Python hook mirrors the union of both kinds as `ANY_ID_CORE` wherever a
+// heading/section boundary is recognized; keep that mirror in sync too.
 
 // Embedded/core form: no capturing prefix/number groups (prefix group is
 // non-capturing), tail-bounded so `TASK-GR-12X` can never parse as
@@ -136,4 +141,59 @@ export function mintNextId(meta, ids) {
   const nextNum = Math.max(meta.lastTaskId, scopedMax) + 1;
   const id = formatTaskId(taskPrefix, nextNum);
   return { id, nextNum };
+}
+
+// =============================================================================
+// TASK-019: Azure DevOps id grammar (additions only — see module header).
+//
+// ADO ids are minted exclusively by Azure DevOps, never by this codebase.
+// `mintNextId`/`maxNumInScope` stay TASK-only for free: `parseTaskId('ADO-12')`
+// is `null` (unchanged code), so ADO ids are inherently invisible to minting.
+// =============================================================================
+
+// Embedded/core form, same shape discipline as TASK_ID_CORE: no capturing
+// groups, tail-bounded so `ADO-12X` never parses as `ADO-12`. Leading zeros
+// are rejected at the grammar level ([1-9][0-9]*) so one work item has
+// exactly one valid spelling — `ADO-012` is plain text, not a task heading.
+export const ADO_ID_CORE = 'ADO-[1-9][0-9]*(?![0-9A-Za-z])';
+
+// Anchored parse form: g1 = numeric tail (no leading zeros).
+export const ADO_ID_RE = /^ADO-([1-9][0-9]*)$/;
+
+// Union used by heading/section regexes (markdown.js, and mirrored in the
+// Python hook as ANY_ID_CORE). Each alternative carries its own tail
+// lookahead, so the union is safe to splice exactly like TASK_ID_CORE.
+export const ANY_ID_CORE = '(?:' + TASK_ID_CORE + '|' + ADO_ID_CORE + ')';
+
+/**
+ * Parse an ADO work-item id string. Verbatim — never pads, never mutates.
+ * @returns {{ kind: 'ado', num: number, raw: string } | null}
+ */
+export function parseAdoId(raw) {
+  if (typeof raw !== 'string') return null;
+  const m = ADO_ID_RE.exec(raw);
+  return m ? { kind: 'ado', num: parseInt(m[1], 10), raw } : null;
+}
+
+/**
+ * Parse either id kind. Tries TASK first (existing behavior untouched), then
+ * ADO. Returns null if neither matches.
+ * @returns {{ kind: 'task', prefix: string, num: number, raw: string }
+ *         | { kind: 'ado', num: number, raw: string } | null}
+ */
+export function parseAnyId(raw) {
+  const t = parseTaskId(raw);
+  if (t) return { kind: 'task', ...t };
+  return parseAdoId(raw);
+}
+
+/**
+ * Format an ADO work-item id. NEVER zero-padded — `ADO-12345`, not
+ * `ADO-012345`.
+ */
+export function formatAdoId(num) {
+  if (!Number.isInteger(num) || num <= 0) {
+    throw new Error(`invalid ADO id: ${num}`);
+  }
+  return `ADO-${num}`;
 }
