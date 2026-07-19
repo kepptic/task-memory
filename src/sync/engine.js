@@ -317,6 +317,120 @@ export async function pull({ boardText, notesFiles, syncState, config, client, t
   };
 }
 
+/**
+ * Prepend a `> Promoted from TASK-x on <date>` blockquote line right after
+ * the notes file's H1 title line.
+ */
+function insertPromotedHeader(notesText, headerLine) {
+  const titleLineEnd = notesText.indexOf('\n');
+  if (titleLineEnd === -1) return `${notesText}\n\n${headerLine}\n`;
+  if (notesText.includes(headerLine)) return notesText;
+  return notesText.slice(0, titleLineEnd + 1) + `\n${headerLine}\n` + notesText.slice(titleLineEnd + 1);
+}
+
+/**
+ * engine.promote — TASK-<...> -> ADO-<n>, either creating a new work item
+ * (default, D1) or linking an existing one (`options.link`). See
+ * PLAN-ado.md §7.
+ *
+ * ADO-side ordering is create/verify FIRST, local rewrite second: every
+ * client call happens before any string mutation, so a `--link` to a
+ * missing id (or a failed create) throws with the board completely
+ * untouched. The old TASK id's counter is NEVER touched — the id simply
+ * stays consumed (trace preserved via syncState's `promotedFrom` + the
+ * notes file's "Promoted from" header).
+ *
+ * @param {object} opts
+ * @param {string} opts.boardText
+ * @param {Object<string,string>} opts.notesFiles
+ * @param {object} opts.syncState
+ * @param {object} opts.config
+ * @param {object} opts.client
+ * @param {string} opts.taskId - e.g. "TASK-GR-12" — must be a 'task'-kind block on the board
+ * @param {{link?: number}} [opts.options]
+ * @param {string} [opts.today] - YYYY-MM-DD
+ * @returns {Promise<{boardText, notesFiles, syncState, report}>}
+ */
+export async function promote({ boardText, notesFiles, syncState, config, client, taskId, options = {}, today }) {
+  await client.ping();
+
+  const taskBlock = findBlocks(boardText).find((b) => b.id === taskId && b.kind === 'task');
+  if (!taskBlock) {
+    throw new Error(`promote: task id "${taskId}" not found on the board`);
+  }
+
+  const headingLineEnd = taskBlock.block.indexOf('\n');
+  const bodyContent = headingLineEnd === -1 ? '' : taskBlock.block.slice(headingLineEnd + 1);
+  const parsedTask = markdownParser.parseTask(taskBlock.id, taskBlock.title, bodyContent, taskBlock.sectionId || 'todo');
+
+  const warnings = [];
+  let item;
+  let created = false;
+
+  if (options.link) {
+    item = await client.getWorkItem(options.link);
+    if (!item) {
+      throw new Error(`promote --link: ADO work item ${options.link} not found or inaccessible`);
+    }
+  } else {
+    const fields = { 'System.Title': parsedTask.title };
+    if (parsedTask.description) fields['System.Description'] = parsedTask.description;
+    const mappedState = config.stateMap[parsedTask.status];
+    if (mappedState) fields['System.State'] = mappedState;
+    if (config.areaPath) fields['System.AreaPath'] = config.areaPath;
+    if (config.scope === 'current-sprint') {
+      const iterations = await client.listIterations();
+      const current = iterations.find((i) => i.timeFrame === 'current');
+      if (current) fields['System.IterationPath'] = current.path;
+      else warnings.push('promote: scope is current-sprint but no current iteration was found — created without an iteration path');
+    }
+    item = await client.createWorkItem(config.workItemType, fields);
+    created = true;
+  }
+
+  const newId = adoIdFor(item.id);
+
+  // Local rewrite — heading id only (title/body untouched), plus Sprint/ADO
+  // fields. Every other line in the block (subtasks, notes, description) is
+  // byte-identical to what was on the board before promotion.
+  let newBlockText = setBlockHeading(taskBlock.block, newId, taskBlock.title);
+  if (item.iterationPath) newBlockText = setField(newBlockText, 'Sprint', item.iterationPath);
+  if (item.url) newBlockText = setField(newBlockText, 'ADO', item.url);
+  const newBoardText = replaceBlockAt(boardText, taskBlock, newBlockText);
+
+  // Notes: rename TASK-x.md -> ADO-<n>.md (create the skeleton first if the
+  // old task never had one), prepend the promotion trace header.
+  const oldNotesText = notesFiles[taskId] || '';
+  const { text: baseNotes } = ensureNotesSkeleton(oldNotesText, newId, taskBlock.title, today || '');
+  const newNotesText = insertPromotedHeader(baseNotes, `> Promoted from ${taskId} on ${today || ''}`);
+  const newNotesFiles = { ...notesFiles, [newId]: newNotesText };
+  delete newNotesFiles[taskId];
+
+  const nowIso = new Date().toISOString();
+  const newSyncState = setTaskEntry(syncState, newId, {
+    rev: item.rev,
+    adoState: item.state,
+    localStatus: taskBlock.sectionId || parsedTask.status,
+    syncedAt: nowIso,
+    lastCommentId: 0,
+    promotedFrom: taskId,
+  });
+
+  return {
+    boardText: newBoardText,
+    notesFiles: newNotesFiles,
+    syncState: newSyncState,
+    report: {
+      id: newId,
+      from: taskId,
+      created,
+      linked: !created,
+      renamedNotesFrom: taskId,
+      warnings,
+    },
+  };
+}
+
 function newPushReport() {
   return {
     pushed: [],

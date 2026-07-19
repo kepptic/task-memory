@@ -37,7 +37,7 @@ import {
   setTaskEntry,
   removeTaskEntry,
 } from '../src/sync/syncState.js';
-import { pull, push, decidePull, decidePush } from '../src/sync/engine.js';
+import { pull, push, promote, decidePull, decidePush } from '../src/sync/engine.js';
 
 // =============================================================================
 // config.js — cases 15-19
@@ -1040,4 +1040,108 @@ test('conflict (41): --take-ado force-applies ADO state locally and re-baselines
   const entry = getTaskEntry(result.syncState, 'ADO-702');
   assert.equal(entry.adoState, 'Active');
   assert.equal(entry.localStatus, 'in-progress');
+});
+
+// =============================================================================
+// engine.promote — cases 42-45
+// =============================================================================
+
+const PROMOTE_BOARD = `${BASE_BOARD.replace('## To Do\n', `## To Do
+
+### TASK-042 | Promote me
+**Status**: todo
+
+Some description text.
+
+**Subtasks**:
+- [ ] one
+- [ ] two
+
+`)}`;
+
+test('promote (42): default create -> createWorkItem args, heading rewritten, notes renamed w/ trace header, syncState promotedFrom', async () => {
+  const client = createMockAdoClient({
+    nextId: 90000,
+    iterations: [{ id: 'iter1', name: 'Sprint 1', path: 'proj\\Sprint 1', timeFrame: 'current' }],
+  });
+  const config = baseConfig({ scope: 'current-sprint' });
+
+  const result = await promote({
+    boardText: PROMOTE_BOARD, notesFiles: {}, syncState: emptySyncState(), config, client, taskId: 'TASK-042', today: '2026-07-19',
+  });
+
+  const createCall = client.calls.find((c) => c.method === 'createWorkItem');
+  assert.ok(createCall);
+  assert.equal(createCall.args[0], 'Task');
+  assert.equal(createCall.args[1]['System.Title'], 'Promote me');
+  assert.match(createCall.args[1]['System.Description'], /Some description text\./);
+  assert.equal(createCall.args[1]['System.State'], 'New'); // todo -> New
+  assert.equal(createCall.args[1]['System.IterationPath'], 'proj\\Sprint 1');
+
+  const block = findBlocks(result.boardText).find((b) => b.id === 'ADO-90000');
+  assert.ok(block, 'heading rewritten to ADO-90000');
+  assert.equal(block.title, 'Promote me');
+  assert.ok(block.block.includes('Some description text.'));
+  assert.ok(block.block.includes('- [ ] one'));
+  assert.equal(findBlocks(result.boardText).find((b) => b.id === 'TASK-042'), undefined);
+
+  const notes = result.notesFiles['ADO-90000'];
+  assert.ok(notes);
+  assert.match(notes, /^# ADO-90000 Notes/);
+  assert.match(notes, /> Promoted from TASK-042 on 2026-07-19/);
+  assert.equal(result.notesFiles['TASK-042'], undefined);
+
+  const entry = getTaskEntry(result.syncState, 'ADO-90000');
+  assert.equal(entry.promotedFrom, 'TASK-042');
+  assert.equal(entry.adoState, 'New');
+
+  assert.equal(result.report.created, true);
+  assert.equal(result.report.id, 'ADO-90000');
+});
+
+test('promote (43): --link uses an existing work item, no create call', async () => {
+  const client = createMockAdoClient({
+    workItems: {
+      555: { id: 555, rev: 2, title: 'Existing item', state: 'Active', type: 'Task', assignee: '', iterationPath: 'proj\\Sprint 2', priority: null, url: 'https://dev.azure.com/o/p/_workitems/edit/555' },
+    },
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  const result = await promote({
+    boardText: PROMOTE_BOARD, notesFiles: {}, syncState: emptySyncState(), config, client, taskId: 'TASK-042', options: { link: 555 }, today: '2026-07-19',
+  });
+
+  assert.equal(client.calls.some((c) => c.method === 'createWorkItem'), false);
+  assert.ok(client.calls.some((c) => c.method === 'getWorkItem' && c.args[0] === 555));
+
+  const block = findBlocks(result.boardText).find((b) => b.id === 'ADO-555');
+  assert.ok(block);
+  assert.equal(readField(block.block, 'Sprint'), 'proj\\Sprint 2');
+  assert.equal(readField(block.block, 'ADO'), 'https://dev.azure.com/o/p/_workitems/edit/555');
+  assert.equal(result.report.linked, true);
+  assert.equal(result.report.created, false);
+});
+
+test('promote (44): --link to a missing/inaccessible id errors, board untouched', async () => {
+  const client = createMockAdoClient({ workItems: {} });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  await assert.rejects(
+    () => promote({ boardText: PROMOTE_BOARD, notesFiles: {}, syncState: emptySyncState(), config, client, taskId: 'TASK-042', options: { link: 999 } }),
+    /999/,
+  );
+  assert.equal(client.calls.some((c) => c.method === 'createWorkItem'), false);
+});
+
+test('promote (45): the config header (task id counter) is byte-identical after promotion', async () => {
+  const client = createMockAdoClient({ nextId: 90000 });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  const result = await promote({
+    boardText: PROMOTE_BOARD, notesFiles: {}, syncState: emptySyncState(), config, client, taskId: 'TASK-042', today: '2026-07-19',
+  });
+
+  const headerBefore = PROMOTE_BOARD.match(/<!-- Config:.*-->/)[0];
+  const headerAfter = result.boardText.match(/<!-- Config:.*-->/)[0];
+  assert.equal(headerAfter, headerBefore);
 });
