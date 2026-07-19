@@ -72,6 +72,15 @@ Ask the user these questions using AskUserQuestion:
   - Project name - Use project name (e.g., MYAPP-001)
   - Custom - Let me specify
 
+**Question 4: Team Mode** (optional)
+- Header: "Team"
+- Question: "Will multiple developers work on separate branches? (Use per-dev task files with namespaced IDs)"
+- Options:
+  - No (Recommended) - Single shared tasks.md
+  - Yes - Per-dev task files (e.g., `tasks-gr.md`, `tasks-dg.md`)
+
+If Yes: Ask for 2–4 letter uppercase initials (developer prefix), then generate `tasks.md` → `tasks-<INITIALS>.md` with header `<!-- Config: Task Prefix: <INITIALS> | Last Task ID: 0 -->`.
+
 ### Phase 3: Setup
 
 1. **Create planning directory:**

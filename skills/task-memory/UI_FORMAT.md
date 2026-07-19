@@ -9,6 +9,10 @@ The task-memory UI (`task-memory.html`) requires a specific format. Tasks MUST b
 
 <!-- Config: Last Task ID: XXX -->
 
+# or (for team mode with per-dev files):
+
+<!-- Config: Task Prefix: GR | Last Task ID: 677 -->
+
 ## ⚙️ Configuration
 
 **Columns**: To Do (todo) | In Progress (in-progress) | Done (done)

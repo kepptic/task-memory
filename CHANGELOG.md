@@ -5,7 +5,16 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.5.0] - 2026-07-17
+
+### Added
+
+- **Team-safe, collision-resistant task IDs:** `TASK-<PREFIX>-<n>` with a 2–4 letter dev-initials prefix (e.g., `TASK-GR-678`). Multiple developers on separate branches never collide on IDs or note filenames. Legacy `TASK-<n>` IDs remain fully supported and work forever.
+- **Per-file `Task Prefix:` header:** `<!-- Config: Task Prefix: GR | Last Task ID: 677 -->`. Per-dev task files (`tasks-gr.md`) under `task_files_glob` each keep an independent counter.
+- **Monotonic task ID counter:** Deleting the highest-numbered task no longer causes an ID to be reused.
+- **Hand-written ID preservation:** Task IDs like `TASK-5` round-trip verbatim (no longer silently re-padded).
+- **Invalid prefix handling:** An invalid/empty `Task Prefix:` field is dropped on save with a warning; the counter is always preserved.
+- **Auto-reorganization hook now honors per-dev filenames:** The hook respects `task_files_glob` filenames (e.g., `tasks-gr.md`), not just `tasks.md`/`kanban.md`.
 
 ## [3.4.1] - 2026-05-31
 

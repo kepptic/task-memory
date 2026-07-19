@@ -397,7 +397,16 @@ def increment_counter(f: Path) -> int:
 # Tasks file parsing
 # =============================================================================
 
-TASK_HEADING_RE = re.compile(r"^### (TASK-\d+)(.*)$", re.MULTILINE)
+# TASK-017: widened to accept optional 2-4 uppercase-letter dev/team-initials
+# namespace prefixes (`TASK-GR-678`) alongside legacy unprefixed ids
+# (`TASK-676`, valid forever). Inner prefix group is non-capturing and the
+# tail is boundary-locked so `TASK-GR-12X` is correctly NOT a task id. Must
+# stay in lockstep with the JS grammar in src/utils/taskId.js (TASK_ID_CORE) —
+# the hook never mints ids or reads the per-file prefix header, it only
+# parses this shape everywhere a task id can appear.
+TASK_ID_CORE = r"TASK-(?:[A-Z]{2,4}-)?[0-9]+(?![0-9A-Za-z])"
+
+TASK_HEADING_RE = re.compile(r"^### (" + TASK_ID_CORE + r")(.*)$", re.MULTILINE)
 
 
 def read_tasks(path: Path | None = None) -> str:
@@ -414,7 +423,7 @@ def read_tasks(path: Path | None = None) -> str:
         return ""
 
 
-NEXT_SECTION_RE = re.compile(r"^(?:### TASK-\d+|## )", re.MULTILINE)
+NEXT_SECTION_RE = re.compile(r"^(?:### " + TASK_ID_CORE + r"|## )", re.MULTILINE)
 
 
 def _iter_task_blocks(content: str):
@@ -1208,7 +1217,12 @@ def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, s
         # matches their section. Saves tokens — Claude flips Status, hook moves
         # the block. No need for a second Edit call.
         file_path = (tool_input.get("file_path") or tool_input.get("path") or "")
-        if file_path and file_path.endswith(("tasks.md", "kanban.md")):
+        # TASK-017: widened from a fixed ("tasks.md", "kanban.md") suffix check
+        # to any ".md" so per-dev files (tasks-gr.md) reachable via
+        # task_files_glob also auto-reorganize. Safe because the membership
+        # check below (`known = task_files()`) already restricts this to
+        # configured task files — an arbitrary "notes.md" still won't match.
+        if file_path and file_path.endswith(".md"):
             # Reorganize only the file that was actually edited.
             try:
                 edited = Path(file_path).resolve()

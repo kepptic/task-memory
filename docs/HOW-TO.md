@@ -126,6 +126,39 @@ Full details: [MONOREPO.md](../skills/task-memory/MONOREPO.md).
 
 ---
 
+## Set up team mode (per-dev files with collision-resistant IDs)
+
+When multiple developers work on separate branches, use per-dev task files to prevent ID collisions. Each developer gets a file with their initials (`tasks-gr.md`, `tasks-dg.md`, etc.) and a namespaced ID counter.
+
+1. Create `.task-memory.json` at the project root:
+
+   ```json
+   { "task_files_glob": "planning/tasks-*.md" }
+   ```
+
+2. Create per-dev files with the `Task Prefix:` header:
+
+   ```markdown
+   # Kanban Board
+
+   <!-- Config: Task Prefix: GR | Last Task ID: 0 -->
+
+   ## To Do
+
+   ### TASK-GR-1 | My first task
+   ...
+   ```
+
+3. Each developer now uses their own file with namespaced IDs (`TASK-GR-678`, `TASK-DG-1`, etc.), so branches never collide.
+
+**Verification:** SessionStart shows tasks from all per-dev files, each labeled with its filename.
+
+**Note:** The `.task-memory.json` config key `task_prefix` is currently unread/reserved and unrelated to the per-file `Task Prefix:` header (dev initials).
+
+Full details: [Reference → Team mode: Per-dev task files](REFERENCE.md#team-mode-per-dev-task-files).
+
+---
+
 ## Park a task on an external signal
 
 Use this when the action has shipped but the task can't close until something

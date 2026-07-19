@@ -63,11 +63,11 @@ while IFS= read -r line; do
     [ -n "$line" ] && existing_planning+=("$line")
 done < <(find . -maxdepth 4 -type d -name "planning" 2>/dev/null | grep -v node_modules | grep -v '.git' | head -10)
 
-# Find existing tasks.md files
+# Find existing tasks.md and per-dev tasks files (tasks-*.md)
 existing_tasks=()
 while IFS= read -r line; do
     [ -n "$line" ] && existing_tasks+=("$line")
-done < <(find . -maxdepth 5 -name "tasks.md" 2>/dev/null | grep -v node_modules | grep -v '.git' | head -10)
+done < <(find . -maxdepth 5 -name "tasks*.md" 2>/dev/null | grep -E '/tasks(-[A-Za-z]{2,4})?\.md$' | grep -v node_modules | grep -v '.git' | head -10)
 
 # Check for existing CLAUDE.md
 has_claude_md="false"

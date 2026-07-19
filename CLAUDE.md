@@ -75,7 +75,11 @@ Status: done        → Place under ## ✅ Done (or ## Done)
 
 **Verification (optional):**
 ```bash
-grep -B 3 "^### TASK-XXX" planning/tasks.md | head -4
+# Legacy or namespaced IDs (TASK-042 or TASK-GR-678)
+grep -B 3 "^### TASK-" planning/tasks.md | head -4
+
+# Or more strictly with regex:
+grep -B 3 -E "^### TASK-([A-Z]{2,4}-)?[0-9]+" planning/tasks.md | head -4
 ```
 
 ---

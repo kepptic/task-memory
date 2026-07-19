@@ -1,6 +1,6 @@
 {
   "name": "task-memory",
-  "version": "3.4.1",
+  "version": "3.5.0",
   "description": "Privacy-first Kanban task manager with Manus-style memory. Single HTML file, zero dependencies, works offline.",
   "main": "src/main.jsx",
   "directories": {
@@ -11,7 +11,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint src/**/*.{js,jsx}"
+    "lint": "eslint src/**/*.{js,jsx}",
+    "test:ui": "node tests/test-ui.mjs"
   },
   "repository": {
     "type": "git",

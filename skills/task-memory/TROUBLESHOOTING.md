@@ -108,9 +108,9 @@ If hooks aren't working as expected:
    ```
 
 4. **Verify tasks.md format:**
-   - Must have `<!-- Config: Last Task ID: XXX -->` comment
+   - Must have `<!-- Config: Last Task ID: XXX -->` comment (or `<!-- Config: Task Prefix: GR | Last Task ID: 677 -->` for team mode)
    - Must have section headers (`## To Do`, `## In Progress`, `## Done`)
-   - Tasks must be h3 level (`### TASK-XXX`)
+   - Tasks must be h3 level (`### TASK-XXX` for legacy, or `### TASK-GR-XXX` for namespaced IDs)
 
 ## File Format Validation
 

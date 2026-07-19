@@ -1,6 +1,6 @@
 # Kanban Board
 
-<!-- Config: Last Task ID: 16 -->
+<!-- Config: Last Task ID: 18 -->
 
 ## ⚙️ Configuration
 
@@ -47,6 +47,37 @@ Currently the project selector only shows the folder name (e.g., "planning"), ma
 - [ ] Review fileSystem.js project storage structure
 - [ ] Review ProjectSelector.jsx component
 - [ ] Check if we can read files within selected directory
+
+**Notes**:
+
+**Errors Log**:
+
+### TASK-018 | Rebind file watcher on task-file switch
+**Priority**: Medium | **Category**: UI/UX | **Status**: todo
+**Workflow**: Bug Fix | **Complexity**: Standard
+**Created**: 2026-07-17
+**Tags**: #ui #file-watcher #bug
+
+The file watcher doesn't rebind when switching task files in the UI. After switching to a different task file via the task-file switcher, the watcher stays bound to the original file. This causes missed updates when the new file changes.
+
+**Subtasks**:
+- [ ] Review current file watcher setup in `src/utils/fileWatcher.js`
+- [ ] Check `handleTaskFileSwitch` in `src/App.jsx` to see what cleanup happens
+- [ ] Implement watcher unbind on task-file switch
+- [ ] Implement watcher rebind to the new task file
+- [ ] Test file watcher with multiple simultaneous task files
+- [ ] Verify no memory leaks from orphaned watchers
+
+**Technical Notes**:
+- Look at `fileWatcher.js` for watcher lifecycle management
+- `handleTaskFileSwitch` callback receives new task file info
+- May need to track active watcher instance in state
+- Test scenario: open `tasks-gr.md`, switch to `tasks-dg.md`, edit `tasks-dg.md`, verify UI reflects changes
+
+**Pre-Work Checklist**:
+- [ ] Read fileWatcher.js implementation
+- [ ] Review App.jsx handleTaskFileSwitch logic
+- [ ] Identify current watcher lifecycle
 
 **Notes**:
 
@@ -132,6 +163,28 @@ Test task for auto-reorganization. Originally in To Do section with Status: in-p
 - 2026-01-16 09:19:30 - Error: Error: command not found
 
 ## Done
+
+### TASK-017 | Team-safe, collision-resistant initials-namespaced task IDs
+**Priority**: High | **Category**: Feature | **Status**: done | **Assigned**: @user
+**Workflow**: Feature | **Complexity**: Complex
+**Created**: 2026-07-17 | **Started**: 2026-07-17 | **Finished**: 2026-07-17
+**Tags**: #feature #multi-dev #ids #backward-compat
+
+Support `TASK-<PREFIX>-<n>` IDs (2-4 uppercase letters + per-file monotonic int) so multiple devs on separate branches never collide on IDs, the counter line, or note filenames. Legacy unprefixed `TASK-<n>` IDs remain valid forever. Canonical grammar `TASK-(?:[A-Z]{2,4}-)?[0-9]+`; per-file header `<!-- Config: Task Prefix: GR | Last Task ID: 677 -->`. Implemented on branch `feat/task-017-namespaced-ids` (orchestrated: Fable plan -> Codex debate -> converge -> Sonnet code -> Haiku docs -> Fable review APPROVE).
+
+**Subtasks**:
+- [x] Phase 1: Fable devises plan -> PLAN-fable-v1.md
+- [x] Phase 2: Codex revised (6 BLOCKs, all real) -> Fable ruled Q1/Q2/Q3 -> PLAN-final.md (converged)
+- [x] Phase 3: Sonnet implemented (taskId.js, hook regex widening, markdown.js, App.jsx mint, multi-file discovery, tests) + Haiku docs sweep
+- [x] Phase 4: Fable final review -> APPROVE WITH NITS; nits cleared (Sonnet code nits 5-6, Haiku docs nits 1-4)
+- [x] Phase 5: Committed to feat/task-017-namespaced-ids (8 commits, TASK-017 refs); awaiting user merge/PR decision
+
+**Notes**:
+- JS tests 32/32; hook suite 54 pass / 10 fail (the 10 diff-identical to clean master = pre-existing, unrelated); build clean.
+- Follow-up filed: TASK-018 (rebind file watcher on task-file switch).
+- Acceptance verified by Fable via live byte-identical round-trip of the repo's own legacy board (master parser vs branch parser).
+
+**Errors Log**:
 
 ### TASK-016 | Dual-Format Release — Claude Code + Cowork
 **Priority**: 🟠 High | **Category**: Feature | **Status**: done | **Assigned**: @user

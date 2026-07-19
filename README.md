@@ -29,6 +29,12 @@ As of v3.2.0 the plugin ships in **dual format** — the same artifact installs 
 
 ## Quick Start
 
+### Team Mode
+
+For teams working on separate branches, use per-dev task files (`planning/tasks-gr.md`, `planning/tasks-dg.md`, etc.) to prevent ID collisions. Each file carries its own `Task Prefix: GR | Last Task ID: 677` header, minting namespaced IDs like `TASK-GR-678`. See [Team mode: Per-dev task files](docs/REFERENCE.md#team-mode-per-dev-task-files) for setup.
+
+**Note:** The `.task-memory.json` config key `task_prefix` is currently unread/reserved and unrelated to per-file `Task Prefix:` headers (dev initials).
+
 ### Install in Claude Code (Recommended)
 
 ```bash
