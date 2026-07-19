@@ -397,6 +397,49 @@ function App() {
     setNotification({ message, type });
   }, []);
 
+  // (Re)bind the file watcher to a specific file handle/content/fileName.
+  // Used both on initial project load and whenever the user switches task
+  // files (TASK-018). fileWatcher.startFileWatcher() now always rebinds
+  // (clearing any prior interval) instead of no-op'ing when one is already
+  // running, so calling this repeatedly across switches never leaks
+  // intervals and never leaves the watcher polling the previous file.
+  const startWatchingFile = useCallback((handle, content, fileName) => {
+    if (!handle) return;
+
+    // Reset the content baseline so the first poll after a switch compares
+    // against the newly-loaded file's content, not the previous file's.
+    fileWatcher.setCurrentContent(content);
+
+    // Set up notification for external changes
+    fileWatcher.setNotificationCallbacks({
+      onExternalChangeDetected: () => {
+        showNotification('File updated by external editor', 'info');
+      },
+    });
+
+    fileWatcher.startFileWatcher(handle, {
+      onExternalChange: (newContent) => {
+        const newParsed = markdownParser.parseMarkdown(newContent, { fileName });
+
+        // Detect what changed for component-level updates
+        const oldTasksForComparison = tasks;
+        const newMappedTasks = installBoard(newParsed, fileName);
+
+        // Use smart change detection
+        const changes = fileWatcher.detectChangedComponents(oldTasksForComparison, newMappedTasks);
+
+        if (changes.hasChanges) {
+          console.log(`📥 External changes: +${changes.addedTasks.length} -${changes.removedTasks.length} ~${changes.updatedTasks.length} moved:${changes.movedTasks.length}`);
+        }
+
+        // Update tasks
+        setTasks(newMappedTasks);
+        console.log('External changes loaded');
+      },
+    });
+    fileWatcherStartedRef.current = true;
+  }, [installBoard, showNotification, tasks]);
+
   const filteredTasks = useMemo(() => {
     let filtered = tasks.filter(task => {
       if (searchQuery) {
@@ -615,39 +658,8 @@ function App() {
         lastAccessed: Date.now(),
       });
 
-      // Start file watcher
-      if (!fileWatcherStartedRef.current && taskResult.fileHandle) {
-        fileWatcher.setCurrentContent(taskResult.content);
-
-        // Set up notification for external changes
-        fileWatcher.setNotificationCallbacks({
-          onExternalChangeDetected: () => {
-            showNotification('File updated by external editor', 'info');
-          },
-        });
-
-        fileWatcher.startFileWatcher(taskResult.fileHandle, {
-          onExternalChange: (newContent) => {
-            const newParsed = markdownParser.parseMarkdown(newContent, { fileName: taskResult.fileName });
-
-            // Detect what changed for component-level updates
-            const oldTasksForComparison = tasks;
-            const newMappedTasks = installBoard(newParsed, taskResult.fileName);
-
-            // Use smart change detection
-            const changes = fileWatcher.detectChangedComponents(oldTasksForComparison, newMappedTasks);
-
-            if (changes.hasChanges) {
-              console.log(`📥 External changes: +${changes.addedTasks.length} -${changes.removedTasks.length} ~${changes.updatedTasks.length} moved:${changes.movedTasks.length}`);
-            }
-
-            // Update tasks
-            setTasks(newMappedTasks);
-            console.log('External changes loaded');
-          },
-        });
-        fileWatcherStartedRef.current = true;
-      }
+      // Start (or rebind) file watcher for the loaded file
+      startWatchingFile(taskResult.fileHandle, taskResult.content, taskResult.fileName);
     } catch (error) {
       console.error('Failed to load project:', error);
       throw error;
@@ -862,8 +874,9 @@ function App() {
         });
       }
 
-      // Update file watcher
-      fileWatcher.setCurrentContent(result.content);
+      // Rebind file watcher to the newly-switched-to file so external edits
+      // to it are detected (and edits to the previous file no longer are).
+      startWatchingFile(result.fileHandle, result.content, fileName);
 
       showNotification(`Switched to ${displayPath}`);
     } catch (error) {

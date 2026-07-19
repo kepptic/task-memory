@@ -52,37 +52,6 @@ Currently the project selector only shows the folder name (e.g., "planning"), ma
 
 **Errors Log**:
 
-### TASK-018 | Rebind file watcher on task-file switch
-**Priority**: Medium | **Category**: UI/UX | **Status**: todo
-**Workflow**: Bug Fix | **Complexity**: Standard
-**Created**: 2026-07-17
-**Tags**: #ui #file-watcher #bug
-
-The file watcher doesn't rebind when switching task files in the UI. After switching to a different task file via the task-file switcher, the watcher stays bound to the original file. This causes missed updates when the new file changes.
-
-**Subtasks**:
-- [ ] Review current file watcher setup in `src/utils/fileWatcher.js`
-- [ ] Check `handleTaskFileSwitch` in `src/App.jsx` to see what cleanup happens
-- [ ] Implement watcher unbind on task-file switch
-- [ ] Implement watcher rebind to the new task file
-- [ ] Test file watcher with multiple simultaneous task files
-- [ ] Verify no memory leaks from orphaned watchers
-
-**Technical Notes**:
-- Look at `fileWatcher.js` for watcher lifecycle management
-- `handleTaskFileSwitch` callback receives new task file info
-- May need to track active watcher instance in state
-- Test scenario: open `tasks-gr.md`, switch to `tasks-dg.md`, edit `tasks-dg.md`, verify UI reflects changes
-
-**Pre-Work Checklist**:
-- [ ] Read fileWatcher.js implementation
-- [ ] Review App.jsx handleTaskFileSwitch logic
-- [ ] Identify current watcher lifecycle
-
-**Notes**:
-
-**Errors Log**:
-
 ### TASK-008 | Integration Testing and Final Polish
 **Priority**: Medium | **Category**: Testing | **Status**: todo | **Assigned**: @user
 **Created**: 2026-01-14 | **Started**: 2026-01-14 | **Finished**: 2026-01-14
@@ -163,6 +132,43 @@ Test task for auto-reorganization. Originally in To Do section with Status: in-p
 - 2026-01-16 09:19:30 - Error: Error: command not found
 
 ## Done
+
+### TASK-018 | Rebind file watcher on task-file switch
+**Priority**: Medium | **Category**: UI/UX | **Status**: done
+**Workflow**: Bug Fix | **Complexity**: Standard
+**Created**: 2026-07-17 | **Started**: 2026-07-19 | **Finished**: 2026-07-19
+**Tags**: #ui #file-watcher #bug
+
+The file watcher didn't rebind when switching task files in the UI. After switching to a different task file via the task-file switcher, the watcher stayed bound to the original file, so external edits to the new file went undetected (and, since the stale watcher kept polling the old file, an edit to the old file could fire its callback onto the switched-to board).
+
+**Root cause (diagnosed):** `startFileWatcher` no-ops if an interval already exists (`if (fileWatcherInterval) return`), so it can't rebind; `handleTaskFileSwitch` swaps the board but never restarts the watcher (bare `// Update file watcher` comment); the `onExternalChange` callback closes over the first file's fileName/handle. Fix: rebind `startFileWatcher` (clear-then-start), extract a `startWatchingFile(handle, content, fileName)` helper used by both load + switch, reset content baseline on switch.
+
+**Subtasks**:
+- [x] Review current file watcher setup in `src/utils/fileWatcher.js`
+- [x] Check `handleTaskFileSwitch` in `src/App.jsx` to see what cleanup happens
+- [x] Implement watcher unbind on task-file switch
+- [x] Implement watcher rebind to the new task file
+- [x] Test file watcher with multiple simultaneous task files (unit-tested via fake-interval-timer harness; live multi-file browser QA is a manual follow-up — browser File System Access API code)
+- [x] Verify no memory leaks from orphaned watchers (regression test asserts exactly one active interval across repeated rebinds)
+
+**Technical Notes**:
+- Look at `fileWatcher.js` for watcher lifecycle management
+- `handleTaskFileSwitch` callback receives new task file info
+- May need to track active watcher instance in state
+- Test scenario: open `tasks-gr.md`, switch to `tasks-dg.md`, edit `tasks-dg.md`, verify UI reflects changes
+
+**Pre-Work Checklist**:
+- [x] Read fileWatcher.js implementation
+- [x] Review App.jsx handleTaskFileSwitch logic
+- [x] Identify current watcher lifecycle
+
+**Notes**:
+- Fix: `src/utils/fileWatcher.js` `startFileWatcher` now clears any existing interval and resets `lastCheckedModified` before rebinding (was a silent no-op). The interval callback now returns the `checkForExternalChanges` promise (behavior-neutral for the real timer; makes ticks awaitable in tests).
+- `src/App.jsx` extracts `startWatchingFile(handle, content, fileName)` — a `useCallback` placed right after `showNotification` (its dependency) to avoid a TDZ reference error. Both `loadProjectFromHandle` and `handleSwitchTaskFile` call it, so every switch rebinds the watcher.
+- New regression suite `tests/test-watcher.mjs` (`npm run test:watcher`, wired into `test-hooks.sh` as `run_js_watcher_tests`) stubs `setInterval`/`clearInterval` to prove: rebind leaves exactly one active interval, the old handle stops being polled, an edit to the new file is detected, `stopFileWatcher` clears cleanly, and 3 rapid switches never leak intervals.
+- Verified: `test-ui.mjs` 51/51, `test-watcher.mjs` 2/2, `npm run build` clean, `dist/task-memory.html` untouched. End-to-end real-browser file-switch QA remains a manual step. The 10 pre-existing `test-hooks.sh` Python-hook failures reproduce identically on the base branch (unrelated to this fix).
+
+**Errors Log**:
 
 ### TASK-019 | Azure DevOps bridge — context layer keyed to ADO work items (full two-way)
 **Priority**: High | **Category**: Feature | **Status**: done | **Assigned**: @user

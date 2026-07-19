@@ -1,6 +1,6 @@
 {
   "name": "task-memory",
-  "version": "3.6.2",
+  "version": "3.6.3",
   "description": "Privacy-first Kanban task manager with Manus-style memory. Single HTML file, zero dependencies, works offline.",
   "main": "src/main.jsx",
   "directories": {
@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "lint": "eslint src/**/*.{js,jsx}",
     "test:ui": "node tests/test-ui.mjs",
+    "test:watcher": "node tests/test-watcher.mjs",
     "test:sync": "node tests/test-sync.mjs",
     "sync:ado": "node scripts/ado-sync.mjs"
   },

@@ -5,6 +5,13 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.3] - 2026-07-19
+
+### Fixed
+
+- **File watcher now rebinds when switching task files** (TASK-018): previously `startFileWatcher` silently no-op'd if a watcher was already running, and the task-file switcher never restarted it — so after switching files, external edits to the new file went undetected and a change to the old file could be applied under the wrong name. The watcher now clears and rebinds to the newly selected file (one interval, no leak; new regression suite `tests/test-watcher.mjs`).
+- **Packaging: skills no longer register twice.** `.claude-plugin/marketplace.json` declared an explicit `skills` array *and* the plugin auto-discovers `skills/`, so every skill was registered twice (inflating always-on cost) and the array had gone stale (missing `ado-sync`). Removed the explicit array — auto-discovery is now the single source of truth and picks up all skills once each.
+
 ## [3.6.2] - 2026-07-19
 
 ### Added

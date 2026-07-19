@@ -6,7 +6,7 @@
 	},
 	"metadata": {
 		"description": "Privacy-first Kanban task manager with Manus-style memory - mirrors TodoWrite, survives compaction",
-		"version": "3.6.2"
+		"version": "3.6.3"
 	},
 	"plugins": [
 		{
@@ -14,8 +14,7 @@
 			"description": "Privacy-first Kanban task manager with Manus-style memory - mirrors native TodoWrite, survives PreCompact, project-local state",
 			"source": "./",
 			"category": "productivity",
-			"strict": true,
-			"skills": ["./skills/task-memory", "./skills/task-status", "./skills/tm-init"]
+			"strict": true
 		}
 	]
 }
