@@ -20,6 +20,23 @@ import assert from 'node:assert/strict';
 import { loadAdoConfig, invertStateMap, normalizeOrgName, DEFAULT_STATE_MAP } from '../src/sync/config.js';
 import { createMockAdoClient, AdoUnavailableError } from '../src/sync/adoClient.js';
 import { htmlToText } from '../src/sync/htmlToText.js';
+import { findBlocks, readField, setField, setHeading, insertBlock, newAdoBlockText } from '../src/sync/board.js';
+import {
+  buildNotesSkeleton,
+  ensureNotesSkeleton,
+  getSection,
+  appendComments,
+  extractContext,
+  extractSummary,
+} from '../src/sync/notes.js';
+import {
+  emptySyncState,
+  parseSyncState,
+  serializeSyncState,
+  getTaskEntry,
+  setTaskEntry,
+  removeTaskEntry,
+} from '../src/sync/syncState.js';
 
 // =============================================================================
 // config.js — cases 15-19
@@ -170,4 +187,269 @@ test('createMockAdoClient: fixture.fail injects a failure on the Nth call only',
   await assert.rejects(() => client.getWorkItem(1), /boom/); // 2nd call: fails
   const third = await client.getWorkItem(1); // 3rd call: ok again
   assert.equal(third.id, 1);
+});
+
+// =============================================================================
+// board.js — cases 20-23
+// =============================================================================
+
+test('findBlocks: attributes sections, bounds mixed TASK/ADO adjacency (NEXT_SECTION tripwire mirror)', () => {
+  const board = `# Kanban Board
+
+<!-- Config: Task Prefix: GR | Last Task ID: 9 -->
+
+## In Progress
+
+### TASK-676 | Legacy block immediately followed by an ADO block
+**Status**: in-progress
+
+**Subtasks**:
+- [ ] pending only
+### ADO-12345 | ADO block sandwiched between two TASK blocks
+**Status**: in-progress
+
+**Subtasks**:
+- [x] done one
+- [ ] pending one
+### TASK-GR-9 | Prefixed block immediately following an ADO block
+**Status**: in-progress
+
+**Subtasks**:
+- [x] a
+
+---
+
+## Done
+
+`;
+  const blocks = findBlocks(board);
+  assert.equal(blocks.length, 3);
+  assert.deepEqual(blocks.map((b) => b.id), ['TASK-676', 'ADO-12345', 'TASK-GR-9']);
+  assert.deepEqual(blocks.map((b) => b.kind), ['task', 'ado', 'task']);
+  assert.ok(blocks.every((b) => b.sectionId === 'in-progress'));
+
+  // Boundary check: TASK-676's block must NOT swallow ADO-12345's heading.
+  assert.ok(!blocks[0].block.includes('ADO-12345'));
+  assert.ok(blocks[0].block.includes('pending only'));
+  // ADO-12345's block must not swallow TASK-GR-9's heading, and must not be
+  // swallowed by TASK-676's.
+  assert.ok(!blocks[1].block.includes('TASK-GR-9'));
+  assert.ok(blocks[1].block.includes('done one'));
+  // TASK-GR-9's block runs to the next '## ' boundary.
+  assert.ok(blocks[2].block.includes('- [x] a'));
+  assert.ok(!blocks[2].block.includes('## Done'));
+});
+
+test('findBlocks: sectionId attribution across multiple sections', () => {
+  const board = `## To Do
+
+### ADO-1 | In todo
+**Status**: todo
+
+## Done
+
+### ADO-2 | In done
+**Status**: done
+`;
+  const blocks = findBlocks(board);
+  assert.equal(blocks.find((b) => b.id === 'ADO-1').sectionId, 'to-do');
+  assert.equal(blocks.find((b) => b.id === 'ADO-2').sectionId, 'done');
+});
+
+test('setField: edits only the target field value, rest of block byte-identical', () => {
+  const block = `### ADO-12345 | Some title
+**Priority**: High | **Status**: todo | **Assigned**: @user
+**Created**: 2026-01-16
+
+Description text unaffected.
+`;
+  const updated = setField(block, 'Status', 'in-progress');
+  assert.match(updated, /\*\*Status\*\*: in-progress/);
+  // Byte-diff the rest: strip just the Status value from both and compare.
+  const stripStatus = (s) => s.replace(/\*\*Status\*\*:[ \t]*[^|\r\n]*/, '**Status**:');
+  assert.equal(stripStatus(updated), stripStatus(block));
+  assert.equal(readField(updated, 'Status'), 'in-progress');
+  assert.equal(readField(updated, 'Priority'), 'High');
+  assert.equal(readField(updated, 'Assigned'), '@user');
+});
+
+test('setField: appends onto a sibling line when the field is absent (Sprint/ADO cohabitation)', () => {
+  const block = `### ADO-12345 | Some title
+**Status**: in-progress
+**Sprint**: Sprint 41
+`;
+  const updated = setField(block, 'ADO', 'https://dev.azure.com/o/p/_workitems/edit/12345');
+  assert.match(updated, /\*\*Sprint\*\*: Sprint 41 \| \*\*ADO\*\*: https:\/\/dev\.azure\.com\/o\/p\/_workitems\/edit\/12345/);
+  assert.equal(readField(updated, 'Sprint'), 'Sprint 41');
+});
+
+test('setField: inserts a brand-new line when neither the field nor a sibling exists', () => {
+  const block = `### ADO-777 | Hand-written, ADO-side fields absent
+**Status**: todo
+`;
+  const updated = setField(block, 'Sprint', 'Sprint 50');
+  assert.equal(readField(updated, 'Sprint'), 'Sprint 50');
+  assert.equal(readField(updated, 'Status'), 'todo');
+});
+
+test('setHeading: rewrites only the heading line, body byte-identical', () => {
+  const board = `## In Progress
+
+### ADO-1 | Old title
+**Status**: in-progress
+
+Body text.
+
+## Done
+`;
+  const blocks = findBlocks(board);
+  const updated = setHeading(board, blocks[0], 'ADO-1', 'New title');
+  assert.match(updated, /^### ADO-1 \| New title$/m);
+  assert.ok(updated.includes('Body text.'));
+  assert.ok(updated.includes('## Done'));
+  // Everything after the heading line is untouched.
+  const bodyBefore = board.slice(board.indexOf('\n', blocks[0].start));
+  const bodyAfter = updated.slice(updated.indexOf('\n', blocks[0].start));
+  assert.equal(bodyAfter, bodyBefore);
+});
+
+test('insertBlock: appends into an existing section without touching others', () => {
+  const board = `## To Do
+
+## In Progress
+
+### TASK-1 | Existing
+
+## Done
+
+`;
+  const { boardText, created, warning } = insertBlock(board, 'in-progress', '### ADO-99 | New item\n**Status**: in-progress\n');
+  assert.equal(created, false);
+  assert.equal(warning, null);
+  assert.ok(boardText.includes('### TASK-1 | Existing'));
+  assert.ok(boardText.includes('### ADO-99 | New item'));
+  // Inserted after the existing task, before '## Done'.
+  const inProgressIdx = boardText.indexOf('## In Progress');
+  const doneIdx = boardText.indexOf('## Done');
+  const newIdx = boardText.indexOf('### ADO-99');
+  assert.ok(newIdx > inProgressIdx && newIdx < doneIdx);
+  // '## To Do' section untouched.
+  assert.match(boardText, /## To Do\n\n## In Progress/);
+});
+
+test('insertBlock: creates a missing section at EOF and reports it', () => {
+  const board = `## To Do
+
+`;
+  const { boardText, created, warning } = insertBlock(board, 'in-progress', '### ADO-99 | New item\n**Status**: in-progress\n', [
+    { id: 'in-progress', name: 'In Progress' },
+  ]);
+  assert.equal(created, true);
+  assert.ok(warning && /in-progress/.test(warning));
+  assert.match(boardText, /## In Progress/);
+  assert.ok(boardText.includes('### ADO-99 | New item'));
+});
+
+test('newAdoBlockText: matches the template shape', () => {
+  const text = newAdoBlockText({
+    id: 'ADO-12345',
+    title: 'Synced item',
+    status: 'in-progress',
+    assignee: '@user',
+    priority: 2,
+    sprint: 'Sprint 42',
+    url: 'https://dev.azure.com/o/p/_workitems/edit/12345',
+    today: '2026-07-19',
+  });
+  assert.equal(
+    text,
+    `### ADO-12345 | Synced item
+**Priority**: 2 | **Status**: in-progress | **Assigned**: @user
+**Created**: 2026-07-19
+**Sprint**: Sprint 42 | **ADO**: https://dev.azure.com/o/p/_workitems/edit/12345
+`,
+  );
+});
+
+test('newAdoBlockText: minimal (no assignee/priority/sprint/url) still parses via findBlocks', () => {
+  const text = newAdoBlockText({ id: 'ADO-1', title: 'Bare', status: 'todo' });
+  const board = `## To Do\n\n${text}\n## Done\n`;
+  const blocks = findBlocks(board);
+  assert.equal(blocks.length, 1);
+  assert.equal(readField(blocks[0].block, 'Status'), 'todo');
+});
+
+// =============================================================================
+// notes.js — smoke coverage (exercised more thoroughly by engine.pull/push
+// in P5/P6; not separately numbered in PLAN-ado.md §9.2)
+// =============================================================================
+
+test('notes: buildNotesSkeleton/ensureNotesSkeleton round-trip has a Summary section', () => {
+  const skeleton = buildNotesSkeleton('ADO-1', 'Some title', '2026-07-19');
+  assert.match(skeleton, /^# ADO-1 Notes — Some title$/m);
+  assert.equal(getSection(skeleton, 'Summary'), '_One-paragraph answer to: what is this task doing and why?_');
+
+  const { text, created } = ensureNotesSkeleton('', 'ADO-1', 'Some title', '2026-07-19');
+  assert.equal(created, true);
+  assert.equal(text, skeleton);
+
+  const { text: unchanged, created: notCreated } = ensureNotesSkeleton('# existing\n\ncontent', 'ADO-1', 'x', 'y');
+  assert.equal(notCreated, false);
+  assert.equal(unchanged, '# existing\n\ncontent');
+});
+
+test('notes: appendComments skips [task-memory]-marked comments and advances max id', () => {
+  const notes = buildNotesSkeleton('ADO-1', 'Title', '2026-07-19');
+  const comments = [
+    { id: 1, author: 'Alice', createdDate: '2026-07-18T00:00:00Z', text: 'Looks good' },
+    { id: 2, author: 'Bot', createdDate: '2026-07-19T00:00:00Z', text: '[task-memory] context update abcd1234\n\nsome pushed context' },
+  ];
+  const { text, appendedMaxId } = appendComments(notes, comments);
+  assert.ok(text.includes('**Alice** — 2026-07-18T00:00:00Z (comment 1)'));
+  assert.ok(!text.includes('[task-memory] context update'));
+  assert.equal(appendedMaxId, 1); // only comment 1 counted — comment 2 was our own marker
+});
+
+test('notes: extractContext strips ADO Comments and Summary; extractSummary rejects placeholder', () => {
+  const notes = buildNotesSkeleton('ADO-1', 'Title', '2026-07-19');
+  assert.equal(extractSummary(notes), null); // still placeholder-only
+
+  const withComments = appendComments(notes, [{ id: 1, author: 'A', createdDate: 'd', text: 'hi' }]).text;
+  const context = extractContext(withComments);
+  assert.ok(!context.includes('ADO Comments'));
+  assert.ok(!context.includes('## Summary'));
+  assert.ok(context.includes('Patterns Discovered'));
+
+  const filledIn = withComments.replace(
+    '_One-paragraph answer to: what is this task doing and why?_',
+    'This task wires up the sync engine.',
+  );
+  assert.equal(extractSummary(filledIn), 'This task wires up the sync engine.');
+});
+
+// =============================================================================
+// syncState.js — smoke coverage (exercised more thoroughly by engine.* in
+// P5/P6; not separately numbered in PLAN-ado.md §9.2)
+// =============================================================================
+
+test('syncState: parse/serialize round-trip, migrate on missing/garbage input', () => {
+  assert.deepEqual(parseSyncState(''), emptySyncState());
+  assert.deepEqual(parseSyncState('not json'), emptySyncState());
+  assert.deepEqual(parseSyncState('{"version":2,"tasks":{}}'), emptySyncState());
+
+  const state = setTaskEntry(emptySyncState(), 'ADO-12345', {
+    rev: 7,
+    adoState: 'Active',
+    localStatus: 'in-progress',
+    syncedAt: '2026-07-19T10:00:00Z',
+    lastCommentId: 987,
+  });
+  const serialized = serializeSyncState(state);
+  const reparsed = parseSyncState(serialized);
+  assert.deepEqual(reparsed, state);
+  assert.equal(getTaskEntry(reparsed, 'ADO-12345').rev, 7);
+  assert.equal(getTaskEntry(reparsed, 'ADO-99999'), null);
+
+  const removed = removeTaskEntry(state, 'ADO-12345');
+  assert.equal(getTaskEntry(removed, 'ADO-12345'), null);
 });
