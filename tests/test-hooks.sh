@@ -1056,6 +1056,399 @@ test_session_start_gcs_stale_state() {
 }
 
 # =============================================================================
+# ADO bridge (TASK-019) — ANY_ID_CORE widening exercised via the hook.
+# Mirrors the TASK-017 prefixed-id fixtures above, but with `### ADO-<n>`
+# headings, to prove notes routing, precompact, Stop-gate, stamping, and
+# reorganize all fall out of the single ANY_ID_CORE regex change (no other
+# hook code was touched — see PLAN-ado.md §3.1).
+# =============================================================================
+
+# Fixture: one ADO-synced in-progress task (1/2 subtasks, one Visual Ops Log
+# entry, Sprint/ADO fields present) plus a legacy done task sitting right
+# next to it, to exercise the widened grammar across every hook code path.
+create_ado_tasks_file() {
+    cat > "$FIXTURES_DIR/planning/tasks.md" << 'EOF'
+# Kanban Board
+
+<!-- Config: Last Task ID: 000 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+
+**Categories**: Feature, Bug, Docs, Research
+
+**Users**: @user
+
+---
+
+## To Do
+
+---
+
+## In Progress
+
+### ADO-12345 | ADO task in progress
+**Priority**: High | **Category**: Feature | **Status**: in-progress | **Assigned**: @user
+**Created**: 2026-01-16 | **Started**: 2026-01-16
+**Sprint**: Sprint 42 | **ADO**: https://dev.azure.com/org/proj/_workitems/edit/12345
+**Tags**: #test
+
+A synced Azure DevOps task currently in progress.
+
+**Subtasks**:
+- [x] Completed subtask
+- [ ] Pending subtask
+
+**Notes**:
+
+**Visual Operations Log**:
+- 2026-01-16 10:00:00 - WebFetch: https://example.com/prior-research
+
+**Errors Log**:
+
+---
+
+## Done
+
+### TASK-676 | Legacy done task
+**Priority**: Low | **Category**: Docs | **Status**: done | **Assigned**: @user
+**Created**: 2026-01-15 | **Started**: 2026-01-15 | **Finished**: 2026-01-15
+**Tags**: #test
+
+A completed legacy (unprefixed) task, sitting right next to an ADO-synced one.
+
+**Subtasks**:
+- [x] Done subtask
+
+**Notes**:
+
+---
+EOF
+}
+
+test_ado_session_start() {
+    log_test "TASK-019: SessionStart shows an ADO work-item id, its own progress, and creates its notes skeleton at the ADO path"
+
+    create_ado_tasks_file
+    reset_v33_state
+    rm -f "$FIXTURES_DIR/planning/notes/ADO-12345.md"
+
+    local output
+    output=$(echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1) || true
+
+    assert_contains "$output" "TASK-MEMORY SESSION START" "Header displayed"
+    assert_contains "$output" "ADO-12345" "ADO task id shown"
+    assert_contains "$output" "ADO task in progress" "Task title shown"
+    assert_contains "$output" "1/2" "Progress shown (1 completed, 2 total)"
+
+    if [ -f "$FIXTURES_DIR/planning/notes/ADO-12345.md" ]; then
+        log_pass "notes skeleton created at planning/notes/ADO-12345.md"
+    else
+        log_fail "notes skeleton not created at planning/notes/ADO-12345.md"
+    fi
+}
+
+test_ado_mixed_block_termination() {
+    log_test "TASK-019: consecutive TASK-676 / ADO-12345 / TASK-GR-9 blocks each report their own counts (NEXT_SECTION_RE tripwire)"
+
+    local MFROOT="$FIXTURES_DIR/ado-mixed-termination"
+    rm -rf "$MFROOT"
+    mkdir -p "$MFROOT/docs/todo/proj"
+
+    cat > "$MFROOT/.task-memory.json" << 'EOF'
+{ "task_files_glob": "docs/todo/*/tasks.md" }
+EOF
+
+    # No blank line / section header between the three headings — proves
+    # NEXT_SECTION_RE recognizes "### ADO-12345" as a boundary between a
+    # legacy TASK block and a following prefixed TASK block, in both
+    # directions, without absorbing either neighbor's subtasks.
+    cat > "$MFROOT/docs/todo/proj/tasks.md" << 'EOF'
+# proj Kanban
+
+<!-- Config: Task Prefix: GR | Last Task ID: 9 -->
+
+## In Progress
+
+### TASK-676 | Legacy block immediately followed by an ADO block
+**Status**: in-progress
+
+**Subtasks**:
+- [ ] pending only
+### ADO-12345 | ADO block sandwiched between two TASK blocks
+**Status**: in-progress
+
+**Subtasks**:
+- [x] done one
+- [ ] pending one
+### TASK-GR-9 | Prefixed block immediately following an ADO block
+**Status**: in-progress
+
+**Subtasks**:
+- [x] a
+- [x] b
+- [ ] c
+
+---
+
+## Done
+
+---
+EOF
+
+    local output
+    output=$(CLAUDE_PROJECT_DIR="$MFROOT" echo '{"hook_event_name":"SessionStart"}' | CLAUDE_PROJECT_DIR="$MFROOT" "$HOOK_SCRIPT" 2>&1) || true
+
+    assert_contains "$output" "TASK-676" "Legacy block listed"
+    assert_contains "$output" "ADO-12345" "ADO block listed"
+    assert_contains "$output" "TASK-GR-9" "Prefixed block listed"
+    assert_contains "$output" "[0/1]" "Legacy block reports its own 0/1 (not absorbed into the ADO block)"
+    assert_contains "$output" "[1/2]" "ADO block reports its own 1/2 (not absorbed by either neighbor)"
+    assert_contains "$output" "[2/3]" "Trailing prefixed block reports its own 2/3 (not absorbed by the ADO block)"
+
+    rm -rf "$MFROOT"
+}
+
+test_ado_reorg() {
+    log_test "TASK-019: reorganize moves an ADO done-block out of In Progress into Done; legacy in-progress block stays (mirrors test_reorg_mixed)"
+
+    cat > "$FIXTURES_DIR/planning/tasks.md" << 'EOF'
+# Kanban Board
+
+<!-- Config: Last Task ID: 000 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+
+---
+
+## To Do
+
+---
+
+## In Progress
+
+### ADO-12345 | ADO task actually done
+**Status**: done
+
+**Subtasks**:
+- [x] only one
+
+### TASK-676 | Legacy task correctly in progress
+**Status**: in-progress
+
+**Subtasks**:
+- [ ] pending
+
+---
+
+## Done
+
+---
+EOF
+
+    local input
+    input=$(printf '{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"%s/planning/tasks.md"}}' "$FIXTURES_DIR")
+    echo "$input" | "$HOOK_SCRIPT" > /dev/null 2>&1 || true
+
+    local done_section in_progress_section
+    done_section=$(awk '/^## Done/{flag=1} flag' "$FIXTURES_DIR/planning/tasks.md")
+    in_progress_section=$(awk '/^## In Progress/{flag=1} /^## Done/{flag=0} flag' "$FIXTURES_DIR/planning/tasks.md")
+
+    if echo "$done_section" | grep -q "ADO-12345"; then
+        log_pass "ADO done-block moved into the Done section"
+    else
+        log_fail "ADO done-block was NOT moved into the Done section"
+    fi
+
+    if echo "$in_progress_section" | grep -q "TASK-676" && ! echo "$in_progress_section" | grep -q "ADO-12345"; then
+        log_pass "legacy in-progress block stayed in In Progress; ADO block left"
+    else
+        log_fail "In Progress section content unexpected after reorganize"
+    fi
+}
+
+test_ado_stop_block() {
+    log_test "TASK-019: Stop-block JSON names the ADO work-item id"
+
+    create_ado_tasks_file
+    reset_v33_state
+
+    local sid="ado-stop-session"
+
+    # Emit enough relevant engagements to pass the v3.3 threshold (3).
+    for _ in 1 2 3 4; do
+        echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"grep ADO-12345 planning/tasks.md"}}' \
+            | "$HOOK_SCRIPT" 2>&1 || true
+    done
+
+    local output
+    output=$(echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' \
+        | "$HOOK_SCRIPT" 2>&1) || true
+
+    assert_contains "$output" '"decision": "block"' "Stop blocks after relevant engagement on an ADO task"
+    assert_contains "$output" "ADO-12345" "Block JSON names the ADO work-item id"
+}
+
+test_ado_precompact() {
+    log_test "TASK-019: PreCompact writes an ADO-prefixed snapshot filename and appends the ops log"
+
+    create_ado_tasks_file
+    rm -f "$FIXTURES_DIR/planning/notes/ADO-12345"*.md
+
+    local output
+    output=$(echo '{"hook_event_name":"PreCompact","trigger":"manual"}' | "$HOOK_SCRIPT" 2>&1) || true
+
+    assert_contains "$output" "Pre-compact snapshot:" "Snapshot message shown"
+
+    local snapshot
+    snapshot=$(ls "$FIXTURES_DIR/planning/notes/ADO-12345-precompact-"*.md 2>/dev/null | head -1)
+    if [ -n "$snapshot" ] && [ -f "$snapshot" ]; then
+        log_pass "precompact snapshot written with the ADO id in its filename"
+    else
+        log_fail "precompact snapshot not found for ADO id (looked for ADO-12345-precompact-*.md)"
+    fi
+
+    if [ -f "$FIXTURES_DIR/planning/notes/ADO-12345.md" ]; then
+        local content
+        content=$(cat "$FIXTURES_DIR/planning/notes/ADO-12345.md")
+        assert_contains "$content" "Pre-Compact Ops Log" "Ops log appended to the ADO task's notes file"
+    else
+        log_fail "notes file for ADO id missing after precompact"
+    fi
+}
+
+test_ado_malformed_heading_ignored() {
+    log_test "TASK-019: malformed heading ADO-012 (leading zero) is never treated as a task"
+
+    cat > "$FIXTURES_DIR/planning/tasks.md" << 'EOF'
+# Kanban Board
+
+<!-- Config: Last Task ID: 000 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+
+---
+
+## To Do
+
+---
+
+## In Progress
+
+### ADO-012 | Malformed id (leading zero), should never parse as a task
+**Status**: in-progress
+
+**Subtasks**:
+- [ ] should not be counted anywhere
+
+---
+
+## Done
+
+---
+EOF
+
+    local output
+    output=$(echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1) || true
+
+    # Despite "**Status**: in-progress", ADO-012's heading never matches
+    # TASK_HEADING_RE (leading zero rejected by ADO_ID_CORE), so it's never
+    # yielded as a task block — SessionStart must report no in-progress tasks.
+    assert_contains "$output" "No in-progress tasks" "Malformed ADO heading produced no parsed task"
+}
+
+test_ado_hyphen_continuation_not_boundary() {
+    log_test "TASK-019 (Codex review finding #14): a bare '### ADO-12-foo' line (no title/pipe) inside a block body is NOT read as a new task boundary"
+
+    cat > "$FIXTURES_DIR/planning/tasks.md" << 'EOF'
+# Kanban Board
+
+<!-- Config: Last Task ID: 000 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+
+---
+
+## To Do
+
+---
+
+## In Progress
+
+### ADO-777 | Real task with a stray hyphen-glued mention in its body
+**Status**: in-progress
+
+Notes mention ADO-12-foo inline, and even a stray markdown H3 line:
+### ADO-12-foo
+which must NOT be read as a new task boundary — ADO_ID_CORE's tail lookahead
+excludes a following "-", so this whole line fails to match TASK_HEADING_RE
+at all and stays inside THIS block.
+
+**Subtasks**:
+- [x] one
+- [ ] two
+- [ ] three
+
+---
+
+## Done
+
+---
+EOF
+
+    local output
+    output=$(echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1) || true
+
+    assert_contains "$output" "ADO-777" "Real task still recognized"
+    assert_contains "$output" "[1/3]" "Subtask count is the FULL block's (1/3) — not truncated at the bogus '### ADO-12-foo' line"
+}
+
+test_ado_notes_skeleton() {
+    log_test "TASK-019: SessionStart creates a notes skeleton for an ADO work-item id"
+
+    create_ado_tasks_file
+    reset_v33_state
+    rm -f "$FIXTURES_DIR/planning/notes/ADO-12345.md"
+
+    echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1 > /dev/null || true
+
+    if [ -f "$FIXTURES_DIR/planning/notes/ADO-12345.md" ]; then
+        log_pass "notes skeleton created at planning/notes/ADO-12345.md"
+    else
+        log_fail "notes skeleton not created at planning/notes/ADO-12345.md"
+    fi
+}
+
+test_ado_stamping_bash() {
+    log_test "TASK-019: Bash command mentioning an ADO id DOES stamp"
+
+    create_ado_tasks_file
+    reset_v33_state
+
+    local sid="ado-stamp-session"
+
+    # Emit enough engagements to pass the threshold (3 by default).
+    for _ in 1 2 3 4; do
+        echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"grep ADO-12345 planning/tasks.md"}}' \
+            | "$HOOK_SCRIPT" 2>&1 || true
+    done
+
+    local output
+    output=$(echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' \
+        | "$HOOK_SCRIPT" 2>&1) || true
+
+    assert_contains "$output" '"decision": "block"' "Stop blocks after relevant engagement"
+    assert_contains "$output" "ADO-12345" "Block message names the ADO task"
+}
+
+# =============================================================================
 # JS UI suite (TASK-017) — node:test against production taskId.js /
 # markdown.js / fileSystem.js. Guarded behind `command -v node`; skips
 # cleanly (not a failure) on a machine without node on PATH. Also runnable
@@ -1148,6 +1541,17 @@ test_reorg_mixed
 test_reorg_gate_prefixed_filename
 test_malformed_heading_ignored
 test_stop_block_prefixed
+
+# TASK-019: ADO bridge id acceptance (ANY_ID_CORE widening)
+test_ado_session_start
+test_ado_mixed_block_termination
+test_ado_reorg
+test_ado_stop_block
+test_ado_precompact
+test_ado_malformed_heading_ignored
+test_ado_hyphen_continuation_not_boundary
+test_ado_notes_skeleton
+test_ado_stamping_bash
 
 # JS UI suite (taskId.js / markdown.js / fileSystem.js) — guarded, see below
 run_js_ui_tests

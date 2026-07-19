@@ -1,0 +1,16 @@
+{
+  "workItems": {
+    "2001": {
+      "id": 2001,
+      "rev": 5,
+      "title": "Conflicted item",
+      "state": "Active",
+      "type": "Task",
+      "assignee": "",
+      "iterationPath": "",
+      "priority": null,
+      "url": "https://dev.azure.com/o/p/_workitems/edit/2001"
+    }
+  },
+  "comments": { "2001": [] }
+}

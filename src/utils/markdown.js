@@ -1,7 +1,25 @@
 // Markdown parsing and generation module
 // Handles conversion between markdown format and task objects
 import DOMPurify from "dompurify";
-import { TASK_ID_CORE, CONFIG_HEADER_RE, resolvePrefix, serializeConfigHeader } from "./taskId.js";
+import { ANY_ID_CORE, CONFIG_HEADER_RE, resolvePrefix, serializeConfigHeader } from "./taskId.js";
+
+// TASK-019 (Codex review finding #13): quiet-logger toggle. parseMarkdown/
+// parseTask normally emit human-readable progress lines (console.log/warn)
+// for the UI's dev console — useful there, but they corrupt `ado-sync
+// ... --json` output, whose entire stdout contract is "parseable JSON,
+// nothing else". Defaults to false so the UI's logging behavior is
+// UNCHANGED; only scripts/ado-sync.mjs calls setQuietLogging(true), and only
+// when --json was passed.
+let quietLogging = false;
+export function setQuietLogging(enabled) {
+  quietLogging = !!enabled;
+}
+function qlog(...args) {
+  if (!quietLogging) console.log(...args);
+}
+function qwarn(...args) {
+  if (!quietLogging) console.warn(...args);
+}
 
 // Parse markdown content into tasks and config
 // `opts.fileName` is used ONLY as the fallback source for prefix derivation
@@ -26,7 +44,7 @@ function parseMarkdown(content, opts = {}) {
     config.lastTaskId = parseInt(configMatch[2], 10);
     const { prefix, warning } = resolvePrefix(configMatch[1], opts.fileName);
     config.taskPrefix = prefix;
-    if (warning) console.warn(warning);
+    if (warning) qwarn(warning);
   }
 
   // Parse config section
@@ -168,10 +186,10 @@ function parseMarkdown(content, opts = {}) {
   }
 
   // Parse tasks from configured columns
-  console.log('📊 Parsing tasks from columns:', config.columns.map(c => `${c.name}(${c.id})`).join(', '));
+  qlog('📊 Parsing tasks from columns:', config.columns.map(c => `${c.name}(${c.id})`).join(', '));
   config.columns.forEach((column) => {
     const columnTasks = parseTasksFromSection(content, column.name, column.id);
-    console.log(`📋 Column "${column.name}" (id: ${column.id}): found ${columnTasks.length} tasks`);
+    qlog(`📋 Column "${column.name}" (id: ${column.id}): found ${columnTasks.length} tasks`);
     tasks.push(...columnTasks);
   });
 
@@ -189,7 +207,7 @@ function parseMarkdown(content, opts = {}) {
       orphanedTasks.forEach((task) => {
         task.status = defaultColumn; // Move to first column
         task._wasOrphaned = true; // Mark for potential notification
-        console.log(`🔄 Rescued orphaned task ${task.id} from "${section.name}" to "${defaultColumn}"`);
+        qlog(`🔄 Rescued orphaned task ${task.id} from "${section.name}" to "${defaultColumn}"`);
       });
       tasks.push(...orphanedTasks);
     }
@@ -241,17 +259,18 @@ function deriveColumnId(name) {
     || 'column';
 }
 
-// Shared anchored task-heading iterator (TASK-017). Replaces the old
-// `split(/###\s+TASK-/)` approach, which (a) could split mid-line on any
-// literal "### TASK-" substring appearing inside a description/notes body,
-// and (b) silently dropped prefixed ids (`TASK-GR-678` never matched
-// `/^(\d+)$/`). Anchored to line starts (`^###`, MULTILINE) and bounded by
-// TASK_ID_CORE's tail lookahead, so `TASK-GR-12X` is correctly not a task
-// heading. IDs are returned VERBATIM — never re-padded (a hand-written
-// `TASK-5` round-trips as `TASK-5`, not `TASK-005`). Used by both
-// parseTasksFromSection and parseArchive so this logic lives in one place.
+// Shared anchored task-heading iterator (TASK-017; widened to ANY_ID_CORE in
+// TASK-019). Replaces the old `split(/###\s+TASK-/)` approach, which (a)
+// could split mid-line on any literal "### TASK-" substring appearing inside
+// a description/notes body, and (b) silently dropped prefixed ids
+// (`TASK-GR-678` never matched `/^(\d+)$/`). Anchored to line starts (`^###`,
+// MULTILINE) and bounded by each id kind's own tail lookahead, so
+// `TASK-GR-12X` and `ADO-012` are correctly not task headings. IDs are
+// returned VERBATIM — never re-padded (a hand-written `TASK-5` round-trips
+// as `TASK-5`, not `TASK-005`). Used by both parseTasksFromSection and
+// parseArchive so this logic lives in one place.
 function iterTaskHeadingBlocks(sectionContent) {
-  const headingRe = new RegExp('^###[ \\t]+(' + TASK_ID_CORE + ')[ \\t]*\\|[ \\t]*(.+)$', 'gm');
+  const headingRe = new RegExp('^###[ \\t]+(' + ANY_ID_CORE + ')[ \\t]*\\|[ \\t]*(.+)$', 'gm');
   const matches = [...sectionContent.matchAll(headingRe)];
   return matches.map((m, i) => {
     const blockStart = m.index + m[0].length;
@@ -323,6 +342,8 @@ function parseTask(id, title, content, status) {
     started: "",
     due: "",
     completed: "",
+    sprint: "",     // NEW (TASK-019): ADO iteration path, first-class so round-trip is lossless
+    adoUrl: "",     // NEW (TASK-019): ADO work-item web url
     description: "",
     subtasks: [],
     preWorkChecklist: [], // NEW: Pre-implementation checklist items
@@ -372,25 +393,34 @@ function parseTask(id, title, content, status) {
   const completedMatch = content.match(/\*\*Finished\*\*:\s*([\d-]+)/);
   if (completedMatch) task.completed = completedMatch[1];
 
+  // NEW (TASK-019, D6): Sprint (ADO iteration path) and ADO (work-item url),
+  // first-class fields so the UI round-trips them losslessly instead of
+  // swallowing them into description.
+  const sprintMatch = content.match(/\*\*Sprint\*\*:\s*(.+?)(?:\s*\||$)/m);
+  if (sprintMatch) task.sprint = sprintMatch[1].trim();
+
+  const adoUrlMatch = content.match(/\*\*ADO\*\*:\s*(\S+)/);
+  if (adoUrlMatch) task.adoUrl = adoUrlMatch[1].trim();
+
   // Parse Status field - if present, it's authoritative (overrides section)
   const statusMatch = content.match(/\*\*Status\*\*:\s*(\S+)/i);
   if (statusMatch) {
     // Accept any status value - it will be used to move the task to the correct section
     const parsedStatus = statusMatch[1].toLowerCase().trim();
 
-    console.log(
+    qlog(
       `🔍 Task ${id}: current section='${status}', parsed Status field='${parsedStatus}'`,
     );
 
     // If the status doesn't match the section we're in, mark it for reorganization
     if (parsedStatus !== status) {
-      console.log(
+      qlog(
         `✨ Task ${id} marked for reorganization: will move from '${status}' to '${parsedStatus}'`,
       );
       task._needsReorganization = true;
       task.status = parsedStatus; // Use the parsed status
     } else {
-      console.log(`✓ Task ${id} already in correct section '${status}'`);
+      qlog(`✓ Task ${id} already in correct section '${status}'`);
     }
   }
 
@@ -409,7 +439,7 @@ function parseTask(id, title, content, status) {
     // Skip metadata lines
     if (
       line.match(
-        /^\*\*(Priority|Category|Assigned|Created|Started|Due|Finished|Tags|Status|Workflow|Complexity)\*\*/,
+        /^\*\*(Priority|Category|Assigned|Created|Started|Due|Finished|Tags|Status|Workflow|Complexity|Sprint|ADO)\*\*/,
       )
     ) {
       continue;
@@ -616,6 +646,14 @@ function generateMarkdown(tasks, config) {
         dates += (dates ? " | " : "") + `**Finished**: ${task.completed}`;
       if (dates) md += dates + "\n";
 
+      // NEW (TASK-019, D6): Sprint / ADO — single ` | `-joined line, first-class
+      // so it round-trips losslessly instead of being swallowed into description.
+      let adoLine = "";
+      if (task.sprint) adoLine += `**Sprint**: ${task.sprint}`;
+      if (task.adoUrl)
+        adoLine += (adoLine ? " | " : "") + `**ADO**: ${task.adoUrl}`;
+      if (adoLine) md += adoLine + "\n";
+
       if (task.tags.length > 0) {
         md += `**Tags**: ${task.tags.join(" ")}\n`;
       }
@@ -699,6 +737,13 @@ function generateArchiveMarkdown(archivedTasks) {
     if (task.completed)
       dates += (dates ? " | " : "") + `**Finished**: ${task.completed}`;
     if (dates) md += dates + "\n";
+
+    // Sprint / ADO (TASK-019, D6) — mirrors generateMarkdown.
+    let archiveAdoLine = "";
+    if (task.sprint) archiveAdoLine += `**Sprint**: ${task.sprint}`;
+    if (task.adoUrl)
+      archiveAdoLine += (archiveAdoLine ? " | " : "") + `**ADO**: ${task.adoUrl}`;
+    if (archiveAdoLine) md += archiveAdoLine + "\n";
 
     if (task.tags && task.tags.length > 0) {
       md += `**Tags**: ${task.tags.join(" ")}\n`;
@@ -867,6 +912,7 @@ export const markdownParser = {
   scheduleStatusReorganization,
   deriveColumnId,
   normalizeForComparison,
+  setQuietLogging,
 };
 
 export {

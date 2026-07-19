@@ -2,5 +2,21 @@
   "planning_dir": "planning",
   "task_prefix": "TASK",
   "min_engagements_to_block": 3,
-  "session_state_max_age_hours": 24
+  "session_state_max_age_hours": 24,
+  "ado": {
+    "org": "https://dev.azure.com/YOUR_ORG",
+    "project": "YOUR_PROJECT",
+    "team": "",
+    "area_path": "",
+    "scope": "current-sprint",
+    "work_item_type": "Task",
+    "task_file": "planning/tasks.md",
+    "repo_url": "https://github.com/YOUR_ORG/YOUR_REPO",
+    "state_map": {
+      "todo": "New",
+      "in-progress": "Active",
+      "awaiting": "Resolved",
+      "done": "Closed"
+    }
+  }
 }

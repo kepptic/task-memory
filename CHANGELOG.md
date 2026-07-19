@@ -5,6 +5,16 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.0] - 2026-07-19
+
+### Added
+
+- **Azure DevOps bridge (opt-in):** Sync the board with Azure DevOps work items via the official `microsoft/azure-devops-mcp` server. Team tasks key off ADO ids (`### ADO-12345`) with context in `notes/ADO-12345.md`; local `TASK-<PREFIX>-<n>` ids continue to work offline. ADO owns identity, state, assignee, priority, and sprint; task-memory becomes the AI-context layer with notes, subtasks, and a distilled done-summary flowing back to ADO as comments.
+- **`scripts/ado-sync.mjs` CLI:** Four commands: `pull` (materialize sprint/assigned items + comments), `push` (status + notes + done-summary), `promote` (turn a local `TASK-*` into a new or linked ADO work item), `status` (diff-report, fully offline).
+- **New `ado-sync` skill:** Full workflow guide at `skills/ado-sync/SKILL.md`, including live-ADO integration checklist.
+- **`docs/ADO-SYNC.md` reference:** Complete technical documentation covering config schema, command reference, two-way sync rules, conflict resolution, and the done flow.
+- Enable by adding an `ado` block to `.task-memory.json`; with no block, behavior is unchanged.
+
 ## [3.5.0] - 2026-07-17
 
 ### Added

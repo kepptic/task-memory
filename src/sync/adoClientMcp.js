@@ -1,0 +1,426 @@
+// src/sync/adoClientMcp.js — TASK-019 (Azure DevOps bridge)
+//
+// The REAL adoClient implementation, backed by the official
+// `@modelcontextprotocol/sdk` stdio client talking to the official
+// `microsoft/azure-devops-mcp` server (`npx -y @azure-devops/mcp <org> -d
+// core work work-items`), authenticated via the server's own `az login` /
+// browser-OAuth flow — no PAT, no custom REST client (D4).
+//
+// This is the ONLY file in src/sync/ that imports @modelcontextprotocol/sdk,
+// and the ONLY file that knows the real MCP tool names/params/result shapes.
+// Every other module (engine.js, board.js, notes.js, ...) only ever sees the
+// adoClient.js interface (WorkItem/AdoComment/Iteration typedefs) — this
+// file's entire job is normalizing MCP's wire shapes into those typedefs so
+// nothing downstream has to know MCP exists.
+//
+// NOT unit-tested (PLAN-ado.md's hard constraint: no live ADO project is
+// available during the build) and NOT imported by scripts/ado-sync.mjs
+// unless the CLI is run WITHOUT --from-json — see that file's buildClient().
+// Exercised only by the live-ADO integration checklist (PLAN-ado.md §10).
+//
+// Robustness rule (§1.3): MCP client-host tool-name prefixes drift between
+// hosts, so instead of hardcoding e.g. "mcp_ado_wit_get_work_item" this file
+// calls listTools() once at connect time and resolves each canonical suffix
+// below by "tool name ends with suffix" — if a suffix can't be resolved, it
+// throws a clear, actionable AdoUnavailableError naming the missing suffix
+// (see §10 step 1 of the live checklist).
+
+import { AdoUnavailableError } from './adoClient.js';
+import { htmlToText } from './htmlToText.js';
+
+// Canonical MCP tool-name suffixes this client depends on (§1.3 table).
+const TOOL_SUFFIXES = {
+  listTeamIterations: 'work_list_team_iterations',
+  getWorkItemsForIteration: 'wit_get_work_items_for_iteration',
+  myWorkItems: 'wit_my_work_items',
+  queryByWiql: 'wit_query_by_wiql',
+  getWorkItem: 'wit_get_work_item',
+  getWorkItemsBatchByIds: 'wit_get_work_items_batch_by_ids',
+  updateWorkItem: 'wit_update_work_item',
+  createWorkItem: 'wit_create_work_item',
+  listWorkItemComments: 'wit_list_work_item_comments',
+  addWorkItemComment: 'wit_add_work_item_comment',
+};
+
+const REQUESTED_FIELDS = [
+  'System.Id',
+  'System.Rev',
+  'System.Title',
+  'System.State',
+  'System.WorkItemType',
+  'System.AssignedTo',
+  'System.IterationPath',
+  'Microsoft.VSTS.Common.Priority',
+];
+
+function buildWebUrl(org, project, id) {
+  return `https://dev.azure.com/${org}/${encodeURIComponent(project)}/_workitems/edit/${id}`;
+}
+
+// Codex review finding #16: a domain-level MCP tool error (e.g. "work item
+// 999 does not exist") arrives as a NORMAL (non-thrown) tool result with
+// `isError: true` — it is NOT a transport/auth failure. This is the ONLY
+// signal getWorkItem (finding #8) treats as "not found / no access" and
+// returns null for; every other failure mode (a thrown SDK error, a
+// malformed result shape, unparsable JSON) is a genuine AdoUnavailableError
+// that must propagate, never get swallowed into null.
+class AdoToolResultError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'AdoToolResultError';
+  }
+}
+
+// MCP tool results arrive as { content: [{ type: 'text', text: '<json>' }],
+// isError?: boolean } — extract the text defensively (§1.3 note b). Finding
+// #16: combine ALL text content blocks (not just content[0] — a valid
+// payload may legitimately be split across multiple text parts, or
+// content[0] may be a non-text block). Split out from parseToolResult (BUG
+// B, live test) so queryByWiql can get at the raw combined text itself when
+// it isn't valid JSON, instead of only ever seeing a thrown parse error.
+function extractResultText(result) {
+  if (!result || !Array.isArray(result.content)) {
+    throw new AdoUnavailableError('unexpected MCP tool result shape (no content array)');
+  }
+  const textParts = result.content
+    .filter((c) => c && c.type === 'text' && typeof c.text === 'string')
+    .map((c) => c.text);
+  if (textParts.length === 0) {
+    throw new AdoUnavailableError('unexpected MCP tool result shape (no text content)');
+  }
+  return { combined: textParts.join('\n'), isError: !!result.isError };
+}
+
+// Strict form used by every tool except queryByWiql — check `isError`
+// before trying to parse the combined text as the expected JSON shape.
+function parseToolResult(result) {
+  const { combined, isError } = extractResultText(result);
+  if (isError) {
+    throw new AdoToolResultError(combined || 'Azure DevOps MCP tool reported an error');
+  }
+  try {
+    return JSON.parse(combined);
+  } catch (err) {
+    throw new AdoUnavailableError(`could not parse MCP tool result JSON: ${err.message}`);
+  }
+}
+
+// BUG B (found via live ADO test, TASK-019): with `ado.scope = {wiql: ...}`,
+// the live server's `wit_query_by_wiql` result text is NOT plain JSON — it
+// was observed starting with a non-JSON envelope marker (`<<6fc43062...`).
+// `my-work` and `current-sprint` scopes parse fine; this is scoped to WIQL
+// only (see docs/ADO-SYNC.md "Known limitations — WIQL scope" — the exact
+// envelope shape needs live re-verification, so this is a best-effort
+// salvage, not a confirmed fix). Look for the id shapes an ADO response is
+// most likely to embed even inside a non-JSON wrapper: `"id": <n>` (a JSON
+// fragment nested in prose/markup), and `/_workitems/edit/<n>` work-item
+// URLs (which normalizeWorkItem/buildWebUrl already produce elsewhere in
+// this file, so the server plausibly emits the same shape here). Returns
+// [] (never throws) if nothing matches — the caller decides what "nothing
+// salvageable" means.
+function extractWorkItemIdsFromText(text) {
+  const ids = new Set();
+  const patterns = [/"id"\s*:\s*(\d+)/gi, /_workitems\/edit\/(\d+)/gi];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(text))) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > 0) ids.add(n);
+    }
+  }
+  return [...ids];
+}
+
+function normalizeAssignedTo(raw) {
+  if (!raw) return '';
+  if (typeof raw === 'string') return raw;
+  return raw.displayName || raw.uniqueName || '';
+}
+
+function normalizeWorkItem(raw, org, project) {
+  const fields = (raw && raw.fields) || raw || {};
+  const id = raw ? (raw.id ?? fields['System.Id']) : undefined;
+  const numericId = Number(id);
+  // Codex review finding #16: validate the one field every downstream
+  // caller unconditionally relies on (adoNumFromBlockId/setBlockHeading
+  // keys everything off `id`) — a malformed/unexpected MCP response shape
+  // must surface as AdoUnavailableError, not silently produce `id: NaN`
+  // that then corrupts board text or syncState downstream.
+  if (!raw || !Number.isFinite(numericId) || numericId <= 0) {
+    throw new AdoUnavailableError(`malformed Azure DevOps work item response (missing/invalid id): ${JSON.stringify(raw)}`);
+  }
+  return {
+    id: numericId,
+    rev: Number(raw.rev ?? fields['System.Rev'] ?? 0),
+    title: fields['System.Title'] || '',
+    state: fields['System.State'] || '',
+    type: fields['System.WorkItemType'] || '',
+    assignee: normalizeAssignedTo(fields['System.AssignedTo']),
+    iterationPath: fields['System.IterationPath'] || '',
+    priority: fields['Microsoft.VSTS.Common.Priority'] ?? null,
+    url: raw.url || buildWebUrl(org, project, numericId),
+  };
+}
+
+function normalizeComment(raw) {
+  return {
+    id: Number(raw.id),
+    text: htmlToText(raw.text || raw.renderedText || ''),
+    author: normalizeAssignedTo(raw.createdBy) || raw.createdBy || '',
+    createdDate: raw.createdDate || raw.modifiedDate || '',
+  };
+}
+
+function normalizeIteration(raw) {
+  return {
+    id: raw.id,
+    name: raw.name || '',
+    path: raw.path || raw.attributes?.path || '',
+    timeFrame: raw.attributes?.timeFrame || raw.timeFrame || '',
+  };
+}
+
+/**
+ * Create the real MCP-backed adoClient. Spawns the official ADO MCP server
+ * as a subprocess and connects over stdio.
+ *
+ * @param {{org: string, project: string, team?: string}} config - the
+ *   `.config` object returned by loadAdoConfig().
+ * @returns {Promise<object>} an adoClient (see adoClient.js for the interface)
+ */
+export async function createAdoClient(config) {
+  let Client;
+  let StdioClientTransport;
+  try {
+    ({ Client } = await import('@modelcontextprotocol/sdk/client/index.js'));
+    ({ StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js'));
+  } catch (err) {
+    throw new AdoUnavailableError(
+      `@modelcontextprotocol/sdk is not installed — run \`npm install\` (${err.message})`,
+    );
+  }
+
+  const transport = new StdioClientTransport({
+    command: 'npx',
+    args: ['-y', '@azure-devops/mcp', config.org, '-d', 'core', 'work', 'work-items'],
+  });
+
+  const client = new Client({ name: 'task-memory-ado-sync', version: '1.0.0' }, { capabilities: {} });
+
+  try {
+    await client.connect(transport);
+  } catch (err) {
+    // Codex review finding #16: a failed connect can still have spawned the
+    // subprocess (transport) and/or partially initialized the client — leaving
+    // either open on the failure path leaks a process/handle. Best-effort
+    // close both before rethrowing; a secondary failure here must never mask
+    // the original (and more informative) connect error.
+    try {
+      await client.close?.();
+    } catch {
+      // ignore
+    }
+    try {
+      await transport.close?.();
+    } catch {
+      // ignore
+    }
+    throw new AdoUnavailableError(
+      `could not start/connect to the Azure DevOps MCP server (is \`npx -y @azure-devops/mcp\` ` +
+        `installed and are you \`az login\`'ed?): ${err.message}`,
+    );
+  }
+
+  // Codex review finding #8: resolveTools() must ALWAYS raise
+  // AdoUnavailableError on any failure (a raw `client.listTools()` SDK
+  // error must not escape as a generic Error) — every entry point below
+  // (ping, and callTool) relies on that uniform contract.
+  let toolNameBySuffix;
+  async function resolveTools() {
+    if (toolNameBySuffix) return toolNameBySuffix;
+    let tools;
+    try {
+      ({ tools } = await client.listTools());
+    } catch (err) {
+      throw new AdoUnavailableError(`could not list Azure DevOps MCP tools: ${err.message}`);
+    }
+    const map = {};
+    for (const [key, suffix] of Object.entries(TOOL_SUFFIXES)) {
+      const match = tools.find((t) => t.name === suffix || t.name.endsWith(`_${suffix}`) || t.name.endsWith(suffix));
+      if (!match) {
+        throw new AdoUnavailableError(
+          `Azure DevOps MCP server does not expose a tool ending in "${suffix}" (needed for ${key}). ` +
+            `Available tools: ${tools.map((t) => t.name).join(', ')}`,
+        );
+      }
+      map[key] = match.name;
+    }
+    toolNameBySuffix = map;
+    return map;
+  }
+
+  // Codex review finding #8: resolveTools() is called INSIDE this try block
+  // (not before it, as a separate un-caught `await` ahead of the try) so a
+  // raw transport error surfacing from tool discovery is normalized to
+  // AdoUnavailableError exactly like a raw error from the tool CALL itself
+  // — previously a `resolveTools()` failure here bypassed this catch
+  // entirely and could reach the CLI as a generic "unexpected error" (exit
+  // 1) instead of the "ADO unreachable" contract (exit 2).
+  async function callTool(key, args) {
+    try {
+      const names = await resolveTools();
+      const result = await client.callTool({ name: names[key], arguments: args });
+      return parseToolResult(result);
+    } catch (err) {
+      if (err instanceof AdoUnavailableError || err instanceof AdoToolResultError) throw err;
+      throw new AdoUnavailableError(`Azure DevOps MCP call "${key}" failed: ${err.message}`);
+    }
+  }
+
+  // Same tool-resolution + transport-error normalization as callTool, but
+  // returns the raw { combined, isError } text pair instead of JSON.parse
+  // -ing it (BUG B, live test). The one caller that needs this
+  // (queryByWiql) has to fall back to salvaging ids from non-JSON text,
+  // which callTool's strict parseToolResult doesn't allow for.
+  async function callToolRaw(key, args) {
+    try {
+      const names = await resolveTools();
+      const result = await client.callTool({ name: names[key], arguments: args });
+      return extractResultText(result);
+    } catch (err) {
+      if (err instanceof AdoUnavailableError) throw err;
+      throw new AdoUnavailableError(`Azure DevOps MCP call "${key}" failed: ${err.message}`);
+    }
+  }
+
+  const project = config.project;
+  const team = config.team || undefined;
+
+  return {
+    async ping() {
+      await resolveTools();
+      return true;
+    },
+
+    async listIterations() {
+      const data = await callTool('listTeamIterations', { project, team });
+      const list = Array.isArray(data) ? data : data.value || [];
+      return list.map(normalizeIteration);
+    },
+
+    async currentIterationId() {
+      const iterations = await this.listIterations();
+      const current = iterations.find((i) => i.timeFrame === 'current');
+      return current ? current.id : null;
+    },
+
+    async listIterationWorkItemIds(iterationId) {
+      const data = await callTool('getWorkItemsForIteration', { project, team, iterationId });
+      const list = Array.isArray(data) ? data : data.workItemRelations || data.value || [];
+      return list.map((r) => Number(r.target?.id ?? r.id)).filter((n) => Number.isFinite(n));
+    },
+
+    async myWorkItemIds() {
+      const data = await callTool('myWorkItems', { project, includeCompleted: true, top: 200 });
+      const list = Array.isArray(data) ? data : data.value || [];
+      return list.map((r) => Number(r.id)).filter((n) => Number.isFinite(n));
+    },
+
+    // BUG B (live test): the wiql tool's result text is not reliably plain
+    // JSON — see extractWorkItemIdsFromText above and docs/ADO-SYNC.md
+    // "Known limitations — WIQL scope". Every other scope (my-work,
+    // current-sprint) goes through the strict callTool/parseToolResult path
+    // unchanged; this is the only tool call with a salvage fallback.
+    async queryByWiql(wiql) {
+      const { combined, isError } = await callToolRaw('queryByWiql', { project, wiql, top: 200 });
+      if (isError) {
+        throw new AdoToolResultError(combined || 'Azure DevOps MCP tool reported an error');
+      }
+      let data;
+      try {
+        data = JSON.parse(combined);
+      } catch {
+        const salvaged = extractWorkItemIdsFromText(combined);
+        if (salvaged.length > 0) return salvaged;
+        throw new AdoUnavailableError(
+          'wiql scope: Azure DevOps MCP "queryByWiql" result was not JSON and no work-item ids ' +
+            'could be salvaged from it — this scope needs live re-verification (see ' +
+            'docs/ADO-SYNC.md, "Known limitations — WIQL scope"). Try ado.scope "my-work" or ' +
+            '"current-sprint" instead — both are verified working against a live server.',
+        );
+      }
+      const list = Array.isArray(data) ? data : data.workItems || data.value || [];
+      return list.map((r) => Number(r.id)).filter((n) => Number.isFinite(n));
+    },
+
+    async getWorkItem(id) {
+      // Codex review finding #8: the previous bare `catch { return null }`
+      // treated EVERY failure — including a dead transport or a malformed
+      // response — as "not found", masking real outages behind a false
+      // "not found" from `promote --link`. Only AdoToolResultError (a
+      // genuine MCP-tool-level error response — the shape a missing/
+      // inaccessible work item actually surfaces as) resolves to null;
+      // everything else (AdoUnavailableError from callTool/parseToolResult/
+      // normalizeWorkItem) propagates per the adoClient.js contract.
+      try {
+        const data = await callTool('getWorkItem', { project, id, fields: REQUESTED_FIELDS });
+        if (!data) return null;
+        return normalizeWorkItem(data, config.org, project);
+      } catch (err) {
+        if (err instanceof AdoToolResultError) return null;
+        throw err;
+      }
+    },
+
+    async getWorkItemsBatch(ids) {
+      if (ids.length === 0) return [];
+      const out = [];
+      for (let i = 0; i < ids.length; i += 200) {
+        const chunk = ids.slice(i, i + 200);
+        const data = await callTool('getWorkItemsBatchByIds', { project, ids: chunk, fields: REQUESTED_FIELDS });
+        const list = Array.isArray(data) ? data : data.value || [];
+        out.push(...list.map((r) => normalizeWorkItem(r, config.org, project)));
+      }
+      return out;
+    },
+
+    async updateWorkItemFields(id, fields) {
+      const updates = Object.entries(fields).map(([path, value]) => ({
+        op: 'replace',
+        path: `/fields/${path}`,
+        value,
+      }));
+      const data = await callTool('updateWorkItem', { id, updates });
+      return normalizeWorkItem(data, config.org, project);
+    },
+
+    async createWorkItem(type, fields) {
+      // wit_create_work_item wants `fields` as an ARRAY of {name, value}
+      // (verified live against azure-devops-mcp v2.8.1 — the schema rejects a
+      // plain object). Callers pass a {ref: value} map; convert it here.
+      const fieldArray = Object.entries(fields).map(([name, value]) => ({
+        name,
+        value: String(value),
+      }));
+      const data = await callTool('createWorkItem', { project, workItemType: type, fields: fieldArray });
+      return normalizeWorkItem(data, config.org, project);
+    },
+
+    async listComments(workItemId) {
+      const data = await callTool('listWorkItemComments', { project, workItemId, top: 200 });
+      const list = Array.isArray(data) ? data : data.comments || data.value || [];
+      return list.map(normalizeComment).sort((a, b) => a.id - b.id);
+    },
+
+    async addComment(workItemId, markdownText) {
+      // format enum is 'Markdown' | 'Html' (capitalized) — verified live; the
+      // server rejects lowercase 'markdown' with an invalid_enum_value error.
+      const data = await callTool('addWorkItemComment', { project, workItemId, comment: markdownText, format: 'Markdown' });
+      return { id: Number(data.id) };
+    },
+
+    async close() {
+      await client.close();
+    },
+  };
+}

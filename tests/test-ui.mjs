@@ -23,6 +23,12 @@ import {
   maxNumInScope,
   serializeConfigHeader,
   mintNextId,
+  ADO_ID_CORE,
+  ADO_ID_RE,
+  ANY_ID_CORE,
+  parseAdoId,
+  parseAnyId,
+  formatAdoId,
 } from '../src/utils/taskId.js';
 
 import { markdownParser } from '../src/utils/markdown.js';
@@ -417,4 +423,226 @@ test('fileSystem TASK_FILE_RE: accepts tasks.md/tasks-gr.md/tasks_dg.md, rejects
   assert.ok(TASK_FILE_RE.test('tasks_dg.md'));
   assert.ok(!TASK_FILE_RE.test('tasks-archive.md'));
   assert.ok(!TASK_FILE_RE.test('archive.md'));
+});
+
+// =============================================================================
+// 7. ADO id grammar (TASK-019) — PLAN-ado.md §9.1, cases 1-14.
+//    P0 -> cases 1-10 (taskId.js is pure, no other module changes needed)
+//    P1 -> cases 11-14 (markdown.js: ANY_ID_CORE headings + Sprint/ADO fields)
+// =============================================================================
+
+test('parseAdoId: valid id', () => {
+  assert.deepEqual(parseAdoId('ADO-12345'), { kind: 'ado', num: 12345, raw: 'ADO-12345' });
+});
+
+test('parseAdoId: leading zero does not parse', () => {
+  assert.equal(parseAdoId('ADO-012'), null);
+});
+
+test('parseAdoId: zero does not parse', () => {
+  assert.equal(parseAdoId('ADO-0'), null);
+});
+
+test('parseAdoId: trailing alnum breaks tail boundary', () => {
+  assert.equal(parseAdoId('ADO-12X'), null);
+});
+
+test('parseAdoId / parseTaskId: kinds do not cross', () => {
+  assert.equal(parseTaskId('ADO-12'), null);
+  assert.equal(parseAdoId('TASK-12'), null);
+});
+
+test('parseAnyId: dispatches both kinds + null passthrough', () => {
+  assert.deepEqual(parseAnyId('TASK-GR-678'), { kind: 'task', prefix: 'GR', num: 678, raw: 'TASK-GR-678' });
+  assert.deepEqual(parseAnyId('ADO-12345'), { kind: 'ado', num: 12345, raw: 'ADO-12345' });
+  assert.equal(parseAnyId('not-an-id'), null);
+});
+
+test('formatAdoId: never padded, rejects non-positive-integers', () => {
+  assert.equal(formatAdoId(12345), 'ADO-12345');
+  assert.throws(() => formatAdoId(0));
+  assert.throws(() => formatAdoId(-1));
+  assert.throws(() => formatAdoId(1.5));
+  assert.throws(() => formatAdoId('12'));
+});
+
+test('bit-identical guard: existing TASK id behavior is untouched by the ADO addition', () => {
+  assert.deepEqual(parseTaskId('TASK-676'), { prefix: '', num: 676, raw: 'TASK-676' });
+  assert.deepEqual(parseTaskId('TASK-GR-678'), { prefix: 'GR', num: 678, raw: 'TASK-GR-678' });
+  assert.equal(formatTaskId('', 43), 'TASK-043');
+  assert.equal(formatTaskId('DG', 1), 'TASK-DG-1');
+});
+
+test('mintNextId: ADO ids in the pool are ignored (prefixed scope)', () => {
+  const meta = { taskPrefix: 'GR', lastTaskId: 0 };
+  const { id } = mintNextId(meta, ['ADO-99999', 'TASK-GR-2']);
+  assert.equal(id, 'TASK-GR-3');
+});
+
+test('mintNextId: ADO ids in the pool are ignored (legacy scope)', () => {
+  const meta = { taskPrefix: '', lastTaskId: 0 };
+  const { id } = mintNextId(meta, ['ADO-99999', 'TASK-2']);
+  assert.equal(id, 'TASK-003');
+});
+
+test('maxNumInScope: ADO ids never count toward any TASK scope', () => {
+  assert.equal(maxNumInScope(['ADO-7'], ''), 0);
+});
+
+test('ADO_ID_CORE: embeds cleanly and respects tail boundary', () => {
+  const re = new RegExp('^' + ADO_ID_CORE + '$');
+  assert.ok(re.test('ADO-12345'));
+  assert.ok(!re.test('ADO-012'));
+  assert.ok(!re.test('ADO-0'));
+  assert.ok(!re.test('ADO-12X'));
+});
+
+test('ADO_ID_RE: sanity (group numbering)', () => {
+  const m = ADO_ID_RE.exec('ADO-12345');
+  assert.equal(m[1], '12345');
+  assert.equal(ADO_ID_RE.exec('ADO-012'), null);
+});
+
+test('ANY_ID_CORE: matches both kinds, rejects malformed tails', () => {
+  const re = new RegExp('^' + ANY_ID_CORE + '$');
+  assert.ok(re.test('TASK-676'));
+  assert.ok(re.test('TASK-GR-678'));
+  assert.ok(re.test('ADO-12345'));
+  assert.ok(!re.test('ADO-012'));
+  assert.ok(!re.test('TASK-GR-12X'));
+  assert.ok(!re.test('ADO-12X'));
+});
+
+test('ADO_ID_CORE (Codex review finding #14): tail boundary also excludes "-", so a glued hyphen continuation is never partially matched', () => {
+  // Full-string anchoring (^...$, used by the two tests above) can't
+  // distinguish "rejects the whole string" from "matches a truncated
+  // prefix of it" — both fail re.test() the same way. Anchor only at the
+  // START (mirrors how this core gets embedded, unanchored-at-tail, into
+  // heading/NEXT_SECTION regexes in board.js and the Python hook) to prove
+  // ADO-12 is not matched as a truncated prefix of "ADO-12-foo".
+  const startAnchored = new RegExp('^' + ADO_ID_CORE);
+  assert.equal(startAnchored.exec('ADO-12-foo'), null, 'must not match "ADO-12" out of "ADO-12-foo"');
+  assert.equal(startAnchored.exec('ADO-12-13'), null, 'must not match "ADO-12" out of a hyphenated range-looking string');
+  // Sanity: the exclusion is specifically about the tail, not the id itself
+  // — a real id followed by non-alnum, non-hyphen punctuation still matches
+  // as a prefix (e.g. embedded in prose: "(ADO-12)", "ADO-12,", "ADO-12.").
+  assert.ok(startAnchored.exec('ADO-12)'));
+  assert.ok(startAnchored.exec('ADO-12,'));
+  assert.ok(startAnchored.exec('ADO-12 done'));
+});
+
+// -----------------------------------------------------------------------------
+// P1 (markdown.js): cases 11-14
+// -----------------------------------------------------------------------------
+
+test('markdown: ADO heading and TASK heading coexist in one section, ids verbatim', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Task Prefix: GR | Last Task ID: 1 -->
+
+## ⚙️ Configuration
+
+**Columns**: In Progress (in-progress) | Done (done)
+
+---
+
+## In Progress
+
+### ADO-12345 | Synced ADO item
+**Status**: in-progress
+
+### TASK-GR-1 | Local-only item
+**Status**: in-progress
+
+---
+
+## Done
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks-gr.md' });
+  const ids = parsed.tasks.map((t) => t.id);
+  assert.ok(ids.includes('ADO-12345'), `expected ADO-12345 verbatim, got ${JSON.stringify(ids)}`);
+  assert.ok(ids.includes('TASK-GR-1'), `expected TASK-GR-1 verbatim, got ${JSON.stringify(ids)}`);
+});
+
+test('markdown: round-trip preserves ADO heading + Sprint/ADO fields (D6), never pads', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Last Task ID: 0 -->
+
+## ⚙️ Configuration
+
+**Columns**: In Progress (in-progress) | Done (done)
+
+---
+
+## In Progress
+
+### ADO-12345 | Synced ADO item
+**Status**: in-progress
+**Sprint**: Sprint 42 | **ADO**: https://dev.azure.com/org/proj/_workitems/edit/12345
+
+Some description text.
+
+---
+
+## Done
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks.md' });
+  const task = parsed.tasks.find((t) => t.id === 'ADO-12345');
+  assert.ok(task, 'ADO-12345 should be parsed');
+  assert.equal(task.sprint, 'Sprint 42');
+  assert.equal(task.adoUrl, 'https://dev.azure.com/org/proj/_workitems/edit/12345');
+  assert.doesNotMatch(task.description, /Sprint 42/);
+  assert.doesNotMatch(task.description, /_workitems/);
+
+  const regenerated = markdownParser.generateMarkdown(parsed.tasks, parsed.config);
+  assert.match(regenerated, /^### ADO-12345 \| Synced ADO item$/m);
+  assert.match(regenerated, /\*\*Sprint\*\*: Sprint 42 \| \*\*ADO\*\*: https:\/\/dev\.azure\.com\/org\/proj\/_workitems\/edit\/12345/);
+  assert.doesNotMatch(regenerated, /ADO-012345/);
+});
+
+test('markdown: ADO-012 (leading zero) is not treated as a task heading', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Last Task ID: 0 -->
+
+## ⚙️ Configuration
+
+**Columns**: In Progress (in-progress)
+
+---
+
+## In Progress
+
+### ADO-012 | Not a real ADO id (leading zero)
+**Status**: in-progress
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks.md' });
+  assert.equal(parsed.tasks.length, 0);
+});
+
+test('markdown: parseArchive accepts ADO ids', () => {
+  const content = `# Task Archive
+
+> Archived tasks
+
+## ✅ Archives
+
+### ADO-999 | Archived ADO item
+**Status**: done
+
+### TASK-042 | Archived legacy item
+**Status**: done
+
+`;
+  const archived = markdownParser.parseArchive(content);
+  const ids = archived.map((t) => t.id);
+  assert.ok(ids.includes('ADO-999'), `expected ADO-999 verbatim, got ${JSON.stringify(ids)}`);
+  assert.ok(ids.includes('TASK-042'), `expected TASK-042 verbatim, got ${JSON.stringify(ids)}`);
 });

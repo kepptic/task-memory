@@ -1,6 +1,6 @@
 # Kanban Board
 
-<!-- Config: Last Task ID: 18 -->
+<!-- Config: Last Task ID: 19 -->
 
 ## ⚙️ Configuration
 
@@ -163,6 +163,24 @@ Test task for auto-reorganization. Originally in To Do section with Status: in-p
 - 2026-01-16 09:19:30 - Error: Error: command not found
 
 ## Done
+
+### TASK-019 | Azure DevOps bridge — context layer keyed to ADO work items (full two-way)
+**Priority**: High | **Category**: Feature | **Status**: done | **Assigned**: @user
+**Workflow**: Feature | **Complexity**: Complex
+**Created**: 2026-07-19 | **Started**: 2026-07-19 | **Finished**: 2026-07-19
+**Tags**: #feature #ado #integration #mcp #two-way
+
+Bridge task-memory to Azure DevOps (opt-in). ADO owns identity/state/sprints; task-memory is the AI-context layer keyed to ADO work-item ids (`### ADO-12345`, `notes/ADO-12345.md`). Full two-way sync via a deterministic CLI `scripts/ado-sync.mjs` over the official `microsoft/azure-devops-mcp`. `TASK-<PREFIX>-<n>` stays the local/offline path. Shipped as v3.6.0 on branch `feat/ado-bridge` (PR opened). Orchestrated: Fable plan -> Sonnet build P0-P9 -> Codex review (16 findings) -> fix -> Fable final review (2 more: B1 silent data-loss, B2 skeleton spam) -> fix -> verified.
+
+**Subtasks**:
+- [x] Fable plans the entire bridge -> PLAN-ado.md (11 phases, 10 forks resolved, MCP-client architecture)
+- [x] Sonnet implements grammar+routing+config+pull+push+reconcile+notes+sync-skill (P0-P9)
+- [x] Codex/Fable review loop until clean: Codex 16 findings + Fable 2 blockers, all fixed; test-sync 90/90, UI 51/51
+- [x] Final review + branch ready (PR opened); live-ADO integration test handed to user (docs/ADO-SYNC.md checklist)
+
+**Notes**: Only open item is the live-ADO end-to-end test (needs a real ADO org + `az login`); everything else unit-tested against a mocked MCP boundary. See planning/notes/TASK-019.md + docs/ADO-SYNC.md.
+
+**Errors Log**:
 
 ### TASK-017 | Team-safe, collision-resistant initials-namespaced task IDs
 **Priority**: High | **Category**: Feature | **Status**: done | **Assigned**: @user

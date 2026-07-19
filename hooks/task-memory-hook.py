@@ -406,7 +406,25 @@ def increment_counter(f: Path) -> int:
 # parses this shape everywhere a task id can appear.
 TASK_ID_CORE = r"TASK-(?:[A-Z]{2,4}-)?[0-9]+(?![0-9A-Za-z])"
 
-TASK_HEADING_RE = re.compile(r"^### (" + TASK_ID_CORE + r")(.*)$", re.MULTILINE)
+# TASK-019: Azure DevOps work-item ids (`ADO-12345`). Minted only by ADO,
+# never by this codebase — this hook only ever recognizes the shape. Leading
+# zeros are rejected ([1-9][0-9]*) so `ADO-012` is plain text, same treatment
+# as a malformed `TASK-GR-12X` id. Mirrors src/utils/taskId.js ADO_ID_CORE.
+# Codex review (finding #14): tail lookahead also excludes `-` so `### ADO-
+# 12-foo` doesn't parse as heading `ADO-12` with a bogus `-foo` continuation
+# (NEXT_SECTION_RE would otherwise treat that as a spurious block boundary
+# and truncate the preceding block). TASK_ID_CORE stays untouched (bit-
+# identical guard, TASK-017) — this asymmetry is deliberate.
+ADO_ID_CORE = r"ADO-[1-9][0-9]*(?![0-9A-Za-z-])"
+
+# Union of both id kinds. Mirrors src/utils/taskId.js ANY_ID_CORE — every
+# heading/section-boundary regex in this file keys off this union so `###
+# ADO-<n>` blocks get identical treatment to `### TASK-*` blocks (note
+# routing, precompact snapshots, Stop-gate, stamping, reorganize-by-Status,
+# TodoWrite mirror all fall out of this one change; see PLAN-ado.md §3.1).
+ANY_ID_CORE = r"(?:" + TASK_ID_CORE + r"|" + ADO_ID_CORE + r")"
+
+TASK_HEADING_RE = re.compile(r"^### (" + ANY_ID_CORE + r")(.*)$", re.MULTILINE)
 
 
 def read_tasks(path: Path | None = None) -> str:
@@ -423,7 +441,7 @@ def read_tasks(path: Path | None = None) -> str:
         return ""
 
 
-NEXT_SECTION_RE = re.compile(r"^(?:### " + TASK_ID_CORE + r"|## )", re.MULTILINE)
+NEXT_SECTION_RE = re.compile(r"^(?:### " + ANY_ID_CORE + r"|## )", re.MULTILINE)
 
 
 def _iter_task_blocks(content: str):
