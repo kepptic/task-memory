@@ -99,18 +99,30 @@ npm run sync:ado -- status  [--json]
 
 **Flags:**
 - `--dry-run` — compute and print the report; write nothing.
-- `--json` — print the raw report object instead of the default rendering.
+- `--json` — print the raw report object instead of the default rendering
+  (pure JSON — `parseMarkdown`/`parseTask`'s normal dev-console logging is
+  silenced for the duration of the process).
 - `--take-local <id>` / `--take-ado <id>` (push only) — force a conflicted
   card to resolve toward the local or ADO side and re-baseline
   `planning/.ado-sync.json`.
 - `--only <id>` (push only) — scope the run to specific ids.
 - `--from-json <fixture.json>` — manual fallback (see below); feeds a
   `createMockAdoClient`-shaped fixture into the engine instead of the real
-  MCP client.
+  MCP client. **Read-only escape hatch, restricted to non-mutating runs**:
+  allowed unconditionally for `pull`/`status`, allowed for `push` only when
+  `--dry-run` is also passed, and **rejected outright for `promote`** (it
+  has no dry-run form — every call creates or links a real work item). Using
+  it with a real `push`/`promote` would make the engine believe a write
+  landed in Azure DevOps when nothing did.
 
 **Exit codes:** `0` ok · `1` unexpected error (bad config, missing task id,
-etc.) · `2` ADO unreachable — clean no-op, **zero files touched** · `3`
-conflicts pending (see below).
+invalid `--link`, `--from-json` used with a mutating command, etc.) · `2`
+ADO unreachable — clean no-op, **zero files touched** (the ping() gate
+failed before any local write, and before any remote write) · `3` conflicts
+pending (see below) · `4` partial remote failure — `push` landed some writes
+then failed on others (e.g. the MCP connection died mid-run); check
+`report.failed`, then just re-run — the state compare and both comment-hash
+guards make re-running safe, only what didn't land gets retried.
 
 ---
 
@@ -122,6 +134,14 @@ conflicts pending (see below).
 | **Status** | **Both** (the one genuinely conflictable field) | Pull applies ADO's state when only ADO changed since the last sync; push applies local state when only local changed. Both changed since the last sync → **conflict**, neither side is written. |
 | Notes / description / subtasks | **Local** | Never touched by pull. Your notes file's context (minus the `## ADO Comments` and `## Summary` sections) pushes as a hashed comment — idempotent, re-running posts nothing new unless the content actually changed. |
 | ADO comments ↔ notes | **Append-only, both ways** | Pull appends new ADO comments into `## ADO Comments` (skipping anything starting with the `[task-memory]` marker — never re-imports its own pushes). Push posts the notes context + (on a `done` transition) the distilled `## Summary`. This can never conflict — it's additive on both sides. |
+
+Because comments/context are append-only and can never conflict, `push`
+posts the context comment **regardless of what the Status decision does** —
+a context-only local edit (notes changed, Status didn't: `push`'s internal
+`noop` decision) still posts; a Status conflict still posts (only the
+Status *write* is withheld). The only decision that withholds comments too
+is `untracked` (no prior `pull` baseline for that card yet — there's nothing
+to compare against).
 
 ### Conflict rule, precisely
 
@@ -155,6 +175,13 @@ Both flags re-baseline that task's `planning/.ado-sync.json` entry so the
 conflict won't resurface. Comments still flow in both directions during a
 conflict — only the Status field is held back.
 
+`--take-ado` requires the ADO state to have a REVERSE mapping back to a
+local status (i.e. it appears as a value somewhere in `state_map`) — an ADO
+state your `state_map` doesn't know about is reported as
+`take-ado-unmapped-ado-state` and the conflict is left exactly as it was
+(never silently re-baselined without actually applying anything). Fix
+`state_map`, or use `--take-local` instead.
+
 ---
 
 ## Done flow
@@ -170,8 +197,10 @@ pending comment:
 
 A failed stage stops only that task — whatever landed earlier stays recorded
 in `planning/.ado-sync.json`, so re-running only retries what didn't land
-(the state compare and the context-comment hash both short-circuit
-already-completed work).
+(the state compare, the context-comment hash, AND the summary-comment hash
+all short-circuit already-completed work — so if the summary comment landed
+but the state transition then failed, the retry moves straight to the state
+transition instead of posting the summary a second time).
 
 ---
 
@@ -191,6 +220,7 @@ never hand-edited:
       "syncedAt": "2026-07-19T10:00:00Z",
       "lastCommentId": 987,
       "pushedContextHash": "sha256:...",
+      "pushedSummaryHash": "sha256:...",
       "pushedCommentIds": [988],
       "promotedFrom": "TASK-GR-12"
     }
@@ -202,13 +232,35 @@ never hand-edited:
 `adoState`/`localStatus` **values**, never timestamps or `rev` alone (a
 comment bumps `rev` too, so `rev` alone would false-positive).
 
+`syncedAt` records the last time `adoState`/`localStatus` were
+**successfully reconciled** — a pull/push run that ends in a conflict never
+bumps it (even though comments may still have flowed and `lastCommentId`
+advanced), so a conflict report's "since" always reflects when the two
+sides actually diverged, not the timestamp of the most recent failed
+reconciliation attempt.
+
 ---
 
 ## Manual fallback: `--from-json`
 
 If the live MCP wiring misbehaves, the same deterministic engine can be fed
 hand-gathered ADO data instead of a live connection. The fixture shape is
-exactly `createMockAdoClient`'s input (`src/sync/adoClient.js`):
+exactly `createMockAdoClient`'s input (`src/sync/adoClient.js`).
+
+**Restricted to non-mutating runs.** `--from-json` never talks to real Azure
+DevOps — for `pull`/`status` that's fine (they only ever write LOCAL files),
+but a REAL `push`/`promote` mutates ADO itself, so feeding it fixture data
+would make the engine record fields/comments/work-items as pushed when
+nothing actually landed. The CLI therefore:
+- allows `--from-json` unconditionally for `pull` and `status`,
+- allows it for `push` **only** when `--dry-run` is also passed (compute and
+  print the report against fixture data; write nothing, push nothing),
+- **rejects it outright for `promote`** — promote has no dry-run form; every
+  call creates or links a real work item, so there is no safe non-mutating
+  way to run it against fixture data.
+
+A rejected combination exits `1` with a message naming the offending flag —
+this is a fast, local, offline check (no client is ever built).
 
 ```json
 {
@@ -274,11 +326,33 @@ items; the `ado` config block filled in.
    `--link` to an existing item; confirm both the ADO item's content and
    the local board rewrite.
 8. Conflict drill: change state in the ADO web UI AND locally, run `push`
-   (expect exit code `3`), resolve with `--take-ado`.
-9. Failure drills: `az logout` then `pull` → exit `2`, clean no-op (verify
-   nothing under `planning/` changed). Kill the MCP process mid-pull → no
-   partial writes (the atomic write-temp-then-rename means either the old
-   file is intact or the new one is — never a half-written file).
+   (expect exit code `3`), resolve with `--take-ado`. Also drill
+   `--take-ado` against an ADO state your `state_map` doesn't cover —
+   expect it rejected (`take-ado-unmapped-ado-state`), not silently no-op'd.
+9. Failure drills:
+   - `az logout` then `pull` → exit `2`, clean no-op (verify nothing under
+     `planning/` changed — the `ping()` gate fails before any local write).
+   - Kill the MCP process mid-**pull**, after it's connected → no partial
+     writes for a single run (write-temp-then-rename per file, sync-state
+     written last as the commit marker); re-running is safe.
+   - Kill the MCP process mid-**push**, after ≥1 work item has already been
+     updated → expect exit code `4` (partial remote failure), not `0` or
+     `2` — `report.failed` names which task(s) didn't land; re-run to retry
+     only those (the state/context/summary hash guards make it safe).
+   - Kill the process (or otherwise interrupt) mid-**promote**, right after
+     the local board/notes rewrite but before `planning/.ado-sync.json` is
+     written → the OLD notes file must NOT be gone; it's either still at
+     `notes/TASK-x.md` or renamed to a recoverable
+     `notes/TASK-x.md.tmp-promoted-*` (cleaned up automatically on a
+     successful re-run of the write step, harmless if it lingers).
+     **Known residual limitation** (documented, not automatically
+     recoverable): a crash strictly between the board rewrite (heading now
+     `ADO-<n>`) and the notes-file rename can leave the board showing the
+     new id while its notes are still under the old `TASK-x.md` name with
+     no `.ado-sync.json` entry yet — recover by hand (rename the notes file
+     to `ADO-<n>.md`, re-run `status`) if it's ever observed; a full
+     cross-file journal was judged unnecessary for v1 given how narrow this
+     window is (three synchronous, fast local file operations).
 10. Scale sanity: a sprint of 50+ items pulls in one batch call
     (`getWorkItemsBatch` chunks at 200); comment-listing latency stays
     acceptable.
@@ -287,6 +361,6 @@ items; the `ado` config block filled in.
 
 ## See also
 
-- [`ado-sync` skill](../skills/ado-sync/SKILL.md) — the Claude-facing workflow (when to run each command, how to distill a done-summary, how to handle exit codes 2/3).
+- [`ado-sync` skill](../skills/ado-sync/SKILL.md) — the Claude-facing workflow (when to run each command, how to distill a done-summary, how to handle exit codes 2/3/4).
 - [`src/sync/adoClient.js`](../src/sync/adoClient.js) — the interface contract + mock (read this to understand exactly what data shape everything downstream of the client sees).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the rest of the plugin (hook, UI, id grammar) works.
