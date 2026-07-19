@@ -14,11 +14,11 @@ Invoke the **tm-init** skill for the full interactive setup. The skill lives at 
 The skill will:
 
 1. Detect project type (monorepo vs single, existing planning directories, existing CLAUDE.md)
-2. Ask three configuration questions via AskUserQuestion (planning location, monorepo mode, task-ID prefix)
+2. Ask configuration questions via AskUserQuestion (planning location, monorepo mode, task-ID prefix, optional team mode, and an optional Azure DevOps sync question — default No, skipped entirely unless the user opts in)
 3. Create `planning/tasks.md` using the canonical template — **do not overwrite an existing tasks.md; ask first**
 4. Create `planning/archive.md` and `planning/notes/`
 5. Append (never overwrite) the task-memory integration section to CLAUDE.md, including Session Start Protocol, Task vs. Question triage, and Context Preservation Protocol
-6. Drop a `.task-memory.json` only if the planning location isn't the default
+6. Drop a `.task-memory.json` if the planning location isn't the default, or if the user opted into Azure DevOps sync (writes the `ado` block and prints setup prerequisites — see docs/ADO-SYNC.md)
 
 ## Notes
 

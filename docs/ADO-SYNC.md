@@ -16,16 +16,35 @@ of the plugin works; this doc covers only the ADO bridge.
 
 ## Setup
 
-1. **`az login`** — the ADO MCP server authenticates via the Azure CLI
-   session (or its own browser-OAuth fallback). No PAT, no custom REST
-   client, no stored secret.
+0. **`npm install`** in the task-memory project first. The bridge needs
+   `@modelcontextprotocol/sdk` (a runtime dependency declared in
+   `package.json`) — plugin-only installs that never ran `npm install` fail
+   with `@modelcontextprotocol/sdk is not installed`. Requires **Node 20+**
+   on PATH (both the MCP server and the SDK require it).
+1. **Authenticate — two equal paths, pick whichever applies:**
+   - **Azure CLI session**: `az login` to the tenant that owns the ADO org.
+   - **Interactive browser OAuth**: just run a command that needs auth (e.g.
+     step 4 below); a browser window opens — sign in with an account that
+     has access to the org.
+
+   The azure-devops-mcp server tries the Azure CLI session first, then
+   falls back to interactive browser OAuth. **Gotcha we hit live:** if `az`
+   is signed into a *different* tenant/org than the one in `ado.org`, auth
+   fails with `Identity ... has not been materialized, please use
+   interactive login over the browser first` (or `pull` exits `2`, "ADO
+   unreachable"). Recover by either running `az login` again against the
+   *correct* tenant, or letting the browser-OAuth flow complete — for
+   cross-tenant setups, browser OAuth is often the only path that works.
+   No PAT, no custom REST client, no stored secret either way.
 2. **Confirm the MCP server can start**: `npx -y @azure-devops/mcp <org>`
-   should launch without error (Node/npx must be on PATH; first run
-   downloads the package).
-3. **Add the `ado` block** to `.task-memory.json` (schema below).
+   should launch without error (first run downloads the package on demand —
+   nothing to clone or install ahead of time).
+3. **Add the `ado` block** to `.task-memory.json` (schema below). `ado.org`
+   accepts either a full URL (`https://dev.azure.com/<org>`) or a bare org
+   name — it's normalized automatically, either form works.
 4. **Try it**: `npm run sync:ado -- status` (fully offline — proves the
    config parses) then `npm run sync:ado -- pull --dry-run` (first live
-   MCP call — proves auth + connectivity).
+   MCP call — proves auth + connectivity; read-only, writes nothing).
 
 ## Config schema
 

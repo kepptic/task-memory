@@ -81,6 +81,42 @@ Ask the user these questions using AskUserQuestion:
 
 If Yes: Ask for 2–4 letter uppercase initials (developer prefix), then generate `tasks.md` → `tasks-<INITIALS>.md` with header `<!-- Config: Task Prefix: <INITIALS> | Last Task ID: 0 -->`.
 
+**Question 5: Azure DevOps Sync** (optional, default No)
+- Header: "Azure DevOps"
+- Question: "Sync this board with Azure DevOps? (pull sprint/assigned work items, push status + notes)"
+- Options:
+  - `No` (Recommended) - Skip; local-only board, nothing changes
+  - `Yes` - Set up the ADO bridge now
+
+If No: skip entirely — do not write an `ado` block. (Its absence is the
+feature's off-switch; every `ado-sync` command no-ops cleanly without it.)
+
+If Yes, ask three more required questions, then two optional ones:
+
+- **ADO org** — "What's your Azure DevOps org?" Accepts either a full URL
+  (`https://dev.azure.com/<org>`) or a bare org name (`<org>`) — both are
+  valid, the config normalizes it.
+- **ADO project** — "What's the Azure DevOps project name?"
+- **Process template** — "Which process template does this project use?
+  (Project Settings → Process, in ADO, if unsure)"
+  - Options: `Agile` | `Scrum` | `Basic`
+
+  Map the answer to the matching `state_map` — **this must match the
+  project's actual process template**, or `push`/`promote` fails with
+  `The field 'State' contains the value '<x>' that is not in the list of
+  supported values`:
+
+  | Template | todo | in-progress | done |
+  |----------|------|-------------|------|
+  | Agile    | New  | Active      | Closed |
+  | Scrum    | To Do | In Progress | Done |
+  | Basic    | To Do | Doing       | Done |
+
+- **Team** (optional) — "What ADO team? (needed for current-sprint scope;
+  leave blank to skip)"
+- **Scope** (optional, default `current-sprint`) — "Which work items should
+  sync? (current-sprint / my-work — default current-sprint)"
+
 ### Phase 3: Setup
 
 1. **Create planning directory:**
@@ -248,6 +284,58 @@ If Yes: Ask for 2–4 letter uppercase initials (developer prefix), then generat
    | `min_engagements_to_block` | `3` | Task-relevant tool uses before Stop can block |
    | `session_state_max_age_hours` | `24` | GC threshold for orphaned session state files |
 
+6. **If Question 5 was answered Yes, write the `ado` block into
+   `.task-memory.json`** (create the file if it doesn't already exist from
+   step 5). Schema validated by `src/sync/config.js` — `org` and `project`
+   are required, everything else optional with sensible defaults:
+
+   ```json
+   {
+     "planning_dir": "{planning_dir}",
+     "ado": {
+       "org": "{ado_org}",
+       "project": "{ado_project}",
+       "team": "{ado_team}",
+       "scope": "current-sprint",
+       "work_item_type": "Task",
+       "state_map": {
+         "todo": "New",
+         "in-progress": "Active",
+         "done": "Closed"
+       }
+     }
+   }
+   ```
+
+   Use the `state_map` row matching the chosen process template (see the
+   Agile/Scrum/Basic table in Question 5) — do not default to the Agile
+   example verbatim if the project uses Scrum or Basic. Omit `team` if the
+   user left it blank. Leaving the whole `ado` block out of the file is the
+   feature's off switch — never write an empty `"ado": {}` placeholder.
+
+   After writing the block, print the prerequisites and first-run steps —
+   don't just leave the config sitting there unexplained:
+
+   ```
+   Azure DevOps sync configured. Before it can talk to ADO:
+
+   1. npm install          (installs @modelcontextprotocol/sdk — required)
+      Requires Node 20+ on PATH.
+   2. Authenticate — either:
+        az login             (Azure CLI session, must be the tenant that owns
+                               the ADO org), OR
+        let step 3 below trigger interactive browser OAuth
+      If az is signed into the WRONG tenant, auth fails with "Identity ...
+      has not been materialized, please use interactive login over the
+      browser first" — fix by az login to the correct tenant, or complete
+      the browser OAuth flow (often the only path for cross-tenant setups).
+   3. npm run sync:ado -- status         (offline — proves config parses)
+      npm run sync:ado -- pull --dry-run (first live call — proves auth +
+                                           connectivity; read-only)
+
+   Full reference: docs/ADO-SYNC.md
+   ```
+
 ### Phase 4: Verification
 
 1. **Verify setup:**
@@ -354,5 +442,6 @@ Task Memory is ready! The nearest planning/tasks.md will be used automatically.
 
 ---
 
-**Version:** 2.0.0 | **License:** MIT
+**Version:** 2.1.0 | **License:** MIT
+**Changelog 2.1.0:** Added Question 5 (Azure DevOps Sync, optional, default No) and matching Phase 3 scaffolding — writes the `ado` block into `.task-memory.json` per the chosen process template's `state_map` and prints prerequisites/first-run steps (`npm install`, Node 20+, auth, `status`/`pull --dry-run`).
 **Changelog 2.0.0:** CLAUDE.md template now includes Session Start Protocol, Task vs. Question triage (with AMBIGUOUS case), and Context Preservation Protocol section that describes what the hook auto-handles vs. what Claude must still do.
