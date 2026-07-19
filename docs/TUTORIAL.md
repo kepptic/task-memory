@@ -17,10 +17,11 @@ This is the *learning* path. If you just want the install commands, see
 
 ## Step 1: Initialize the board
 
-From your project, in Claude Code or Cowork:
+From your project, in Claude Code or Cowork — the tm-init skill auto-invokes,
+or run it explicitly:
 
 ```
-/tm-init
+/task-memory:tm-init
 ```
 
 Accept the defaults. You now have:

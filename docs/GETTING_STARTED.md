@@ -30,10 +30,10 @@ chmod +x /path/to/your-project/hooks/*.sh
 # Run interactive setup
 cd /path/to/your-project
 claude
-# Then run: /tm-init
+# The tm-init skill auto-invokes on setup, or run it explicitly: /task-memory:tm-init
 ```
 
-The init command will:
+The init skill will:
 - Detect if you're in a monorepo
 - Ask where to store tasks
 - Create planning directory structure
@@ -111,14 +111,16 @@ As you work, Claude Code automatically:
 3. Move task to the `## Done` section
 4. Commit: `git commit -m "feat: Set up dev environment (TASK-001)"`
 
-## Using Slash Commands
+## Using Skills
 
-### /tm-init
+Skills auto-invoke when the conversation matches their purpose (e.g. asking to implement/fix/build triggers the task-memory skill). You can also invoke any of them explicitly with their plugin-namespaced form.
+
+### /task-memory:tm-init
 
 Interactive project setup. Use when first adding task-memory to a project:
 
 ```
-/tm-init
+/task-memory:tm-init
 ```
 
 This will:
@@ -128,12 +130,12 @@ This will:
 - Create planning directories
 - Update CLAUDE.md
 
-### /task-memory
+### /task-memory:task-memory
 
 Full task planning workflow. Use when starting new work:
 
 ```
-/task-memory
+/task-memory:task-memory
 ```
 
 This guides you through:
@@ -142,7 +144,7 @@ This guides you through:
 - Creating pre-work checklist
 - Defining subtasks with dependencies
 
-### /task-status
+### /task-memory:task-status
 
 Quick context check. Use when:
 - Starting a new session
@@ -150,7 +152,7 @@ Quick context check. Use when:
 - Before making major decisions
 
 ```
-/task-status
+/task-memory:task-status
 ```
 
 This answers 5 questions:

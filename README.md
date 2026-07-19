@@ -8,7 +8,7 @@
 
 **Task Memory** gives AI assistants persistent memory through markdown files. It automatically logs research operations, preserves context across sessions, and enforces task completion before stopping.
 
-As of v3.2.0 the plugin ships in **dual format** — the same artifact installs into Claude Code (via the kepptic marketplace) and Cowork (via sideloaded `.plugin` archive). Skills, commands, and the Python context-preservation hook are byte-identical across both runtimes.
+As of v3.2.0 the plugin ships in **dual format** — the same artifact installs into Claude Code (via the kepptic marketplace) and Cowork (via sideloaded `.plugin` archive). Skills and the Python context-preservation hook are byte-identical across both runtimes.
 
 ```
 "What was I working on? What did I learn? What's next?"
@@ -37,7 +37,7 @@ For teams working on separate branches, use per-dev task files (`planning/tasks-
 
 ### Azure DevOps Integration (Optional)
 
-Connect task-memory to Azure DevOps for team workflows. Add an `ado` block to `.task-memory.json`, and task items keyed to ADO work items (`### ADO-12345`, `notes/ADO-12345.md`) sync bidirectionally — pull items and comments, push status and notes context. Local `TASK-<PREFIX>-<n>` ids remain available offline. `/tm-init` can scaffold the `ado` block for you interactively (Question 5). Prerequisites: `npm install` (gets `@modelcontextprotocol/sdk`), Node 20+, and either an `az login` session or interactive browser OAuth for the correct ADO tenant — see [ADO Sync guide](docs/ADO-SYNC.md) for full setup and command reference.
+Connect task-memory to Azure DevOps for team workflows. Add an `ado` block to `.task-memory.json`, and task items keyed to ADO work items (`### ADO-12345`, `notes/ADO-12345.md`) sync bidirectionally — pull items and comments, push status and notes context. Local `TASK-<PREFIX>-<n>` ids remain available offline. The tm-init skill (auto-invokes on setup, or run `/task-memory:tm-init`) can scaffold the `ado` block for you interactively (Question 5). Prerequisites: `npm install` (gets `@modelcontextprotocol/sdk`), Node 20+, and either an `az login` session or interactive browser OAuth for the correct ADO tenant — see [ADO Sync guide](docs/ADO-SYNC.md) for full setup and command reference.
 
 ### Install in Claude Code (Recommended)
 
@@ -46,7 +46,7 @@ Connect task-memory to Azure DevOps for team workflows. Add an `ado` block to `.
 /plugin install task-memory@kepptic
 ```
 
-Then `cd` into any project and run `/tm-init`. The hook wires up automatically.
+Then `cd` into any project — the tm-init skill auto-invokes on setup, or run it explicitly with `/task-memory:tm-init`. The hook wires up automatically.
 
 ### Install in Cowork
 
@@ -61,7 +61,7 @@ Cowork uses sideloaded plugin archives. Either:
    ```
 2. **Or download the prebuilt archive** from the [Releases](https://github.com/kepptic/task-memory/releases) page.
 
-Then in Cowork: drag the `.plugin` file into the chat, or use the **Install plugin** menu and point it at the file. After install, invoke `/tm-init` to bootstrap a project.
+Then in Cowork: drag the `.plugin` file into the chat, or use the **Install plugin** menu and point it at the file. After install, the tm-init skill auto-invokes on setup, or run it explicitly with `/task-memory:tm-init` to bootstrap a project.
 
 ### Git Clone (Development)
 
@@ -81,7 +81,7 @@ chmod +x /path/to/your-project/hooks/*.sh
 
 cd /path/to/your-project
 claude
-# Then run: /tm-init
+# The tm-init skill auto-invokes on setup, or run: /task-memory:tm-init
 ```
 
 ### Standalone HTML App
@@ -157,11 +157,13 @@ Deeper dives:
 
 ## Skills
 
-| Command | Purpose |
-|---------|---------|
-| `/tm-init` | Initialize task-memory in a new project (was `/task-memory-init` in v1) |
-| `/task-memory` | Full task planning workflow |
-| `/task-status` | Quick context check (5-Question Reboot Test) |
+Skills auto-invoke when the conversation matches their purpose, or you can invoke them explicitly with their plugin-namespaced form.
+
+| Skill | Purpose |
+|-------|---------|
+| `/task-memory:tm-init` | Initialize task-memory in a new project (was `/task-memory-init` in v1) |
+| `/task-memory:task-memory` | Full task planning workflow |
+| `/task-memory:task-status` | Quick context check (5-Question Reboot Test) |
 
 ## File Structure
 
@@ -174,11 +176,7 @@ task-memory/
 │   ├── hooks.json         # Hook config (uses ${CLAUDE_PLUGIN_ROOT})
 │   ├── task-memory-hook.py   # Main hook (Python 3.11+ stdlib only)
 │   └── skill-eval.sh         # UserPromptSubmit shim
-├── commands/              # Slash command wrappers (Cowork convention, also works in Claude Code)
-│   ├── tm-init.md
-│   ├── task-memory.md
-│   └── task-status.md
-├── skills/                # Skill definitions (same format in both runtimes)
+├── skills/                # Skill definitions (same format in both runtimes); auto-discovered, invocable as /task-memory:<name>
 │   ├── tm-init/
 │   ├── task-memory/
 │   └── task-status/
@@ -194,7 +192,7 @@ Inside a project that *uses* task-memory:
 ```
 your-project/
 ├── planning/
-│   ├── tasks.md           # Active tasks (created by /tm-init)
+│   ├── tasks.md           # Active tasks (created by the tm-init skill / /task-memory:tm-init)
 │   ├── archive.md         # Completed tasks
 │   └── notes/             # Per-task research preservation
 └── .task-memory.json      # Optional: custom planning_dir or task_prefix

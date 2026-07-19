@@ -17,7 +17,7 @@ this directory as the source of truth for format, field names, and section order
 
 ## Bootstrap
 
-For most projects, run `/tm-init` — it reads from this directory, asks a couple of
+For most projects, the tm-init skill auto-invokes on setup (or run it explicitly with `/task-memory:tm-init`) — it reads from this directory, asks a couple of
 configuration questions, and creates the right files in the right places. If you
 need to do it by hand:
 

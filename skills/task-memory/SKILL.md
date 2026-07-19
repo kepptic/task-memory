@@ -603,7 +603,7 @@ After work:
 ```
 ☐ Hook displays current task + notes summary automatically
 ☐ If "CONTEXT GAP DETECTED" warning appears, recreate findings from ops log
-☐ Run /task-status for 5-question verification
+☐ Run /task-memory:task-status for 5-question verification
 ☐ Resume from first unchecked subtask
 ```
 

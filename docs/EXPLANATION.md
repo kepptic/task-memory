@@ -100,7 +100,7 @@ Two deliberate constraints:
 
 ## Why one artifact installs into both Claude Code and Cowork
 
-Skills, commands, and the Python hook are byte-identical across both runtimes —
+Skills and the Python hook are byte-identical across both runtimes —
 the only thing that differs is packaging (Claude Code installs from the `kepptic`
 marketplace; Cowork sideloads a `.plugin` archive built from the same tree). One
 source of truth means a fix or feature lands in both places at once, and there's

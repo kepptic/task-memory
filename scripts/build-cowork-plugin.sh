@@ -6,7 +6,7 @@
 # Produces: dist/task-memory-<version>.plugin (zip archive)
 #
 # The same artifact is valid as a Claude Code plugin — the two formats share
-# .claude-plugin/plugin.json, skills/, commands/, and hooks/hooks.json. The
+# .claude-plugin/plugin.json, skills/, and hooks/hooks.json. The
 # only reason Claude Code users don't need this file is that they install via
 # the kepptic marketplace (`/plugin install task-memory@kepptic`), which
 # publishes the git repo directly. Cowork users sideload the .plugin file.
@@ -64,7 +64,6 @@ mkdir -p "${STAGE_DIR}"
 INCLUDE=(
   ".claude-plugin"
   "skills"
-  "commands"
   "hooks"
   "README.md"
   "LICENSE"
@@ -111,9 +110,6 @@ REQUIRED=(
   "skills/task-memory/SKILL.md"
   "skills/task-status/SKILL.md"
   "skills/tm-init/SKILL.md"
-  "commands/tm-init.md"
-  "commands/task-memory.md"
-  "commands/task-status.md"
 )
 for req in "${REQUIRED[@]}"; do
   if [[ ! -e "${STAGE_DIR}/${req}" ]]; then

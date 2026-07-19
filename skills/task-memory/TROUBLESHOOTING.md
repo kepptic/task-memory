@@ -67,7 +67,7 @@ _Reusable techniques, "do this"_
    6 research operations logged but NO notes file.
    Previous session insights may be LOST.
 ```
-**Fix:** Before coding, read the Visual Operations Log (with its response snippets), synthesize into notes/TASK-XXX.md, then run `/task-status` to re-verify Context Health Score.
+**Fix:** Before coding, read the Visual Operations Log (with its response snippets), synthesize into notes/TASK-XXX.md, then run `/task-memory:task-status` to re-verify Context Health Score.
 
 ### ❌ Repeating failed actions
 ```

@@ -134,7 +134,7 @@ Recommended actions (in order):
    - What GOTCHA to record?
    - What DECISIONS follow?
 3. Complete Pre-Work Checklist before resuming coding
-4. Re-run /task-status to re-verify
+4. Re-run /task-memory:task-status to re-verify
 
 ═══════════════════════════════════════════════════════════════
 ```
@@ -156,7 +156,7 @@ Recommended actions:
 2. If work was in progress, find most recent precompact snapshot:
    ls planning/notes/*-precompact-*.md
 3. Add subtasks to break down the work
-4. Start from the beginning with /task-memory
+4. Start from the beginning with /task-memory:task-memory
 
 ═══════════════════════════════════════════════════════════════
 ```
@@ -165,7 +165,7 @@ Recommended actions:
 
 ## When to Use
 
-Run `/task-status` when:
+Run `/task-memory:task-status` when:
 - Starting a new session (the SessionStart hook also shows notes summary automatically)
 - Resuming after a break
 - Context feels uncertain
@@ -274,7 +274,7 @@ Recommended recovery:
    - Gotcha: "jsonwebtoken is legacy — avoid for new code"
    - Decision: "Choose jose for modern algorithm support"
 3. Complete Pre-Work Checklist
-4. Re-run /task-status
+4. Re-run /task-memory:task-status
 
 ═══════════════════════════════════════════════════════════════
 ```
@@ -288,13 +288,13 @@ This skill reads from:
 - **planning/notes/TASK-XXX.md** — task documentation (Patterns, Gotchas, Decisions)
 - **planning/notes/TASK-XXX-precompact-*.md** — pre-compaction snapshots (fallback if main notes missing)
 
-Use with `/task-memory` to preserve research before checking status.
+Use with `/task-memory:task-memory` to preserve research before checking status.
 
 ---
 
 ## Format Reference
 
-For complete format documentation, see `/task-memory` skill.
+For complete format documentation, see the `/task-memory:task-memory` skill.
 
 **Required Task Structure:**
 ```markdown
