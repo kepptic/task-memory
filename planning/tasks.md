@@ -1,6 +1,6 @@
 # Kanban Board
 
-<!-- Config: Last Task ID: 18 -->
+<!-- Config: Last Task ID: 19 -->
 
 ## ⚙️ Configuration
 
@@ -144,6 +144,29 @@ Test task for auto-reorganization. Originally in Done section with Status: todo 
 **Errors Log**:
 
 ## In Progress
+
+### TASK-019 | Azure DevOps bridge — context layer keyed to ADO work items (full two-way)
+**Priority**: High | **Category**: Feature | **Status**: in-progress | **Assigned**: @user
+**Workflow**: Feature | **Complexity**: Complex
+**Created**: 2026-07-19 | **Started**: 2026-07-19
+**Tags**: #feature #ado #integration #mcp #two-way
+
+Bridge task-memory to Azure DevOps: ADO owns identity/state/sprints; task-memory becomes the AI-context layer keyed to ADO work-item ids (`### ADO-12345`, `notes/ADO-12345.md`). Sync on-demand via the official `microsoft/azure-devops-mcp` (no daemon). **Full two-way** (pull items+state+comments; push status+notes+distilled summary) per user directive — overrides Fable's earlier descope-to-one-way. `TASK-<PREFIX>-<n>` remains the local/offline path.
+
+**Orchestration (per user):** Fable plans the entire thing → Opus orchestrates → Sonnet writes all code → Codex reviews (Fable if Codex down) → loop build/review/fix until complete, folding in design upgrades as they surface. Do not stop between phases. MCP boundary is mocked for unit tests; live-ADO integration test is the one hand-off item.
+
+**Subtasks** (Fable's plan will refine):
+- [x] Fable plans the entire bridge (Phase 1 one-way + Phase 2 two-way, mock boundary explicit)
+- [x] Sonnet implements grammar+routing+config+pull+push+reconcile+notes+sync-skill
+- [ ] Codex/Fable review loop until clean + unit tests green
+- [ ] Final review + branch ready; live-ADO integration test handed to user
+**Notes**:
+
+**Errors Log**:
+- 2026-07-19 03:04:39 - Error: Removed extra error line
+**Visual Operations Log**:
+- 2026-07-19 02:13:13 - WebFetch: https://raw.githubusercontent.com/microsoft/azure-devops-mcp/main/docs/TOOLSET.md => # Work Item and Team Iteration Tools  ## Work Item Operations  **Get Work Item(s) by ID:** - `mcp_ado_wit_get_work_item`
+- 2026-07-19 02:13:01 - WebFetch: https://github.com/microsoft/azure-devops-mcp => # Azure DevOps MCP Server Tool Names & Parameters  Based on the provided documentation, I cannot provide the exact MCP t
 
 ### TASK-011 | Test Auto-Reorg: To Do→In Progress
 **Priority**: Low | **Category**: Testing | **Status**: todo | **Assigned**: @user

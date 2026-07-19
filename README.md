@@ -35,6 +35,10 @@ For teams working on separate branches, use per-dev task files (`planning/tasks-
 
 **Note:** The `.task-memory.json` config key `task_prefix` is currently unread/reserved and unrelated to per-file `Task Prefix:` headers (dev initials).
 
+### Azure DevOps Integration (Optional)
+
+Connect task-memory to Azure DevOps for team workflows. Add an `ado` block to `.task-memory.json`, and task items keyed to ADO work items (`### ADO-12345`, `notes/ADO-12345.md`) sync bidirectionally — pull items and comments, push status and notes context. Local `TASK-<PREFIX>-<n>` ids remain available offline. See [ADO Sync guide](docs/ADO-SYNC.md) for full setup and command reference.
+
 ### Install in Claude Code (Recommended)
 
 ```bash
