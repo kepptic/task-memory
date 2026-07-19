@@ -128,7 +128,16 @@ user: "Azure DevOps is unreachable — confirm `az login` is current and that
 `npx -y @azure-devops/mcp <org>` can start, then re-run." Nothing was
 written locally (the CLI gates on `ping()` before touching any file).
 
-### 7. Manual fallback (`--from-json`) — only if the user explicitly asks
+### 6b. Exit code 4 — partial remote failure (push only)
+
+Some of `push`'s writes landed before something failed mid-run (e.g. the
+MCP connection died partway through a multi-task push). This is different
+from exit code 2 — real writes already happened, so it is NOT a clean
+no-op. Show the user `report.failed` (which task(s), which stage), then
+just re-run `push` — the state compare and both comment-hash guards make
+re-running safe; only what didn't land the first time gets retried.
+
+### 7. Manual fallback (`--from-json`) — only if the user explicitly asks, and only for `pull`/`status`/dry-run
 
 If live MCP wiring is misbehaving and the user explicitly wants to proceed
 anyway, you may gather the same tool outputs by calling the ADO MCP tools
@@ -145,6 +154,15 @@ This feeds the exact same deterministic engine — nothing about the decision
 logic changes, only where the ADO data came from. **Never do this
 proactively** — it's a last resort, and the CLI's normal path (dynamic
 import of `adoClientMcp.js`) is what runs by default.
+
+**`--from-json` is a READ-ONLY escape hatch — it never touches real Azure
+DevOps.** The CLI enforces this: it's allowed for `pull`/`status` always,
+allowed for `push` only alongside `--dry-run`, and **rejected outright for
+`promote`** (no dry-run form exists — every promote call creates or links a
+real work item). Do not try to work around this by hand-editing files or
+skipping the CLI — if `promote` needs to run and live MCP is misbehaving,
+that's an exit-code-2 situation (tell the user, stop; §6 above), not a
+`--from-json` one.
 
 ### Promoting a local task to ADO
 
