@@ -1,6 +1,6 @@
 # Reference
 
-Complete technical reference for task-memory: the slash commands, the `tasks.md`
+Complete technical reference for task-memory: the skills, the `tasks.md`
 file format, the status model, every hook event, configuration options,
 environment variables, and on-disk state. This is the factual layer — for a
 guided walkthrough see [Getting Started](GETTING_STARTED.md), for task-oriented
@@ -12,16 +12,21 @@ Everything here is derived from the plugin source (`hooks/task-memory-hook.py`,
 
 ---
 
-## Slash commands
+## Skills
 
-task-memory installs three user-invocable commands. They work identically in
-Claude Code and Cowork.
+task-memory ships three skills, auto-discovered from `skills/`. They auto-invoke
+when the conversation matches their purpose, or can be invoked explicitly with
+their plugin-namespaced form (`/task-memory:<name>`). They work identically in
+Claude Code and Cowork. (Prior to v3.7, these were also registered as separate
+bare slash commands under `commands/` — that duplicated each entry and wasted
+tokens, so the thin command wrappers were removed; the skills are the only
+registration now.)
 
-| Command | Purpose | Skill source |
-|---------|---------|--------------|
-| `/tm-init` | Initialize task-memory in the current project — create `planning/`, scaffold `tasks.md`, optionally write `.task-memory.json`, update `CLAUDE.md`. Renamed from `/task-memory-init` in v2.0 to avoid colliding with Claude Code's built-in `/init`. | `skills/tm-init/SKILL.md` |
-| `/task-memory` | Full task-planning workflow — create a task, set workflow type and complexity, drive it through the status lifecycle, preserve research. | `skills/task-memory/SKILL.md` |
-| `/task-status` | Quick context check — the 5-Question Reboot Test. Read-only; reports current task progress and what to resume. | `skills/task-status/SKILL.md` |
+| Skill | Purpose | Skill source |
+|-------|---------|--------------|
+| `/task-memory:tm-init` | Initialize task-memory in the current project — create `planning/`, scaffold `tasks.md`, optionally write `.task-memory.json`, update `CLAUDE.md`. Renamed from `/task-memory-init` in v2.0 to avoid colliding with Claude Code's built-in `/init`. | `skills/tm-init/SKILL.md` |
+| `/task-memory:task-memory` | Full task-planning workflow — create a task, set workflow type and complexity, drive it through the status lifecycle, preserve research. | `skills/task-memory/SKILL.md` |
+| `/task-memory:task-status` | Quick context check — the 5-Question Reboot Test. Read-only; reports current task progress and what to resume. | `skills/task-status/SKILL.md` |
 
 The plugin name is `task-memory`; the marketplace is `kepptic`. Claude Code
 install ref is therefore `task-memory@kepptic`.

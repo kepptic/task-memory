@@ -28,7 +28,7 @@ This project uses the **task-memory** plugin for task tracking.
 At the start of EVERY session:
 1. The SessionStart hook auto-displays the current task + notes summary.
 2. If you see "⚠️ CONTEXT GAP DETECTED", recreate findings from the operations log BEFORE coding.
-3. For full verification, run `/task-status` — it computes a Context Health Score (0-5).
+3. For full verification, run the task-status skill (`/task-memory:task-status`) — it computes a Context Health Score (0-5).
 
 ### Task vs. Question Triage
 
@@ -37,14 +37,14 @@ At the start of EVERY session:
 - **QUESTION** (what, how, why, explain): Answer directly
 - **AMBIGUOUS** ("help me with X", "I'm stuck"): Ask one clarifying question first
 
-**Skills:** `/tm-init` (setup) | `/task-memory` (full workflow) | `/task-status` (health score)
+**Skills:** `/task-memory:tm-init` (setup) | `/task-memory:task-memory` (full workflow) | `/task-memory:task-status` (health score) — skills auto-invoke when the conversation matches their purpose; the namespaced form invokes them explicitly.
 
 **Install:**
 
 - **Claude Code:** `/plugin install task-memory@kepptic`
 - **Cowork:** build the archive with `scripts/build-cowork-plugin.sh`, then sideload the resulting `dist/task-memory-<version>.plugin` file (drag into the chat or use the Install plugin menu)
 
-Same skills, commands, and Python hook in both runtimes — `.plugin` archive contents are format-identical.
+Same skills and Python hook in both runtimes — `.plugin` archive contents are format-identical.
 
 ---
 
@@ -158,7 +158,7 @@ Before marking `Status: done`:
 | Wrong pattern used | Didn't check existing code | Pre-work: search for similar implementations |
 | Bug introduced | Skipped self-critique | Complete Rule 6 before marking done |
 | Context lost | Notes file empty despite research | Hook blocks Stop — fill Patterns/Gotchas/Decisions |
-| Research gap | Ops logged but no synthesis | SessionStart warns; /task-status shows Health Score |
+| Research gap | Ops logged but no synthesis | SessionStart warns; /task-memory:task-status shows Health Score |
 
 ---
 

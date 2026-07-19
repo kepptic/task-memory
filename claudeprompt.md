@@ -15,12 +15,14 @@ On every prompt, determine:
 - **TASK** (implement, fix, build, create): Create task in `planning/tasks.md` first
 - **QUESTION** (what, how, why, explain): Answer directly
 
-### Slash Commands
+### Skills
 
-| Command | Purpose |
-|---------|---------|
-| `/task-memory` | Full task planning workflow |
-| `/task-status` | Quick context check (5-Question Reboot Test) |
+Skills auto-invoke when the conversation matches their purpose, or invoke explicitly with the plugin-namespaced form.
+
+| Skill | Purpose |
+|-------|---------|
+| `/task-memory:task-memory` | Full task planning workflow |
+| `/task-memory:task-status` | Quick context check (5-Question Reboot Test) |
 
 ### Workflow
 

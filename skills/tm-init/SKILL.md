@@ -190,7 +190,7 @@ If Yes, ask three more required questions, then two optional ones:
    At the start of EVERY session:
    1. The SessionStart hook auto-displays current task + notes summary.
    2. If you see "⚠️ CONTEXT GAP DETECTED", recreate findings from the operations log BEFORE coding.
-   3. For full verification, run `/task-status` — it computes a Context Health Score (0-5).
+   3. For full verification, run the task-status skill (`/task-memory:task-status`) — it computes a Context Health Score (0-5).
 
    ### Task vs. Question Triage
 
@@ -215,7 +215,7 @@ If Yes, ask three more required questions, then two optional ones:
 
    Reference the task ID in every commit: `feat: description (TASK-XXX)`
 
-   **Skills:** `/tm-init` (setup) | `/task-memory` (full workflow) | `/task-status` (5-question + health score)
+   **Skills:** `/task-memory:tm-init` (setup) | `/task-memory:task-memory` (full workflow) | `/task-memory:task-status` (5-question + health score) — auto-invoke, or run explicitly with the namespaced form
    ```
 
    If CLAUDE.md doesn't exist, create a full version:
@@ -234,7 +234,7 @@ If Yes, ask three more required questions, then two optional ones:
    At the start of EVERY session:
    1. The SessionStart hook auto-displays current task + notes summary.
    2. If you see "⚠️ CONTEXT GAP DETECTED", recreate findings from the operations log BEFORE coding.
-   3. For full verification, run `/task-status` — it computes a Context Health Score (0-5).
+   3. For full verification, run the task-status skill (`/task-memory:task-status`) — it computes a Context Health Score (0-5).
 
    ### Task vs. Question Triage
 
@@ -259,7 +259,7 @@ If Yes, ask three more required questions, then two optional ones:
 
    Reference the task ID in every commit: `feat: description (TASK-XXX)`
 
-   **Skills:** `/tm-init` (setup) | `/task-memory` (full workflow) | `/task-status` (5-question + health score)
+   **Skills:** `/task-memory:tm-init` (setup) | `/task-memory:task-memory` (full workflow) | `/task-memory:task-status` (5-question + health score) — auto-invoke, or run explicitly with the namespaced form
    ```
 
 5. **Create .task-memory.json if non-default location or custom thresholds:**
@@ -354,8 +354,8 @@ If Yes, ask three more required questions, then two optional ones:
    Notes folder: {planning_dir}/notes/
 
    Next steps:
-   1. Run /task-memory to create your first task
-   2. Run /task-status to check context at any time
+   1. Run /task-memory:task-memory to create your first task
+   2. Run /task-memory:task-status to check context at any time
    ```
 
 ## Monorepo Detection
@@ -402,7 +402,7 @@ Setting up with:
 ✓ Created planning/notes/
 ✓ Created CLAUDE.md with task-memory integration
 
-Task Memory is ready! Run /task-memory to create your first task.
+Task Memory is ready! Run /task-memory:task-memory to create your first task.
 ```
 
 ### Monorepo Init

@@ -907,6 +907,21 @@ def handle_session_start() -> None:
     print("TASK-MEMORY SESSION START", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
+    # v3.7.0: task_files_glob routes task files independently of planning_dir.
+    # If a project sets task_files_glob (task files NOT under planning/) but
+    # never sets planning_dir, find_planning_dir() silently falls back to
+    # PROJECT_DIR/"planning" (or the nearest ancestor "planning/" dir) — so
+    # notes/skeletons/context land somewhere disconnected from the actual task
+    # files. Warn once per SessionStart so this doesn't cause silent drift.
+    if TASK_FILES_GLOB and "planning_dir" not in CONFIG:
+        print(
+            f"⚠️  task_files_glob is set but planning_dir is not — notes/context "
+            f"default to {PLANNING_DIR}/notes/, which may not be where your task "
+            f"files live. Set \"planning_dir\" in .task-memory.json to co-locate "
+            f"notes with your tasks.",
+            file=sys.stderr,
+        )
+
     files = task_files()
     if not files:
         if TASK_FILES_GLOB:

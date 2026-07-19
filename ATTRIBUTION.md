@@ -55,7 +55,7 @@ Beyond the original projects, Task Memory contributes:
 - **Session Tracking** - Stop hook only blocks tasks worked on in current session
 - **Visual Operations Logging** - Automatic research operation tracking
 - **Auto-Reorganization** - Tasks move to correct sections when Status changes
-- **Skill System** - `/task-memory` and `/task-status` slash commands
+- **Skill System** - `/task-memory:task-memory` and `/task-memory:task-status` skills (auto-invoke, or run via the plugin-namespaced form)
 - **Monorepo Support** - Auto-detection of nearest planning directory
 - **Plugin Distribution** - `/plugin install` compatibility
 

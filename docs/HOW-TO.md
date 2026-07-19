@@ -48,9 +48,9 @@ Cowork sideloads a `.plugin` archive (it validates by the exact filename
 
 2. In Cowork, drag `task-memory.plugin` into the chat, or use **Install plugin** and point it at the file.
 
-3. Run `/tm-init` to bootstrap a project.
+3. The tm-init skill auto-invokes on setup, or run it explicitly with `/task-memory:tm-init` to bootstrap a project.
 
-**Verification:** `/tm-init` creates `planning/tasks.md` in the project.
+**Verification:** `/task-memory:tm-init` creates `planning/tasks.md` in the project.
 
 **Troubleshooting:** "File is not a valid plugin archive" → you used the
 versioned name (`task-memory-3.4.1.plugin`). Rename it to `task-memory.plugin`;
@@ -62,11 +62,11 @@ Cowork validates by filename.
 
 ```bash
 cd /path/to/your-project
-# in Claude Code / Cowork:
-/tm-init
+# in Claude Code / Cowork, the tm-init skill auto-invokes, or run it explicitly:
+/task-memory:tm-init
 ```
 
-`/tm-init` detects monorepos, asks where to store planning, scaffolds
+`/task-memory:tm-init` detects monorepos, asks where to store planning, scaffolds
 `planning/tasks.md` + `archive.md` + `notes/`, and adds a task-memory section to
 `CLAUDE.md`.
 
@@ -85,7 +85,7 @@ Put planning somewhere other than `./planning/`.
    { "planning_dir": "docs/planning" }
    ```
 
-2. Run `/tm-init` (or move an existing `planning/` to the new path).
+2. Run `/task-memory:tm-init` (or move an existing `planning/` to the new path).
 
 **Verification:** start a new session — the hook reads from `docs/planning/tasks.md`.
 

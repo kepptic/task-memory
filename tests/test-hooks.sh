@@ -478,6 +478,81 @@ EOF
 }
 
 # =============================================================================
+# TASK-020 — warn when task_files_glob is set but planning_dir is not
+# =============================================================================
+
+test_planning_dir_warning_missing() {
+    log_test "TASK-020: SessionStart warns when task_files_glob is set but planning_dir is not"
+
+    local PDROOT="$FIXTURES_DIR/planning-dir-warn-missing"
+    rm -rf "$PDROOT"
+    mkdir -p "$PDROOT/docs/todo/api"
+
+    cat > "$PDROOT/.task-memory.json" << 'EOF'
+{ "task_files_glob": "docs/todo/*/tasks.md" }
+EOF
+
+    cat > "$PDROOT/docs/todo/api/tasks.md" << 'EOF'
+# api Kanban
+
+<!-- Config: Last Task ID: 001 -->
+
+## In Progress
+
+---
+
+## Done
+
+---
+EOF
+
+    local output
+    output=$(CLAUDE_PROJECT_DIR="$PDROOT" "$HOOK_SCRIPT" <<< '{"hook_event_name":"SessionStart","session_id":"pd-warn-test"}' 2>&1) || true
+
+    assert_contains "$output" "task_files_glob is set but planning_dir is not" "Warning printed when planning_dir is absent from config"
+    assert_contains "$output" "planning_dir" "Warning mentions planning_dir as the fix"
+
+    rm -rf "$PDROOT"
+}
+
+test_planning_dir_warning_control_no_warning() {
+    log_test "TASK-020: control — no warning when planning_dir IS set alongside task_files_glob"
+
+    local PDROOT="$FIXTURES_DIR/planning-dir-warn-control"
+    rm -rf "$PDROOT"
+    mkdir -p "$PDROOT/docs/todo/api"
+
+    cat > "$PDROOT/.task-memory.json" << 'EOF'
+{ "task_files_glob": "docs/todo/*/tasks.md", "planning_dir": "docs/todo" }
+EOF
+
+    cat > "$PDROOT/docs/todo/api/tasks.md" << 'EOF'
+# api Kanban
+
+<!-- Config: Last Task ID: 001 -->
+
+## In Progress
+
+---
+
+## Done
+
+---
+EOF
+
+    local output
+    output=$(CLAUDE_PROJECT_DIR="$PDROOT" "$HOOK_SCRIPT" <<< '{"hook_event_name":"SessionStart","session_id":"pd-warn-control"}' 2>&1) || true
+
+    if echo "$output" | grep -q "task_files_glob is set but planning_dir is not"; then
+        log_fail "No warning expected when planning_dir is set - Warning was printed unexpectedly"
+    else
+        log_pass "No warning expected when planning_dir is set"
+    fi
+
+    rm -rf "$PDROOT"
+}
+
+# =============================================================================
 # TASK-017 — namespaced (initials-prefixed) task ids
 # =============================================================================
 
@@ -1556,6 +1631,10 @@ test_stop_incomplete_tasks
 test_session_end_same_as_stop
 test_checkbox_regex
 test_multifile_session_start
+
+# TASK-020: task_files_glob-without-planning_dir SessionStart warning
+test_planning_dir_warning_missing
+test_planning_dir_warning_control_no_warning
 
 # v3.3.0 regression tests
 test_stamping_scoped_to_relevant_tool_use
