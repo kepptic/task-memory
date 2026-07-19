@@ -44,7 +44,7 @@ import {
 } from '../src/sync/syncState.js';
 import { pull, push, promote, decidePull, decidePush } from '../src/sync/engine.js';
 import { markdownParser } from '../src/utils/markdown.js';
-import { applyPromoteWrites, LINK_ID_RE } from '../scripts/ado-sync.mjs';
+import { applyPromoteWrites, LINK_ID_RE, pushExitCode } from '../scripts/ado-sync.mjs';
 
 // =============================================================================
 // config.js — cases 15-19
@@ -575,16 +575,49 @@ test('notes: extractContext strips ADO Comments and Summary; extractSummary reje
   assert.equal(extractSummary(notes), null); // still placeholder-only
 
   const withComments = appendComments(notes, [{ id: 1, author: 'A', createdDate: 'd', text: 'hi' }]).text;
-  const context = extractContext(withComments);
+  // Give the fixture REAL content under Patterns Discovered — a pure
+  // untouched skeleton (headings + italic placeholders + empty bullet
+  // stubs only) is exercised separately below (B2 regression) and must
+  // yield NO context, so this test can no longer rely on skeleton
+  // boilerplate alone to make `context` non-empty.
+  const withRealNote = withComments.replace(
+    '_Reusable techniques, "do this". Each bullet should be specific enough to apply without re-reading source material._\n\n-',
+    '_Reusable techniques, "do this". Each bullet should be specific enough to apply without re-reading source material._\n\n- Use setField for surgical, single-line edits.',
+  );
+  const context = extractContext(withRealNote);
   assert.ok(!context.includes('ADO Comments'));
   assert.ok(!context.includes('## Summary'));
   assert.ok(context.includes('Patterns Discovered'));
+  assert.ok(context.includes('Use setField for surgical, single-line edits.'));
 
-  const filledIn = withComments.replace(
+  const filledIn = withRealNote.replace(
     '_One-paragraph answer to: what is this task doing and why?_',
     'This task wires up the sync engine.',
   );
   assert.equal(extractSummary(filledIn), 'This task wires up the sync engine.');
+});
+
+test('notes (Fable review B2): extractContext rejects an untouched skeleton — no real content means nothing to push', () => {
+  const notes = buildNotesSkeleton('ADO-2', 'Title', '2026-07-19');
+  assert.equal(extractContext(notes), '');
+
+  // Appending ADO comments doesn't change the verdict — the ADO Comments
+  // section is stripped before the boilerplate check runs, and everything
+  // else is still the untouched skeleton.
+  const withComments = appendComments(notes, [{ id: 1, author: 'A', createdDate: 'd', text: 'hi' }]).text;
+  assert.equal(extractContext(withComments), '');
+
+  // One real bullet anywhere is enough to flip the verdict — and the
+  // returned context still includes the surrounding skeleton headings
+  // (extractContext strips ADO Comments/Summary, nothing else).
+  const withRealBullet = notes.replace(
+    '_Reusable techniques, "do this". Each bullet should be specific enough to apply without re-reading source material._\n\n-',
+    '_Reusable techniques, "do this". Each bullet should be specific enough to apply without re-reading source material._\n\n- Real technique here.',
+  );
+  const context = extractContext(withRealBullet);
+  assert.notEqual(context, '');
+  assert.ok(context.includes('Real technique here.'));
+  assert.ok(context.includes('Patterns Discovered'));
 });
 
 // =============================================================================
@@ -988,6 +1021,57 @@ test('push (33): no local change -> zero write calls, reported no-local-change',
   assert.deepEqual(result.report.skipped, [{ id: 'ADO-401', reason: 'no-local-change' }]);
 });
 
+test('pull -> push (Fable review B1, silent data loss): a NO-OP pull must NEVER re-baseline localStatus to the board\'s current status, or a pending local edit is silently swallowed forever', async () => {
+  // Repro: baseline syncState {adoState: 'New', localStatus: 'todo'}; the
+  // board card is then moved to 'in-progress' (a local-only edit, e.g. drag
+  // on the kanban board) while ADO's item is untouched — still 'New'.
+  // decidePull sees `!adoChanged` and resolves 'noop' regardless of the
+  // local edit (that comparison is push's job, not pull's — see decidePull
+  // above). The bug: pull's noop branch used to rewrite
+  // `localStatus: finalLocalStatus`, which for a noop equals the board's
+  // CURRENT status ('in-progress') — re-baselining the pending edit as
+  // "already synced" so push's decidePush() would then see no local change
+  // and never send it to ADO. No error, no warning — just silence.
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-720 | Local edit must survive a noop pull
+**Status**: in-progress
+
+`)}`;
+  const syncState = setTaskEntry(emptySyncState(), 'ADO-720', {
+    rev: 1, adoState: 'New', localStatus: 'todo', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0,
+  });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+
+  const pullClient = createMockAdoClient({
+    workItems: { 720: { id: 720, rev: 1, title: 'Local edit must survive a noop pull', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+    comments: { 720: [] },
+  });
+  const pullResult = await pull({ boardText, notesFiles: {}, syncState, config, client: pullClient, today: '2026-07-19' });
+  assert.equal(pullResult.report.conflicts.length, 0); // !adoChanged -> noop, never conflict
+
+  const entryAfterPull = getTaskEntry(pullResult.syncState, 'ADO-720');
+  assert.equal(entryAfterPull.adoState, 'New');
+  assert.equal(entryAfterPull.localStatus, 'todo', "noop must preserve the last SYNCED baseline ('todo'), not re-baseline to the board's current status ('in-progress')");
+
+  const pushClient = createMockAdoClient({
+    workItems: { 720: { id: 720, rev: 1, title: 'Local edit must survive a noop pull', state: 'New', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
+  });
+  const pushResult = await push({
+    boardText: pullResult.boardText,
+    notesFiles: pullResult.notesFiles,
+    syncState: pullResult.syncState,
+    config,
+    client: pushClient,
+  });
+
+  const stateCalls = pushClient.calls.filter((c) => c.method === 'updateWorkItemFields');
+  assert.equal(stateCalls.length, 1, 'push must send the local status change to ADO exactly once — not silently no-op it');
+  assert.deepEqual(stateCalls[0].args, [720, { 'System.State': 'Active' }]);
+  assert.deepEqual(pushResult.report.pushed, ['ADO-720']);
+  assert.deepEqual(pushResult.report.skipped, []);
+});
+
 test('push (context-only, finding #3/D2): no Status change but notes context changed -> zero STATE calls, one context comment', async () => {
   // Companion to (33) above — that test has an EMPTY notesFiles fixture, so
   // it can't distinguish "noop correctly skips comments too" from "noop
@@ -1072,6 +1156,53 @@ test('push (34): context comment posts once with marker+hash; idempotent when fo
   const commentCalls2 = client.calls.filter((c) => c.method === 'addComment');
   assert.equal(commentCalls2.length, 1); // no NEW comment posted
   assert.equal(second.report.pushed.includes('ADO-402'), true);
+});
+
+test('push (Fable review B2): freshly-pulled skeleton-only notes make ZERO context comments; a sibling item with real notes makes exactly one', async () => {
+  const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
+
+### ADO-409 | Skeleton only
+**Status**: in-progress
+
+### ADO-410 | Has real notes
+**Status**: in-progress
+
+`)}`;
+  const workItems = {
+    409: { id: 409, rev: 1, title: 'Skeleton only', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' },
+    410: { id: 410, rev: 1, title: 'Has real notes', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' },
+  };
+  const client = createMockAdoClient({ workItems });
+  const config = baseConfig({ scope: { wiql: 'x' } });
+  let syncState = emptySyncState();
+  for (const id of ['ADO-409', 'ADO-410']) {
+    syncState = setTaskEntry(syncState, id, { rev: 1, adoState: 'Active', localStatus: 'in-progress', syncedAt: '2026-07-01T00:00:00Z', lastCommentId: 0 });
+  }
+
+  // Exactly what `pull` leaves behind for a brand-new item that nobody has
+  // annotated yet: the raw, untouched skeleton (buildNotesSkeleton), byte
+  // for byte — this is the "50-item sprint -> 50 junk comments" repro.
+  const skeletonOnly = buildNotesSkeleton('ADO-409', 'Skeleton only', '2026-07-19');
+  const withRealContent = buildNotesSkeleton('ADO-410', 'Has real notes', '2026-07-19').replace(
+    '_Reusable techniques, "do this". Each bullet should be specific enough to apply without re-reading source material._\n\n-',
+    '_Reusable techniques, "do this". Each bullet should be specific enough to apply without re-reading source material._\n\n- Mock rev bumps by 1 on every updateWorkItemFields call.',
+  );
+  const notesFiles = { 'ADO-409': skeletonOnly, 'ADO-410': withRealContent };
+
+  // Status didn't change (both cards' local Status already equals the
+  // mapped ADO state) — decidePush resolves 'noop' for both, so the ONLY
+  // thing that could still make a client call is the context-comment
+  // stage (finding #3/D2: noop still lets a context-only edit flow).
+  const result = await push({ boardText, notesFiles, syncState, config, client });
+
+  const commentCalls = client.calls.filter((c) => c.method === 'addComment');
+  assert.equal(commentCalls.length, 1, 'skeleton-only notes must post ZERO context comments; real notes post exactly one');
+  assert.equal(client.calls.filter((c) => c.method === 'updateWorkItemFields').length, 0);
+
+  assert.equal(result.report.commentsPushed['ADO-409'], undefined);
+  assert.equal(result.report.commentsPushed['ADO-410'], 1);
+  assert.equal(getTaskEntry(result.syncState, 'ADO-409').pushedContextHash, undefined);
+  assert.equal(getTaskEntry(result.syncState, 'ADO-410').pushedContextHash?.length, 64);
 });
 
 test('push (35a): done flow posts the verbatim Summary section, then pushes state to done', async () => {
@@ -1227,6 +1358,23 @@ test('push (finding #4): AdoUnavailableError mid-push aborts remaining candidate
   assert.equal(getTaskEntry(result.syncState, 'ADO-513').adoState, 'New'); // never even attempted
 });
 
+test('CLI (finding #4 companion): cmdPush maps a mid-push transport abort to exit code 4 — conflicts still take priority (3), clean success stays 0', () => {
+  // The mid-push abort ITSELF (report.failed getting populated when the MCP
+  // transport dies partway through) is exercised end-to-end by the
+  // engine-level "push (finding #4)" test directly above. What that test
+  // does NOT cover is cmdPush's own 3-line decision — conflicts (3) beat
+  // failures (4) beat clean success (0) — so exercise `pushExitCode`
+  // (the function cmdPush actually calls) directly against representative
+  // reports.
+  assert.equal(pushExitCode({ conflicts: [], failed: [] }), 0);
+  assert.equal(pushExitCode({ conflicts: [], failed: [{ id: 'ADO-512', stage: 'state', unavailable: true }] }), 4);
+  assert.equal(
+    pushExitCode({ conflicts: [{ id: 'ADO-700' }], failed: [{ id: 'ADO-512', stage: 'state', unavailable: true }] }),
+    3,
+    'a pending conflict always wins over a plain failure — it needs an explicit --take-local/--take-ado decision, not a blind re-run',
+  );
+});
+
 test('push (36): unmapped local status is skipped + reported, no calls made', async () => {
   const boardText = `${BASE_BOARD.replace('## In Progress\n', `## In Progress
 
@@ -1337,12 +1485,26 @@ test('conflict (39): both sides changed -> pull leaves Status, push makes zero S
   assert.equal(readField(blockAfterPull.block, 'Status'), 'done'); // board leaves local Status as-is
   assert.ok(pullResult.notesFiles['ADO-700'].includes('ADO-side note')); // comments still flow in
 
+  // Fable review B2: the notes file pull() just created is otherwise still
+  // the untouched skeleton (extractContext now correctly treats that as NO
+  // context — see the B2 regression tests below), so give the fixture REAL
+  // local context here, same as any card someone actually took notes on,
+  // to keep exercising "the context comment still flows through a Status
+  // conflict" rather than accidentally re-testing the skeleton-spam bug.
+  const notesWithRealContext = {
+    ...pullResult.notesFiles,
+    'ADO-700': pullResult.notesFiles['ADO-700'].replace(
+      '_Reusable techniques, "do this". Each bullet should be specific enough to apply without re-reading source material._\n\n-',
+      '_Reusable techniques, "do this". Each bullet should be specific enough to apply without re-reading source material._\n\n- Root-caused via bisect; bad commit touched the state-map default.',
+    ),
+  };
+
   const pushClient = createMockAdoClient({
     workItems: { 700: { id: 700, rev: 3, title: 'Conflicted item', state: 'Active', type: 'Task', assignee: '', iterationPath: '', priority: null, url: '' } },
   });
   const pushResult = await push({
     boardText: pullResult.boardText,
-    notesFiles: pullResult.notesFiles,
+    notesFiles: notesWithRealContext,
     syncState: pullResult.syncState,
     config,
     client: pushClient,
@@ -1350,13 +1512,14 @@ test('conflict (39): both sides changed -> pull leaves Status, push makes zero S
   assert.equal(pushResult.report.conflicts.length, 1);
   // The STATE field is never touched while conflicted — Codex review
   // finding #3/D2: comments are an append-only merge that can never
-  // conflict, so the context comment (non-empty: the pulled notes file
-  // still carries the skeleton's Patterns/Gotchas/Decisions sections) DOES
-  // flow, even though the Status conflict blocks the state write.
+  // conflict, so the context comment (non-empty: the notes file carries
+  // real local content, not just the skeleton) DOES flow, even though the
+  // Status conflict blocks the state write.
   assert.equal(pushClient.calls.filter((c) => c.method === 'updateWorkItemFields').length, 0);
   const commentCalls = pushClient.calls.filter((c) => c.method === 'addComment');
   assert.equal(commentCalls.length, 1);
   assert.match(commentCalls[0].args[1], /^\[task-memory\] context update [0-9a-f]{8}\n\n/);
+  assert.match(commentCalls[0].args[1], /Root-caused via bisect/);
 });
 
 test('conflict (40): --take-local forces the push through a conflict and re-baselines', async () => {
