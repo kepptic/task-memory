@@ -512,3 +512,119 @@ test('ANY_ID_CORE: matches both kinds, rejects malformed tails', () => {
   assert.ok(!re.test('TASK-GR-12X'));
   assert.ok(!re.test('ADO-12X'));
 });
+
+// -----------------------------------------------------------------------------
+// P1 (markdown.js): cases 11-14
+// -----------------------------------------------------------------------------
+
+test('markdown: ADO heading and TASK heading coexist in one section, ids verbatim', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Task Prefix: GR | Last Task ID: 1 -->
+
+## ⚙️ Configuration
+
+**Columns**: In Progress (in-progress) | Done (done)
+
+---
+
+## In Progress
+
+### ADO-12345 | Synced ADO item
+**Status**: in-progress
+
+### TASK-GR-1 | Local-only item
+**Status**: in-progress
+
+---
+
+## Done
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks-gr.md' });
+  const ids = parsed.tasks.map((t) => t.id);
+  assert.ok(ids.includes('ADO-12345'), `expected ADO-12345 verbatim, got ${JSON.stringify(ids)}`);
+  assert.ok(ids.includes('TASK-GR-1'), `expected TASK-GR-1 verbatim, got ${JSON.stringify(ids)}`);
+});
+
+test('markdown: round-trip preserves ADO heading + Sprint/ADO fields (D6), never pads', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Last Task ID: 0 -->
+
+## ⚙️ Configuration
+
+**Columns**: In Progress (in-progress) | Done (done)
+
+---
+
+## In Progress
+
+### ADO-12345 | Synced ADO item
+**Status**: in-progress
+**Sprint**: Sprint 42 | **ADO**: https://dev.azure.com/org/proj/_workitems/edit/12345
+
+Some description text.
+
+---
+
+## Done
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks.md' });
+  const task = parsed.tasks.find((t) => t.id === 'ADO-12345');
+  assert.ok(task, 'ADO-12345 should be parsed');
+  assert.equal(task.sprint, 'Sprint 42');
+  assert.equal(task.adoUrl, 'https://dev.azure.com/org/proj/_workitems/edit/12345');
+  assert.doesNotMatch(task.description, /Sprint 42/);
+  assert.doesNotMatch(task.description, /_workitems/);
+
+  const regenerated = markdownParser.generateMarkdown(parsed.tasks, parsed.config);
+  assert.match(regenerated, /^### ADO-12345 \| Synced ADO item$/m);
+  assert.match(regenerated, /\*\*Sprint\*\*: Sprint 42 \| \*\*ADO\*\*: https:\/\/dev\.azure\.com\/org\/proj\/_workitems\/edit\/12345/);
+  assert.doesNotMatch(regenerated, /ADO-012345/);
+});
+
+test('markdown: ADO-012 (leading zero) is not treated as a task heading', () => {
+  const content = `# Kanban Board
+
+<!-- Config: Last Task ID: 0 -->
+
+## ⚙️ Configuration
+
+**Columns**: In Progress (in-progress)
+
+---
+
+## In Progress
+
+### ADO-012 | Not a real ADO id (leading zero)
+**Status**: in-progress
+
+---
+`;
+  const parsed = markdownParser.parseMarkdown(content, { fileName: 'tasks.md' });
+  assert.equal(parsed.tasks.length, 0);
+});
+
+test('markdown: parseArchive accepts ADO ids', () => {
+  const content = `# Task Archive
+
+> Archived tasks
+
+## ✅ Archives
+
+### ADO-999 | Archived ADO item
+**Status**: done
+
+### TASK-042 | Archived legacy item
+**Status**: done
+
+`;
+  const archived = markdownParser.parseArchive(content);
+  const ids = archived.map((t) => t.id);
+  assert.ok(ids.includes('ADO-999'), `expected ADO-999 verbatim, got ${JSON.stringify(ids)}`);
+  assert.ok(ids.includes('TASK-042'), `expected TASK-042 verbatim, got ${JSON.stringify(ids)}`);
+});
