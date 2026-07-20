@@ -44,7 +44,7 @@ import {
 } from '../src/sync/syncState.js';
 import { pull, push, promote, decidePull, decidePush } from '../src/sync/engine.js';
 import { markdownParser } from '../src/utils/markdown.js';
-import { applyPromoteWrites, LINK_ID_RE, pushExitCode, notesFileId } from '../scripts/ado-sync.mjs';
+import { applyPromoteWrites, LINK_ID_RE, pushExitCode, notesFileId, adoUnavailableMessage } from '../scripts/ado-sync.mjs';
 import { parseWiqlResultIds, buildLauncher } from '../src/sync/adoClientMcp.js';
 
 // =============================================================================
@@ -1535,6 +1535,43 @@ test('CLI (finding #4 companion): cmdPush maps a mid-push transport abort to exi
     3,
     'a pending conflict always wins over a plain failure — it needs an explicit --take-local/--take-ado decision, not a blind re-run',
   );
+});
+
+test('adoUnavailableMessage (TASK-021 coordinator follow-up): a launcher-not-found error prints ONLY its own message — no az-login/auth text', () => {
+  // adoClientMcp.js tags both launcher-not-found raise sites (the
+  // connect-catch ENOENT case and detectMcpCommand's all-probes-exhausted
+  // case) with `.launcherNotFound = true`; simulate both here since a real
+  // CLI spawn can't deterministically force "no launcher on PATH" in a dev
+  // environment that actually has npm/pnpm/npx installed.
+  const connectCatchErr = new AdoUnavailableError(
+    'MCP launcher \'pnpm\' not found on PATH. Install npm (for npx), or set "ado": ' +
+      '{ "mcp_command": [...] } in .task-memory.json (e.g. ["pnpm","dlx"] or ["bunx"]).',
+  );
+  connectCatchErr.launcherNotFound = true;
+  const msg1 = adoUnavailableMessage(connectCatchErr);
+  assert.match(msg1, /MCP launcher/);
+  assert.match(msg1, /mcp_command/);
+  assert.doesNotMatch(msg1, /az login/);
+  assert.doesNotMatch(msg1, /MCP server installed/);
+
+  const autoDetectErr = new AdoUnavailableError(
+    'no MCP launcher found on PATH (probed npx, pnpm, bunx). Install npm (for npx), or set ' +
+      '"ado": { "mcp_command": [...] } in .task-memory.json (e.g. ["pnpm","dlx"] or ["bunx"]).',
+  );
+  autoDetectErr.launcherNotFound = true;
+  const msg2 = adoUnavailableMessage(autoDetectErr);
+  assert.match(msg2, /MCP launcher/);
+  assert.match(msg2, /mcp_command/);
+  assert.doesNotMatch(msg2, /az login/);
+  assert.doesNotMatch(msg2, /MCP server installed/);
+});
+
+test('adoUnavailableMessage: a genuine connect/auth failure (no launcherNotFound flag) keeps the az-login wrapper', () => {
+  const authErr = new AdoUnavailableError('could not start/connect to the Azure DevOps MCP server: some transport error');
+  const msg = adoUnavailableMessage(authErr);
+  assert.match(msg, /az login/);
+  assert.match(msg, /MCP server installed/);
+  assert.match(msg, /some transport error/, 'the underlying err.message must still be surfaced');
 });
 
 test('push (36): unmapped local status is skipped + reported, no calls made', async () => {

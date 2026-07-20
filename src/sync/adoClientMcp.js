@@ -113,6 +113,19 @@ function isLauncherAvailable(bin) {
   return true;
 }
 
+// Coordinator follow-up (TASK-021 live check): the CLI's exit-2 handler
+// used to print a generic "...az login'ed?" wrapper for EVERY
+// AdoUnavailableError, so a launcher-not-found failure still surfaced
+// misleading auth text above the correct message. Tag the error instance
+// with `.launcherNotFound = true` at both raise sites below so
+// scripts/ado-sync.mjs can select the right stderr message — see
+// adoUnavailableMessage() there.
+function launcherNotFoundError(message) {
+  const err = new AdoUnavailableError(message);
+  err.launcherNotFound = true;
+  return err;
+}
+
 // Probe PATH for the first available launcher (npx -> pnpm -> bunx) and
 // return its prefix array, ready for buildLauncher(). Throws
 // AdoUnavailableError naming all three probed launchers if none are found.
@@ -123,7 +136,7 @@ export function detectMcpCommand() {
       return prefix;
     }
   }
-  throw new AdoUnavailableError(
+  throw launcherNotFoundError(
     'no MCP launcher found on PATH (probed npx, pnpm, bunx). Install npm (for npx), or set ' +
       '"ado": { "mcp_command": [...] } in .task-memory.json (e.g. ["pnpm","dlx"] or ["bunx"]).',
   );
@@ -390,7 +403,7 @@ export async function createAdoClient(config) {
     // no npx on this box." Raise a targeted, actionable error instead; keep
     // the original server/auth wording for every other (genuine) failure.
     if (isLauncherNotFoundError(err)) {
-      throw new AdoUnavailableError(
+      throw launcherNotFoundError(
         `MCP launcher '${command}' not found on PATH. Install npm (for npx), or set "ado": ` +
           `{ "mcp_command": [...] } in .task-memory.json (e.g. ["pnpm","dlx"] or ["bunx"]).`,
       );
