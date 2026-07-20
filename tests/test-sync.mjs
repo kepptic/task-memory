@@ -44,8 +44,8 @@ import {
 } from '../src/sync/syncState.js';
 import { pull, push, promote, decidePull, decidePush } from '../src/sync/engine.js';
 import { markdownParser } from '../src/utils/markdown.js';
-import { applyPromoteWrites, LINK_ID_RE, pushExitCode, notesFileId } from '../scripts/ado-sync.mjs';
-import { parseWiqlResultIds } from '../src/sync/adoClientMcp.js';
+import { applyPromoteWrites, LINK_ID_RE, pushExitCode, notesFileId, adoUnavailableMessage } from '../scripts/ado-sync.mjs';
+import { parseWiqlResultIds, buildLauncher } from '../src/sync/adoClientMcp.js';
 
 // =============================================================================
 // config.js — cases 15-19
@@ -134,6 +134,117 @@ test('loadAdoConfig: wiql scope object accepted', () => {
   });
   assert.equal(ok, true);
   assert.deepEqual(config.scope, { wiql: 'SELECT [System.Id] FROM WorkItems' });
+});
+
+// =============================================================================
+// config.js — ado.mcp_command validation (TASK-021: configurable ADO MCP
+// launcher, so a Node+pnpm/bun-but-no-npm box can override the npx default).
+// =============================================================================
+
+test('loadAdoConfig: mcp_command absent -> undefined on config (adoClientMcp auto-detects at spawn time)', () => {
+  const { ok, config } = loadAdoConfig({ ado: { org: 'o', project: 'p' } });
+  assert.equal(ok, true);
+  assert.equal(config.mcpCommand, undefined);
+});
+
+test('loadAdoConfig: mcp_command valid array (npx) passes through, trimmed', () => {
+  const { ok, errors, config } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', mcp_command: [' npx ', ' -y '] },
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(config.mcpCommand, ['npx', '-y']);
+});
+
+test('loadAdoConfig: mcp_command valid array (pnpm dlx) passes through', () => {
+  const { ok, config } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', mcp_command: ['pnpm', 'dlx'] },
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(config.mcpCommand, ['pnpm', 'dlx']);
+});
+
+test('loadAdoConfig: mcp_command valid single-element array (bunx) passes through', () => {
+  const { ok, config } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', mcp_command: ['bunx'] },
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(config.mcpCommand, ['bunx']);
+});
+
+test('loadAdoConfig: mcp_command empty array -> rejected with clear error', () => {
+  const { ok, errors, config } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', mcp_command: [] },
+  });
+  assert.equal(ok, false);
+  assert.equal(config, null);
+  assert.ok(errors.some((e) => /mcp_command/.test(e)));
+});
+
+test('loadAdoConfig: mcp_command with a non-string element -> rejected', () => {
+  const { ok, errors } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', mcp_command: ['npx', 5] },
+  });
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => /mcp_command/.test(e)));
+});
+
+test('loadAdoConfig: mcp_command with a blank-string element -> rejected', () => {
+  const { ok, errors } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', mcp_command: ['npx', '   '] },
+  });
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => /mcp_command/.test(e)));
+});
+
+test('loadAdoConfig: mcp_command not an array (plain string) -> rejected', () => {
+  const { ok, errors } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', mcp_command: 'npx -y' },
+  });
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => /mcp_command/.test(e)));
+});
+
+// =============================================================================
+// adoClientMcp.js — buildLauncher (TASK-021). Pure spawn-arg builder: given
+// an already-validated mcp_command array, splits it into {command, args}
+// with the fixed `@azure-devops/mcp <org> -d core work work-items` suffix
+// appended. Critical invariant under test: `-y` must NEVER be injected here
+// for a non-npx launcher — it's npx-specific and pnpm/bunx reject it; `-y`
+// only ever appears when it's already part of the caller-supplied prefix.
+// =============================================================================
+
+test('buildLauncher: ["npx","-y"] -> npx command, -y preserved from the prefix, fixed args appended', () => {
+  const { command, args } = buildLauncher(['npx', '-y'], 'kepptic');
+  assert.equal(command, 'npx');
+  assert.deepEqual(args, ['-y', '@azure-devops/mcp', 'kepptic', '-d', 'core', 'work', 'work-items']);
+});
+
+test('buildLauncher: ["pnpm","dlx"] -> pnpm command, dlx preserved, NO -y injected anywhere', () => {
+  const { command, args } = buildLauncher(['pnpm', 'dlx'], 'kepptic');
+  assert.equal(command, 'pnpm');
+  assert.deepEqual(args, ['dlx', '@azure-devops/mcp', 'kepptic', '-d', 'core', 'work', 'work-items']);
+  assert.ok(!args.includes('-y'), 'pnpm dlx must never receive -y (it rejects it)');
+});
+
+test('buildLauncher: ["bunx"] -> bunx command, no prefix args, NO -y injected anywhere', () => {
+  const { command, args } = buildLauncher(['bunx'], 'kepptic');
+  assert.equal(command, 'bunx');
+  assert.deepEqual(args, ['@azure-devops/mcp', 'kepptic', '-d', 'core', 'work', 'work-items']);
+  assert.ok(!args.includes('-y'), 'bunx must never receive -y (it rejects it)');
+});
+
+test('buildLauncher: org is passed through verbatim as a positional arg (already normalized upstream by config.js)', () => {
+  const { args } = buildLauncher(['npx', '-y'], 'my-org-123');
+  assert.equal(args[2], 'my-org-123');
+});
+
+test('buildLauncher: invalid mcp_command (empty array) throws AdoUnavailableError', () => {
+  assert.throws(() => buildLauncher([], 'kepptic'), AdoUnavailableError);
+});
+
+test('buildLauncher: invalid mcp_command (not an array) throws AdoUnavailableError', () => {
+  assert.throws(() => buildLauncher('npx -y', 'kepptic'), AdoUnavailableError);
 });
 
 // =============================================================================
@@ -1424,6 +1535,43 @@ test('CLI (finding #4 companion): cmdPush maps a mid-push transport abort to exi
     3,
     'a pending conflict always wins over a plain failure — it needs an explicit --take-local/--take-ado decision, not a blind re-run',
   );
+});
+
+test('adoUnavailableMessage (TASK-021 coordinator follow-up): a launcher-not-found error prints ONLY its own message — no az-login/auth text', () => {
+  // adoClientMcp.js tags both launcher-not-found raise sites (the
+  // connect-catch ENOENT case and detectMcpCommand's all-probes-exhausted
+  // case) with `.launcherNotFound = true`; simulate both here since a real
+  // CLI spawn can't deterministically force "no launcher on PATH" in a dev
+  // environment that actually has npm/pnpm/npx installed.
+  const connectCatchErr = new AdoUnavailableError(
+    'MCP launcher \'pnpm\' not found on PATH. Install npm (for npx), or set "ado": ' +
+      '{ "mcp_command": [...] } in .task-memory.json (e.g. ["pnpm","dlx"] or ["bunx"]).',
+  );
+  connectCatchErr.launcherNotFound = true;
+  const msg1 = adoUnavailableMessage(connectCatchErr);
+  assert.match(msg1, /MCP launcher/);
+  assert.match(msg1, /mcp_command/);
+  assert.doesNotMatch(msg1, /az login/);
+  assert.doesNotMatch(msg1, /MCP server installed/);
+
+  const autoDetectErr = new AdoUnavailableError(
+    'no MCP launcher found on PATH (probed npx, pnpm, bunx). Install npm (for npx), or set ' +
+      '"ado": { "mcp_command": [...] } in .task-memory.json (e.g. ["pnpm","dlx"] or ["bunx"]).',
+  );
+  autoDetectErr.launcherNotFound = true;
+  const msg2 = adoUnavailableMessage(autoDetectErr);
+  assert.match(msg2, /MCP launcher/);
+  assert.match(msg2, /mcp_command/);
+  assert.doesNotMatch(msg2, /az login/);
+  assert.doesNotMatch(msg2, /MCP server installed/);
+});
+
+test('adoUnavailableMessage: a genuine connect/auth failure (no launcherNotFound flag) keeps the az-login wrapper', () => {
+  const authErr = new AdoUnavailableError('could not start/connect to the Azure DevOps MCP server: some transport error');
+  const msg = adoUnavailableMessage(authErr);
+  assert.match(msg, /az login/);
+  assert.match(msg, /MCP server installed/);
+  assert.match(msg, /some transport error/, 'the underlying err.message must still be surfaced');
 });
 
 test('push (36): unmapped local status is skipped + reported, no calls made', async () => {

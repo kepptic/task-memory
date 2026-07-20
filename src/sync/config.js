@@ -71,6 +71,30 @@ function validateScope(scope, errors) {
   return scope;
 }
 
+// TASK-021: `ado.mcp_command` overrides the ADO MCP server launcher (the
+// npx-hardcoded spawn broke on any Node+pnpm/bun-but-no-npm box — WSL,
+// corepack-only CI images, etc). It's an ARRAY of [launcher,
+// ...fixed-prefix-args] — e.g. ["npx","-y"], ["pnpm","dlx"], ["bunx"] —
+// that adoClientMcp.js's buildLauncher() appends the fixed
+// `@azure-devops/mcp <org> -d core work work-items` args to. Left undefined
+// when absent so adoClientMcp.js does its own PATH auto-detect (npx -> pnpm
+// -> bunx) at spawn time — the default is intentionally NOT baked in here.
+function validateMcpCommand(mcpCommand, errors) {
+  if (mcpCommand === undefined) return undefined;
+  const invalid =
+    !Array.isArray(mcpCommand) ||
+    mcpCommand.length === 0 ||
+    mcpCommand.some((el) => typeof el !== 'string' || !el.trim());
+  if (invalid) {
+    errors.push(
+      'ado.mcp_command must be a non-empty array of non-empty strings ' +
+        '(e.g. ["npx","-y"], ["pnpm","dlx"], ["bunx"])',
+    );
+    return undefined;
+  }
+  return mcpCommand.map((el) => el.trim());
+}
+
 function validateStateMap(stateMap, errors) {
   if (stateMap === undefined) return { ...DEFAULT_STATE_MAP };
   if (!isPlainObject(stateMap)) {
@@ -112,6 +136,7 @@ export function loadAdoConfig(rawConfigObject) {
 
   const scope = validateScope(ado.scope, errors);
   const stateMap = validateStateMap(ado.state_map, errors);
+  const mcpCommand = validateMcpCommand(ado.mcp_command, errors);
 
   if (errors.length > 0) {
     return { ok: false, notConfigured: false, config: null, errors };
@@ -130,6 +155,7 @@ export function loadAdoConfig(rawConfigObject) {
     repoUrl: ado.repo_url || '',
     stateMap,
     reverseStateMap: invertStateMap(stateMap),
+    mcpCommand,
   };
 
   return { ok: true, notConfigured: false, config, errors: [] };

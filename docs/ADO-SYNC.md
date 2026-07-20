@@ -16,11 +16,26 @@ of the plugin works; this doc covers only the ADO bridge.
 
 ## Setup
 
-0. **`npm install`** in the task-memory project first. The bridge needs
-   `@modelcontextprotocol/sdk` (a runtime dependency declared in
-   `package.json`) — plugin-only installs that never ran `npm install` fail
-   with `@modelcontextprotocol/sdk is not installed`. Requires **Node 20+**
-   on PATH (both the MCP server and the SDK require it).
+0. **Install dependencies** in the task-memory project first. The bridge
+   needs `@modelcontextprotocol/sdk` (a runtime dependency declared in
+   `package.json`) — plugin-only installs that never installed dependencies
+   fail with `@modelcontextprotocol/sdk is not installed`. Requires **Node
+   20+** on PATH (both the MCP server and the SDK require it).
+
+   **Minimal install:** the CLI's *only* runtime dependencies are
+   `dompurify` (a hard import, via `src/utils/markdown.js`) and
+   `@modelcontextprotocol/sdk` (lazily imported, only when the ADO bridge
+   actually runs). Every other `dependencies` entry in `package.json`
+   (`@dnd-kit/*`, `react`, `react-dom`, `lucide-react`, `clsx`,
+   `class-variance-authority`, `tailwind-merge`) is UI-only — the board
+   webapp needs them, the CLI never touches them. A plain `npm install`
+   pulls all of it; on a CLI-only box (CI runner, a headless server that
+   only runs `sync:ado`) you can skip the UI weight entirely:
+   ```bash
+   npm install dompurify @modelcontextprotocol/sdk
+   ```
+   Run a full `npm install` instead if you also want to build/run the board
+   UI locally.
 1. **Authenticate — two equal paths, pick whichever applies:**
    - **Azure CLI session**: `az login` to the tenant that owns the ADO org.
    - **Interactive browser OAuth**: just run a command that needs auth (e.g.
@@ -38,7 +53,12 @@ of the plugin works; this doc covers only the ADO bridge.
    No PAT, no custom REST client, no stored secret either way.
 2. **Confirm the MCP server can start**: `npx -y @azure-devops/mcp <org>`
    should launch without error (first run downloads the package on demand —
-   nothing to clone or install ahead of time).
+   nothing to clone or install ahead of time). **No `npm`/`npx` on this
+   box** (pnpm-only or bun-only setups — common on WSL, corepack-only CI
+   images)? The bridge auto-detects `pnpm dlx` / `bunx` as a fallback, or
+   set `ado.mcp_command` explicitly (see Config schema below) — e.g. try
+   `pnpm dlx @azure-devops/mcp <org>` or `bunx @azure-devops/mcp <org>`
+   directly to confirm one of those launches instead.
 3. **Add the `ado` block** to `.task-memory.json` (schema below). `ado.org`
    accepts either a full URL (`https://dev.azure.com/<org>`) or a bare org
    name — it's normalized automatically, either form works.
@@ -59,6 +79,7 @@ of the plugin works; this doc covers only the ADO bridge.
     "work_item_type": "Task",
     "task_file": "planning/tasks.md",
     "repo_url": "https://github.com/<owner>/<repo>",
+    "mcp_command": ["npx", "-y"],
     "state_map": {
       "todo": "New",
       "in-progress": "Active",
@@ -80,6 +101,18 @@ of the plugin works; this doc covers only the ADO bridge.
 | `task_file` | no | `<planning_dir>/tasks.md` | Which board file this bridge syncs. Multi-file boards (`task_files_glob`) sync only this one file. |
 | `repo_url` | no | `''` | Appended to the done-summary comment. |
 | `state_map` | no | `{todo:New, in-progress:Active, awaiting:Resolved, done:Closed}` | Local column id → raw ADO state string (verbatim, case-sensitive — match your process template). |
+| `mcp_command` | no | auto-detect: `npx` → `pnpm` → `bunx` (first found on PATH) | Array of `[launcher, ...fixed-prefix-args]` used to spawn the ADO MCP server — e.g. `["npx","-y"]`, `["pnpm","dlx"]`, `["bunx"]`. The bridge appends `@azure-devops/mcp <org> -d core work work-items` itself; don't include it. |
+
+**`mcp_command` — the `-y` caveat:** `-y` is npx-specific (it answers npx's
+"ok to download this package" prompt). `pnpm dlx` and `bunx` are
+non-interactive by default and **reject** an `-y` flag outright, so it must
+only ever appear inside the `["npx","-y"]` prefix itself — never append it
+yourself if you set `mcp_command` to a pnpm/bunx form. If `mcp_command` is
+omitted, the bridge auto-detects by probing PATH in order npx → pnpm → bunx
+and uses whichever is found first (so npm users get identical behavior to
+before this option existed). If none of the three are found, the bridge
+fails fast with a launcher-not-found error rather than falling through to a
+misleading auth/connect error (see Troubleshooting below).
 
 **`state_map` semantics:**
 - The reverse map (ADO state → local status, used on pull) is derived by
@@ -116,6 +149,43 @@ verbatim is the most likely first-run failure.
 Missing the whole `ado` block → every `ado-sync` command prints "ADO sync
 not configured" and exits 0. This is the rollback story: delete the block to
 turn the feature off.
+
+---
+
+## Troubleshooting
+
+**`MCP launcher '<launcher>' not found on PATH. Install npm (for npx), or
+set "ado": { "mcp_command": [...] } in .task-memory.json (e.g.
+["pnpm","dlx"] or ["bunx"]).`**
+
+The bridge tried to spawn the ADO MCP server launcher (either your
+`ado.mcp_command`, or the auto-detected default) and the binary itself
+doesn't exist on PATH — this is a **launcher/config problem, distinct from
+an ADO connect/auth failure**. Most common on a Node+pnpm-only or
+Node+bun-only box (WSL, corepack-only CI images) that has no `npm`/`npx`
+installed at all. Fix by either:
+- installing npm (gives you `npx`, the default launcher), or
+- setting `ado.mcp_command` to a launcher you do have — `["pnpm","dlx"]` or
+  `["bunx"]` — in `.task-memory.json`.
+
+If you see this message, **do not** chase `az login` or "is the ADO MCP
+server installed" — those are unrelated to this specific error; the process
+never even started.
+
+**`no MCP launcher found on PATH (probed npx, pnpm, bunx). Install npm (for
+npx), or set "ado": { "mcp_command": [...] } in .task-memory.json ...`**
+
+`ado.mcp_command` was left unset and none of the three auto-detected
+launchers (`npx`, `pnpm`, `bunx`) are on PATH. Same fix as above — install
+one of the three, or explicitly configure whichever launcher you do have.
+
+**`could not start/connect to the Azure DevOps MCP server (is ... installed
+and are you \`az login\`'ed?)`**
+
+This is the *other* connect failure — the launcher itself started fine, but
+the MCP server/transport failed for some other reason (auth not completed,
+network unreachable, server crashed on startup, etc). Follow the `az login`
+/ connectivity guidance in Setup above.
 
 ---
 

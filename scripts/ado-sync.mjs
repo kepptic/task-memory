@@ -247,6 +247,25 @@ export function pushExitCode(report) {
   return 0;
 }
 
+// Coordinator follow-up (TASK-021 live check): every AdoUnavailableError
+// used to print the same generic "...az login'ed?" wrapper, so a
+// launcher-not-found failure (adoClientMcp.js's ENOENT/auto-detect-exhausted
+// errors, tagged `.launcherNotFound = true`) still showed misleading auth
+// text ABOVE its own correct message — a pnpm-only user with no npx saw "is
+// the MCP server installed / az login'ed?" even though the process never
+// started. Select the exit-2 stderr line here so it's independently
+// unit-testable without spawning the CLI (which needs a real/mock ADO
+// client wired all the way through main()).
+export function adoUnavailableMessage(err) {
+  if (err && err.launcherNotFound) {
+    return `[ado-sync] ${err.message} — no changes made.`;
+  }
+  return (
+    '[ado-sync] Azure DevOps unreachable (is the MCP server installed and are you `az login`\'ed?) — no changes made.' +
+    `\n  ${err.message}`
+  );
+}
+
 // Codex review finding #7: `--link` used a bare `parseInt`, which silently
 // accepts garbage (`parseInt('abc') === NaN` but engine.js only checks
 // `options.link` truthiness — NaN IS truthy — so a typo would fall through
@@ -487,10 +506,7 @@ async function main() {
     }
   } catch (err) {
     if (err instanceof AdoUnavailableError) {
-      console.error(
-        '[ado-sync] Azure DevOps unreachable (is the MCP server installed and are you `az login`\'ed?) — no changes made.',
-      );
-      console.error(`  ${err.message}`);
+      console.error(adoUnavailableMessage(err));
       return 2;
     }
     console.error(`[ado-sync] error: ${err.message}`);

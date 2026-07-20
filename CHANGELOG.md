@@ -5,6 +5,14 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.5] - 2026-07-20
+
+### Fixed
+
+- **ADO MCP launcher is no longer hardcoded to `npx`** (TASK-021): on machines with Node but no npm (pnpm-only, bun-only, corepack, many CI images) the bridge couldn't start at all. New optional `ado.mcp_command` config (array, e.g. `["pnpm","dlx"]` or `["bunx"]`); when unset it auto-detects `npx → pnpm → bunx` on PATH. `-y` is npx-specific and is never injected for other launchers. Live-verified end-to-end through the `pnpm dlx` path.
+- **Honest launcher diagnostics.** A missing launcher previously reported the wrong cause — "is the MCP server installed and are you `az login`'ed?" — sending users chasing auth. It now says `MCP launcher '<x>' not found on PATH … set ado.mcp_command …`, with zero auth text; the auth/server wording is kept only for genuine connect/auth failures.
+- **Docs:** documented `mcp_command`, the launcher troubleshooting, and the minimal CLI dependency set (the sync CLI needs only `dompurify` + `@modelcontextprotocol/sdk`; the other `dependencies` are UI-only).
+
 ## [3.6.4] - 2026-07-19
 
 ### Fixed
