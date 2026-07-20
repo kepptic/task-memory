@@ -45,7 +45,14 @@ import {
 import { pull, push, promote, decidePull, decidePush } from '../src/sync/engine.js';
 import { markdownParser } from '../src/utils/markdown.js';
 import { applyPromoteWrites, LINK_ID_RE, pushExitCode, notesFileId, adoUnavailableMessage } from '../scripts/ado-sync.mjs';
-import { parseWiqlResultIds, buildLauncher } from '../src/sync/adoClientMcp.js';
+import {
+  parseWiqlResultIds,
+  buildLauncher,
+  resolveAuthMode,
+  shouldAnnounceInteractive,
+  INTERACTIVE_ANNOUNCEMENT,
+  azcliFailureHint,
+} from '../src/sync/adoClientMcp.js';
 
 // =============================================================================
 // config.js — cases 15-19
@@ -206,6 +213,81 @@ test('loadAdoConfig: mcp_command not an array (plain string) -> rejected', () =>
 });
 
 // =============================================================================
+// config.js — ado.authentication / ado.tenant validation (TASK-022:
+// configurable ADO MCP auth, so the server doesn't silently default to
+// `interactive` — a browser popup + temporary localhost listener).
+// =============================================================================
+
+test('loadAdoConfig: authentication absent -> undefined on config (resolved at spawn time)', () => {
+  const { ok, config } = loadAdoConfig({ ado: { org: 'o', project: 'p' } });
+  assert.equal(ok, true);
+  assert.equal(config.authentication, undefined);
+});
+
+for (const mode of ['interactive', 'azcli', 'env', 'envvar', 'pat']) {
+  test(`loadAdoConfig: authentication "${mode}" is valid`, () => {
+    const { ok, errors, config } = loadAdoConfig({
+      ado: { org: 'o', project: 'p', authentication: mode },
+    });
+    assert.equal(ok, true);
+    assert.deepEqual(errors, []);
+    assert.equal(config.authentication, mode);
+  });
+}
+
+test('loadAdoConfig: authentication invalid value -> rejected, error names all five valid choices', () => {
+  const { ok, errors, config } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', authentication: 'oauth' },
+  });
+  assert.equal(ok, false);
+  assert.equal(config, null);
+  const err = errors.find((e) => /ado\.authentication/.test(e));
+  assert.ok(err, 'expected an ado.authentication error');
+  for (const mode of ['interactive', 'azcli', 'env', 'envvar', 'pat']) {
+    assert.ok(err.includes(mode), `error should name "${mode}": ${err}`);
+  }
+});
+
+test('loadAdoConfig: authentication non-string -> rejected', () => {
+  const { ok, errors } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', authentication: 42 },
+  });
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => /ado\.authentication/.test(e)));
+});
+
+test('loadAdoConfig: tenant absent -> undefined on config', () => {
+  const { ok, config } = loadAdoConfig({ ado: { org: 'o', project: 'p' } });
+  assert.equal(ok, true);
+  assert.equal(config.tenant, undefined);
+});
+
+test('loadAdoConfig: tenant valid non-empty string passes through, trimmed', () => {
+  const { ok, errors, config } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', tenant: '  my-tenant-guid  ' },
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(errors, []);
+  assert.equal(config.tenant, 'my-tenant-guid');
+});
+
+test('loadAdoConfig: tenant empty/blank string -> rejected', () => {
+  const { ok, errors } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', tenant: '   ' },
+  });
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => /ado\.tenant/.test(e)));
+});
+
+test('loadAdoConfig: tenant non-string -> rejected', () => {
+  const { ok, errors } = loadAdoConfig({
+    ado: { org: 'o', project: 'p', tenant: 12345 },
+  });
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => /ado\.tenant/.test(e)));
+});
+
+// =============================================================================
 // adoClientMcp.js — buildLauncher (TASK-021). Pure spawn-arg builder: given
 // an already-validated mcp_command array, splits it into {command, args}
 // with the fixed `@azure-devops/mcp <org> -d core work work-items` suffix
@@ -245,6 +327,103 @@ test('buildLauncher: invalid mcp_command (empty array) throws AdoUnavailableErro
 
 test('buildLauncher: invalid mcp_command (not an array) throws AdoUnavailableError', () => {
   assert.throws(() => buildLauncher('npx -y', 'kepptic'), AdoUnavailableError);
+});
+
+// =============================================================================
+// adoClientMcp.js — buildLauncher authentication/tenant flags (TASK-022).
+// =============================================================================
+
+test('buildLauncher: no options -> omits -a and -t entirely (back-compat, matches TASK-021 tests)', () => {
+  const { args } = buildLauncher(['npx', '-y'], 'kepptic');
+  assert.deepEqual(args, ['-y', '@azure-devops/mcp', 'kepptic', '-d', 'core', 'work', 'work-items']);
+  assert.ok(!args.includes('-a'));
+  assert.ok(!args.includes('-t'));
+});
+
+test('buildLauncher: authentication only -> appends "-a <mode>", no -t', () => {
+  const { args } = buildLauncher(['npx', '-y'], 'kepptic', { authentication: 'azcli' });
+  assert.deepEqual(args, ['-y', '@azure-devops/mcp', 'kepptic', '-d', 'core', 'work', 'work-items', '-a', 'azcli']);
+});
+
+test('buildLauncher: tenant only -> appends "-t <tenant>", no -a', () => {
+  const { args } = buildLauncher(['npx', '-y'], 'kepptic', { tenant: 'my-tenant' });
+  assert.deepEqual(args, ['-y', '@azure-devops/mcp', 'kepptic', '-d', 'core', 'work', 'work-items', '-t', 'my-tenant']);
+});
+
+test('buildLauncher: authentication + tenant both set -> both appended, exact order', () => {
+  const { args } = buildLauncher(['bunx'], 'kepptic', { authentication: 'interactive', tenant: 'contoso-tenant' });
+  assert.deepEqual(args, [
+    '@azure-devops/mcp',
+    'kepptic',
+    '-d',
+    'core',
+    'work',
+    'work-items',
+    '-a',
+    'interactive',
+    '-t',
+    'contoso-tenant',
+  ]);
+});
+
+test('buildLauncher: empty options object behaves identically to omitted third arg', () => {
+  const withOptions = buildLauncher(['npx', '-y'], 'kepptic', {});
+  const withoutOptions = buildLauncher(['npx', '-y'], 'kepptic');
+  assert.deepEqual(withOptions.args, withoutOptions.args);
+});
+
+// =============================================================================
+// adoClientMcp.js — resolveAuthMode / shouldAnnounceInteractive /
+// azcliFailureHint (TASK-022). All pure functions — the "az session
+// present" boolean is injected rather than probing the real ~/.azure, and
+// the interactive announcement / azcli failure hint are exact strings the
+// module prints/throws, asserted verbatim here.
+// =============================================================================
+
+test('resolveAuthMode: explicit ado.authentication always wins, regardless of az session presence', () => {
+  assert.equal(resolveAuthMode('pat', true), 'pat');
+  assert.equal(resolveAuthMode('pat', false), 'pat');
+  assert.equal(resolveAuthMode('env', true), 'env');
+  assert.equal(resolveAuthMode('envvar', false), 'envvar');
+  assert.equal(resolveAuthMode('interactive', true), 'interactive');
+});
+
+test('resolveAuthMode: no explicit value + az session present -> azcli (never interactive)', () => {
+  assert.equal(resolveAuthMode(undefined, true), 'azcli');
+});
+
+test('resolveAuthMode: no explicit value + no az session -> interactive (fallback only)', () => {
+  assert.equal(resolveAuthMode(undefined, false), 'interactive');
+});
+
+test('shouldAnnounceInteractive: true only for the resolved "interactive" mode', () => {
+  assert.equal(shouldAnnounceInteractive('interactive'), true);
+  assert.equal(shouldAnnounceInteractive('azcli'), false);
+  assert.equal(shouldAnnounceInteractive('pat'), false);
+  assert.equal(shouldAnnounceInteractive('env'), false);
+  assert.equal(shouldAnnounceInteractive('envvar'), false);
+});
+
+test('INTERACTIVE_ANNOUNCEMENT: mentions the browser + localhost listener and the azcli opt-out', () => {
+  assert.match(INTERACTIVE_ANNOUNCEMENT, /browser/i);
+  assert.match(INTERACTIVE_ANNOUNCEMENT, /localhost listener/i);
+  assert.match(INTERACTIVE_ANNOUNCEMENT, /"authentication":\s*"azcli"/);
+});
+
+test('azcliFailureHint: azcli mode -> non-empty hint naming tenant, ado.tenant, and authentication:interactive', () => {
+  const hint = azcliFailureHint('azcli');
+  assert.match(hint, /tenant/i);
+  assert.match(hint, /az login/);
+  assert.match(hint, /"tenant"/);
+  assert.match(hint, /"authentication":\s*"interactive"/);
+});
+
+test('azcliFailureHint: every other mode -> empty string (no-op append)', () => {
+  assert.equal(azcliFailureHint('interactive'), '');
+  assert.equal(azcliFailureHint('pat'), '');
+  assert.equal(azcliFailureHint('env'), '');
+  assert.equal(azcliFailureHint('envvar'), '');
+  assert.equal(azcliFailureHint(undefined), '');
 });
 
 // =============================================================================
