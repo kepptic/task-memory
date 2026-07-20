@@ -29,6 +29,8 @@
 // throws a clear, actionable AdoUnavailableError naming the missing suffix
 // (see §10 step 1 of the live checklist).
 
+import { spawnSync } from 'node:child_process';
+
 import { AdoUnavailableError } from './adoClient.js';
 import { htmlToText } from './htmlToText.js';
 
@@ -59,6 +61,85 @@ const REQUESTED_FIELDS = [
 
 function buildWebUrl(org, project, id) {
   return `https://dev.azure.com/${org}/${encodeURIComponent(project)}/_workitems/edit/${id}`;
+}
+
+// TASK-021: the ADO MCP server launcher is configurable (`ado.mcp_command`
+// in .task-memory.json, validated by config.js) instead of hardcoded to
+// `npx -y` — a Node+pnpm-but-no-npm box (WSL, corepack-only CI images, ...)
+// has no `npx` on PATH at all, and the old hardcoded spawn failed with a
+// bare ENOENT that the old catch block misreported as an auth/connect
+// failure (see isLauncherNotFoundError below).
+//
+// `mcpCommand` is an array of [launcher, ...fixed-prefix-args] — e.g.
+// ["npx","-y"], ["pnpm","dlx"], ["bunx"]. This function appends the fixed
+// package + its args and splits the result into the `command`/`args` pair
+// StdioClientTransport wants. CRITICAL: `-y` is npx-specific (it answers
+// npx's "ok to download" prompt) — `pnpm dlx` and `bunx` are non-interactive
+// by default and REJECT an `-y` flag, so it must never be hardcoded here;
+// it only ever appears as part of the ["npx","-y"] prefix array itself.
+// Pure + exported so the spawn args can be asserted without spawning
+// anything (tests/test-sync.mjs).
+export function buildLauncher(mcpCommand, org) {
+  if (!Array.isArray(mcpCommand) || mcpCommand.length === 0) {
+    throw new AdoUnavailableError('ado.mcp_command must be a non-empty array (e.g. ["npx","-y"])');
+  }
+  const [command, ...prefixArgs] = mcpCommand;
+  return {
+    command,
+    args: [...prefixArgs, '@azure-devops/mcp', org, '-d', 'core', 'work', 'work-items'],
+  };
+}
+
+// Auto-detect probing order when `ado.mcp_command` is unset — npx first
+// (preserves current behavior for npm users), then pnpm, then bunx.
+const KNOWN_LAUNCHERS = [
+  ['npx', '-y'],
+  ['pnpm', 'dlx'],
+  ['bunx'],
+];
+
+// Side-effect-free-ish availability probe: spawn `<bin> --version` and
+// throw away the output. Only a genuine "binary not found" (ENOENT) counts
+// as unavailable — a non-zero exit code or any other spawn hiccup still
+// means the binary exists on PATH, so it's treated as available.
+function isLauncherAvailable(bin) {
+  const result = spawnSync(bin, ['--version'], {
+    stdio: 'ignore',
+    shell: process.platform === 'win32',
+  });
+  if (result.error) {
+    return result.error.code !== 'ENOENT';
+  }
+  return true;
+}
+
+// Probe PATH for the first available launcher (npx -> pnpm -> bunx) and
+// return its prefix array, ready for buildLauncher(). Throws
+// AdoUnavailableError naming all three probed launchers if none are found.
+export function detectMcpCommand() {
+  for (const prefix of KNOWN_LAUNCHERS) {
+    if (isLauncherAvailable(prefix[0])) {
+      console.debug(`[adoClientMcp] auto-detected MCP launcher: ${prefix.join(' ')}`);
+      return prefix;
+    }
+  }
+  throw new AdoUnavailableError(
+    'no MCP launcher found on PATH (probed npx, pnpm, bunx). Install npm (for npx), or set ' +
+      '"ado": { "mcp_command": [...] } in .task-memory.json (e.g. ["pnpm","dlx"] or ["bunx"]).',
+  );
+}
+
+// Distinguish "the launcher binary itself doesn't exist" (ENOENT — a config
+// problem the user can fix by installing npm or setting ado.mcp_command)
+// from a genuine MCP server connect/auth failure. Check the structured
+// `.code` first (a raw Node child_process spawn error sets this); fall back
+// to scanning the message text, since the MCP SDK's StdioClientTransport
+// (via `cross-spawn`) can re-wrap the original spawn error.
+function isLauncherNotFoundError(err) {
+  if (!err) return false;
+  if (err.code === 'ENOENT') return true;
+  if (err.cause && err.cause.code === 'ENOENT') return true;
+  return /ENOENT/.test(String(err.message || ''));
 }
 
 // Codex review finding #16: a domain-level MCP tool error (e.g. "work item
@@ -272,10 +353,15 @@ export async function createAdoClient(config) {
     );
   }
 
-  const transport = new StdioClientTransport({
-    command: 'npx',
-    args: ['-y', '@azure-devops/mcp', config.org, '-d', 'core', 'work', 'work-items'],
-  });
+  // TASK-021: `ado.mcp_command` (validated by config.js) wins when set;
+  // otherwise probe PATH for npx -> pnpm -> bunx. Either way the fixed
+  // `@azure-devops/mcp <org> -d core work work-items` args get appended by
+  // buildLauncher — see its comment for why `-y` must never be injected
+  // here for non-npx launchers.
+  const mcpCommand = config.mcpCommand || detectMcpCommand();
+  const { command, args } = buildLauncher(mcpCommand, config.org);
+
+  const transport = new StdioClientTransport({ command, args });
 
   const client = new Client({ name: 'task-memory-ado-sync', version: '1.0.0' }, { capabilities: {} });
 
@@ -297,8 +383,21 @@ export async function createAdoClient(config) {
     } catch {
       // ignore
     }
+
+    // TASK-021: a missing launcher binary (ENOENT) is a config problem, not
+    // a server/auth problem — the old blanket message pointed users at `az
+    // login` and "is the server installed" for what was actually "you have
+    // no npx on this box." Raise a targeted, actionable error instead; keep
+    // the original server/auth wording for every other (genuine) failure.
+    if (isLauncherNotFoundError(err)) {
+      throw new AdoUnavailableError(
+        `MCP launcher '${command}' not found on PATH. Install npm (for npx), or set "ado": ` +
+          `{ "mcp_command": [...] } in .task-memory.json (e.g. ["pnpm","dlx"] or ["bunx"]).`,
+      );
+    }
+
     throw new AdoUnavailableError(
-      `could not start/connect to the Azure DevOps MCP server (is \`npx -y @azure-devops/mcp\` ` +
+      `could not start/connect to the Azure DevOps MCP server (is \`${mcpCommand.join(' ')}\` ` +
         `installed and are you \`az login\`'ed?): ${err.message}`,
     );
   }
