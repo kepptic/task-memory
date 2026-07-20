@@ -3,8 +3,11 @@
 // The REAL adoClient implementation, backed by the official
 // `@modelcontextprotocol/sdk` stdio client talking to the official
 // `microsoft/azure-devops-mcp` server (`npx -y @azure-devops/mcp <org> -d
-// core work work-items`), authenticated via the server's own `az login` /
-// browser-OAuth flow — no PAT, no custom REST client (D4).
+// core work work-items`) — no PAT, no custom REST client (D4). TASK-022:
+// authenticated via the server's own `az login` (`azcli`) session by
+// default whenever one is detected, falling back to interactive browser
+// OAuth only when none is found (or when explicitly configured via
+// `ado.authentication`) — see resolveAuthMode() below.
 //
 // This is the ONLY file in src/sync/ that imports @modelcontextprotocol/sdk,
 // and the ONLY file that knows the real MCP tool names/params/result shapes.
@@ -30,6 +33,9 @@
 // (see §10 step 1 of the live checklist).
 
 import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import { AdoUnavailableError } from './adoClient.js';
 import { htmlToText } from './htmlToText.js';
@@ -77,17 +83,34 @@ function buildWebUrl(org, project, id) {
 // npx's "ok to download" prompt) — `pnpm dlx` and `bunx` are non-interactive
 // by default and REJECT an `-y` flag, so it must never be hardcoded here;
 // it only ever appears as part of the ["npx","-y"] prefix array itself.
+// TASK-022: the server also accepts `-a/--authentication` (interactive |
+// azcli | env | envvar | pat — defaults to `interactive` server-side when
+// omitted, which is exactly the surprising-browser-popup-plus-localhost-
+// listener behavior this task fixes) and `-t/--tenant` (applies to both
+// interactive and azcli). Both are optional, validated by config.js, and
+// appended after the fixed domain args here so the positional org arg
+// (args[2], asserted by existing tests) never moves.
+//
+// Note: `-d core work work-items` (the domain list) is currently fixed —
+// this bridge only ever needs those three domains. Exposing domains as
+// their own `ado.domains` config is a plausible future addition but is
+// explicitly out of scope for TASK-022.
+//
 // Pure + exported so the spawn args can be asserted without spawning
 // anything (tests/test-sync.mjs).
-export function buildLauncher(mcpCommand, org) {
+export function buildLauncher(mcpCommand, org, { authentication, tenant } = {}) {
   if (!Array.isArray(mcpCommand) || mcpCommand.length === 0) {
     throw new AdoUnavailableError('ado.mcp_command must be a non-empty array (e.g. ["npx","-y"])');
   }
   const [command, ...prefixArgs] = mcpCommand;
-  return {
-    command,
-    args: [...prefixArgs, '@azure-devops/mcp', org, '-d', 'core', 'work', 'work-items'],
-  };
+  const args = [...prefixArgs, '@azure-devops/mcp', org, '-d', 'core', 'work', 'work-items'];
+  if (authentication) {
+    args.push('-a', authentication);
+  }
+  if (tenant) {
+    args.push('-t', tenant);
+  }
+  return { command, args };
 }
 
 // Auto-detect probing order when `ado.mcp_command` is unset — npx first
@@ -140,6 +163,74 @@ export function detectMcpCommand() {
     'no MCP launcher found on PATH (probed npx, pnpm, bunx). Install npm (for npx), or set ' +
       '"ado": { "mcp_command": [...] } in .task-memory.json (e.g. ["pnpm","dlx"] or ["bunx"]).',
   );
+}
+
+// TASK-022: cheap, filesystem-only probe for an existing `az login` session
+// — preferred over spawning `az account show` on every run (a network call
+// under the hood, and slow). A profile file alone can be stale/empty, so
+// also require an adjacent token-cache file before calling a session
+// "present". Never throws — any fs hiccup (no ~/.azure at all, permissions)
+// means "no session detected", which is the safe (interactive-fallback)
+// direction. Not unit-tested directly (it touches the real filesystem) —
+// resolveAuthMode() below is the testable seam; this function only ever
+// supplies its boolean input at real spawn time (see createAdoClient).
+function detectAzSessionPresent() {
+  try {
+    const azureDir = join(homedir(), '.azure');
+    if (!existsSync(join(azureDir, 'azureProfile.json'))) return false;
+    const entries = readdirSync(azureDir);
+    return entries.some((name) => name === 'accessTokens.json' || /^msal_token_cache\./.test(name));
+  } catch {
+    return false;
+  }
+}
+
+// TASK-022: the actual default-resolution decision, factored out as a pure
+// function so it's testable without touching ~/.azure (tests/test-sync.mjs
+// injects the boolean instead of calling detectAzSessionPresent()). An
+// explicit `ado.authentication` always wins; otherwise prefer `azcli` when
+// an az login session looks present (most users already have one and it's
+// silent/non-interactive), falling back to `interactive` only when no
+// session was detected. Interactive must never be the silent default — see
+// the module banner + INTERACTIVE_ANNOUNCEMENT below for why.
+export function resolveAuthMode(explicitAuthentication, azSessionPresent) {
+  if (explicitAuthentication) return explicitAuthentication;
+  return azSessionPresent ? 'azcli' : 'interactive';
+}
+
+// TASK-022: the ADO MCP server's `interactive` auth mode opens a browser
+// AND binds a temporary localhost HTTP listener on a random high port for
+// the OAuth redirect — silent and unexplained if the user isn't expecting
+// it (a real user saw an unexplained `http://localhost:36561/` request and
+// had to ask what it was). Printed to stderr BEFORE the server is spawned
+// whenever the resolved mode is `interactive`, so the browser popup + local
+// listener are never a surprise. Exact wording pinned by tests/test-sync.mjs.
+export const INTERACTIVE_ANNOUNCEMENT =
+  'authenticating via interactive browser sign-in (opens a browser and a temporary localhost listener); ' +
+  'set "ado": { "authentication": "azcli" } in .task-memory.json to reuse your existing az login session.';
+
+// Pure predicate pulled out of createAdoClient so the "when do we print the
+// announcement" decision is independently testable.
+export function shouldAnnounceInteractive(authMode) {
+  return authMode === 'interactive';
+}
+
+// TASK-022: an azcli auth failure is most often a tenant mismatch — the
+// caller's `az login` session is valid, just for a different Azure AD
+// tenant than the one the ADO org lives in. Appended to the generic
+// connect/auth AdoUnavailableError (never to the launcher-not-found one —
+// that's a config/PATH problem, not an identity problem) whenever the
+// resolved auth mode was azcli, so the error is actionable instead of just
+// "unreachable".
+export const AZCLI_FAILURE_HINT =
+  'your az session may be for a different tenant than the Azure DevOps org — run `az login` for the ' +
+  'correct tenant, set "ado": { "tenant": "<tenant-id>" }, or set "ado": { "authentication": "interactive" } ' +
+  'in .task-memory.json.';
+
+// Pure formatter: returns the hint (prefixed with a newline for appending
+// to an existing message) when authMode is azcli, '' otherwise.
+export function azcliFailureHint(authMode) {
+  return authMode === 'azcli' ? `\n  ${AZCLI_FAILURE_HINT}` : '';
 }
 
 // Distinguish "the launcher binary itself doesn't exist" (ENOENT — a config
@@ -372,7 +463,25 @@ export async function createAdoClient(config) {
   // buildLauncher — see its comment for why `-y` must never be injected
   // here for non-npx launchers.
   const mcpCommand = config.mcpCommand || detectMcpCommand();
-  const { command, args } = buildLauncher(mcpCommand, config.org);
+
+  // TASK-022: resolve the effective auth mode BEFORE spawning — an explicit
+  // `ado.authentication` wins, otherwise probe for an existing az login
+  // session and prefer `azcli` (silent, no browser) over the server's own
+  // `interactive` default. Always pass the resolved mode explicitly to
+  // buildLauncher (never leave it unset) so the server never falls back to
+  // its own interactive default behind our back.
+  const authMode = resolveAuthMode(config.authentication, detectAzSessionPresent());
+  console.debug(`[adoClientMcp] ADO auth mode: ${authMode}`);
+  if (shouldAnnounceInteractive(authMode)) {
+    // Printed BEFORE spawning: the interactive flow opens a browser and
+    // binds a temporary localhost listener — see INTERACTIVE_ANNOUNCEMENT.
+    console.error(INTERACTIVE_ANNOUNCEMENT);
+  }
+
+  const { command, args } = buildLauncher(mcpCommand, config.org, {
+    authentication: authMode,
+    tenant: config.tenant,
+  });
 
   const transport = new StdioClientTransport({ command, args });
 
@@ -409,9 +518,14 @@ export async function createAdoClient(config) {
       );
     }
 
+    // TASK-022: when the resolved mode was azcli, a connect/auth failure is
+    // most often a tenant mismatch (a valid az session for the WRONG
+    // tenant) rather than "not installed" — append an actionable hint.
+    // azcliFailureHint() returns '' for every other mode, so this is a
+    // no-op appended string otherwise.
     throw new AdoUnavailableError(
       `could not start/connect to the Azure DevOps MCP server (is \`${mcpCommand.join(' ')}\` ` +
-        `installed and are you \`az login\`'ed?): ${err.message}`,
+        `installed and are you \`az login\`'ed?): ${err.message}${azcliFailureHint(authMode)}`,
     );
   }
 

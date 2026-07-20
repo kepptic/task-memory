@@ -95,6 +95,40 @@ function validateMcpCommand(mcpCommand, errors) {
   return mcpCommand.map((el) => el.trim());
 }
 
+// TASK-022: `ado.authentication` overrides the ADO MCP server's own `-a`
+// flag (it defaults to `interactive` server-side when omitted — a browser
+// OAuth flow that ALSO binds a temporary localhost HTTP listener on a
+// random port, surprising for most users who are already `az login`'ed).
+// Valid values MUST mirror the server's own `-a/--authentication` enum
+// exactly (`azure-devops-mcp --help`) — anything else is rejected here
+// rather than silently passed through to a server that would reject it
+// itself with a less useful error.
+const VALID_AUTH_MODES = new Set(['interactive', 'azcli', 'env', 'envvar', 'pat']);
+
+function validateAuthentication(authentication, errors) {
+  if (authentication === undefined) return undefined;
+  if (typeof authentication !== 'string' || !VALID_AUTH_MODES.has(authentication)) {
+    errors.push(
+      `ado.authentication must be one of "interactive", "azcli", "env", "envvar", "pat" — got ${JSON.stringify(authentication)}`,
+    );
+    return undefined;
+  }
+  return authentication;
+}
+
+// TASK-022: `ado.tenant` overrides the ADO MCP server's own `-t/--tenant`
+// flag — needed when the caller's `az login` session is for a different
+// Azure AD tenant than the one the ADO org lives in (azcli auth silently
+// picks up whatever tenant the CLI is currently logged into).
+function validateTenant(tenant, errors) {
+  if (tenant === undefined) return undefined;
+  if (typeof tenant !== 'string' || !tenant.trim()) {
+    errors.push('ado.tenant must be a non-empty string');
+    return undefined;
+  }
+  return tenant.trim();
+}
+
 function validateStateMap(stateMap, errors) {
   if (stateMap === undefined) return { ...DEFAULT_STATE_MAP };
   if (!isPlainObject(stateMap)) {
@@ -137,6 +171,8 @@ export function loadAdoConfig(rawConfigObject) {
   const scope = validateScope(ado.scope, errors);
   const stateMap = validateStateMap(ado.state_map, errors);
   const mcpCommand = validateMcpCommand(ado.mcp_command, errors);
+  const authentication = validateAuthentication(ado.authentication, errors);
+  const tenant = validateTenant(ado.tenant, errors);
 
   if (errors.length > 0) {
     return { ok: false, notConfigured: false, config: null, errors };
@@ -156,6 +192,8 @@ export function loadAdoConfig(rawConfigObject) {
     stateMap,
     reverseStateMap: invertStateMap(stateMap),
     mcpCommand,
+    authentication,
+    tenant,
   };
 
   return { ok: true, notConfigured: false, config, errors: [] };

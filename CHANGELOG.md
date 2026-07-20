@@ -5,6 +5,14 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.6] - 2026-07-20
+
+### Fixed
+
+- **ADO authentication is configurable and no longer defaults to interactive browser auth** (TASK-022): the bridge never passed `-a/--authentication`, so the MCP server fell back to `interactive` — opening a browser and binding a random localhost listener (users saw unexplained `http://localhost:PORT/` auth requests), and breaking headless/CI outright. New optional `ado.authentication` (`"interactive" | "azcli" | "env" | "envvar" | "pat"`) and `ado.tenant` (→ `-t`). When `authentication` is unset it now resolves to **`azcli`** if an Azure CLI session is present (reuses `az login`, no browser, no listener), falling back to `interactive` only when none exists.
+- **Interactive is now announced.** When the resolved mode is `interactive`, a line prints before spawning explaining the browser + temporary localhost listener, and how to switch to `azcli`.
+- **`az login` is now the recommended default** in the ADO setup docs (was presented as equal to browser OAuth). Documented `authentication`/`tenant`, and the cross-tenant gotcha (a valid az session for a *different* tenant than the ADO org still fails — set `ado.tenant` or use `interactive`).
+
 ## [3.6.5] - 2026-07-20
 
 ### Fixed

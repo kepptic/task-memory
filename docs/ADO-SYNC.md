@@ -36,21 +36,48 @@ of the plugin works; this doc covers only the ADO bridge.
    ```
    Run a full `npm install` instead if you also want to build/run the board
    UI locally.
-1. **Authenticate — two equal paths, pick whichever applies:**
-   - **Azure CLI session**: `az login` to the tenant that owns the ADO org.
-   - **Interactive browser OAuth**: just run a command that needs auth (e.g.
-     step 4 below); a browser window opens — sign in with an account that
-     has access to the org.
+1. **Authenticate — `az login` is the recommended default:**
+   - **Recommended: Azure CLI session.** Run `az login` once, to the tenant
+     that owns the ADO org. task-memory detects the session (a cheap
+     filesystem check of `~/.azure`, not a network call) and defaults
+     `ado.authentication` to `"azcli"` automatically — no browser popup, no
+     extra config. Set `ado.authentication: "azcli"` explicitly if you want
+     to pin this behavior instead of relying on auto-detection.
+   - **Fallback: interactive browser OAuth.** Used only when no `az login`
+     session is detected and `ado.authentication` isn't set, or when you set
+     `ado.authentication: "interactive"` explicitly. A command that needs
+     auth (e.g. step 4 below) opens a browser window — sign in with an
+     account that has access to the org. **task-memory prints a line to
+     stderr before spawning the server whenever this mode is in play** —
+     `authenticating via interactive browser sign-in (opens a browser and a
+     temporary localhost listener); set "ado": { "authentication": "azcli" }
+     in .task-memory.json to reuse your existing az login session.` — so the
+     browser popup and the local listener below are never a surprise.
+   - **Other modes** (`env`, `envvar`, `pat`) are passed straight through to
+     the ADO MCP server's own `-a/--authentication` flag; see the server's
+     own docs for what each expects.
 
-   The azure-devops-mcp server tries the Azure CLI session first, then
-   falls back to interactive browser OAuth. **Gotcha we hit live:** if `az`
-   is signed into a *different* tenant/org than the one in `ado.org`, auth
-   fails with `Identity ... has not been materialized, please use
-   interactive login over the browser first` (or `pull` exits `2`, "ADO
-   unreachable"). Recover by either running `az login` again against the
-   *correct* tenant, or letting the browser-OAuth flow complete — for
-   cross-tenant setups, browser OAuth is often the only path that works.
-   No PAT, no custom REST client, no stored secret either way.
+   **Why this matters — the localhost listener:** the server's `interactive`
+   mode doesn't just open a browser, it also binds a **temporary HTTP
+   listener on a random high port** on localhost to catch the OAuth
+   redirect (e.g. `http://localhost:36561/`) — normal, but silent and
+   confusing if you weren't expecting it. Preferring `azcli` (the default
+   whenever a session is detected) avoids both the browser popup and the
+   listener entirely, since the server reuses your existing `az` token.
+
+   **Cross-tenant gotcha we hit live:** a valid `az login` session for a
+   *different* tenant than the one `ado.org` lives in still fails —
+   `azcli` auth silently picks up whatever tenant the CLI is currently
+   logged into. It surfaces as `Identity ... has not been materialized,
+   please use interactive login over the browser first` (or `pull`/`push`
+   exits `2`, "ADO unreachable"), and task-memory appends an actionable hint
+   to that error when the resolved mode was `azcli`. Recover by either
+   running `az login` again against the *correct* tenant, setting
+   `ado.tenant` to the correct tenant id/domain (passed straight through as
+   the server's `-t/--tenant` flag — applies to both `azcli` and
+   `interactive`), or setting `ado.authentication: "interactive"` to fall
+   back to browser OAuth for that org. No PAT, no custom REST client, no
+   stored secret in the recommended/fallback paths either way.
 2. **Confirm the MCP server can start**: `npx -y @azure-devops/mcp <org>`
    should launch without error (first run downloads the package on demand —
    nothing to clone or install ahead of time). **No `npm`/`npx` on this
@@ -80,6 +107,8 @@ of the plugin works; this doc covers only the ADO bridge.
     "task_file": "planning/tasks.md",
     "repo_url": "https://github.com/<owner>/<repo>",
     "mcp_command": ["npx", "-y"],
+    "authentication": "azcli",
+    "tenant": "<tenant-id-or-domain>",
     "state_map": {
       "todo": "New",
       "in-progress": "Active",
@@ -102,6 +131,8 @@ of the plugin works; this doc covers only the ADO bridge.
 | `repo_url` | no | `''` | Appended to the done-summary comment. |
 | `state_map` | no | `{todo:New, in-progress:Active, awaiting:Resolved, done:Closed}` | Local column id → raw ADO state string (verbatim, case-sensitive — match your process template). |
 | `mcp_command` | no | auto-detect: `npx` → `pnpm` → `bunx` (first found on PATH) | Array of `[launcher, ...fixed-prefix-args]` used to spawn the ADO MCP server — e.g. `["npx","-y"]`, `["pnpm","dlx"]`, `["bunx"]`. The bridge appends `@azure-devops/mcp <org> -d core work work-items` itself; don't include it. |
+| `authentication` | no | auto-detect: `"azcli"` if an `az login` session is detected, else `"interactive"` | One of `"interactive"` \| `"azcli"` \| `"env"` \| `"envvar"` \| `"pat"` — passed straight through as the ADO MCP server's own `-a/--authentication` flag. Set explicitly to pin the mode instead of relying on auto-detection. |
+| `tenant` | no | — | Azure AD tenant id or domain, passed as the server's `-t/--tenant` flag. Applies to both `azcli` and `interactive`. Needed when your `az login` session (or browser sign-in) is for a different tenant than the one `org` lives in. |
 
 **`mcp_command` — the `-y` caveat:** `-y` is npx-specific (it answers npx's
 "ok to download this package" prompt). `pnpm dlx` and `bunx` are
@@ -185,7 +216,12 @@ and are you \`az login\`'ed?)`**
 This is the *other* connect failure — the launcher itself started fine, but
 the MCP server/transport failed for some other reason (auth not completed,
 network unreachable, server crashed on startup, etc). Follow the `az login`
-/ connectivity guidance in Setup above.
+/ connectivity guidance in Setup above. When the resolved auth mode was
+`azcli`, task-memory appends an extra line to this error: `your az session
+may be for a different tenant than the Azure DevOps org — run az login for
+the correct tenant, set "ado": { "tenant": "<tenant-id>" }, or set "ado": {
+"authentication": "interactive" } in .task-memory.json.` — see the
+cross-tenant gotcha in Setup above.
 
 ---
 
