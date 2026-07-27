@@ -5,6 +5,12 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.7] - 2026-07-27
+
+### Added
+
+- **Machine/CI-wide ADO defaults via env vars** (TASK-023): `ado.tenant` and `ado.authentication` now fall back to `TASK_MEMORY_ADO_TENANT` and `TASK_MEMORY_ADO_AUTH` when absent from `.task-memory.json`. Precedence: explicit config > env var > default (tenant → az default; auth → auto-detect). This lets a machine where `az` is constantly re-logged into different client tenants pin the ADO tenant once in the shell profile (`export TASK_MEMORY_ADO_TENANT=<your-ADO-tenant-id>`) so every sync uses it via azcli regardless of the current `az` default — and gives CI a headless config path. Invalid `TASK_MEMORY_ADO_AUTH` is rejected naming the env var.
+
 ## [3.6.6] - 2026-07-20
 
 ### Fixed
