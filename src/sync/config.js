@@ -105,11 +105,15 @@ function validateMcpCommand(mcpCommand, errors) {
 // itself with a less useful error.
 const VALID_AUTH_MODES = new Set(['interactive', 'azcli', 'env', 'envvar', 'pat']);
 
-function validateAuthentication(authentication, errors) {
+// `fieldName` names the source of the value in error messages — either the
+// JSON key (`ado.authentication`, the default) or the env var it was
+// resolved from (`TASK_MEMORY_ADO_AUTH`, TASK-023) — so a bad value is
+// always traceable to where it actually came from.
+function validateAuthentication(authentication, errors, fieldName = 'ado.authentication') {
   if (authentication === undefined) return undefined;
   if (typeof authentication !== 'string' || !VALID_AUTH_MODES.has(authentication)) {
     errors.push(
-      `ado.authentication must be one of "interactive", "azcli", "env", "envvar", "pat" — got ${JSON.stringify(authentication)}`,
+      `${fieldName} must be one of "interactive", "azcli", "env", "envvar", "pat" — got ${JSON.stringify(authentication)}`,
     );
     return undefined;
   }
@@ -120,13 +124,53 @@ function validateAuthentication(authentication, errors) {
 // flag — needed when the caller's `az login` session is for a different
 // Azure AD tenant than the one the ADO org lives in (azcli auth silently
 // picks up whatever tenant the CLI is currently logged into).
-function validateTenant(tenant, errors) {
+// `fieldName` — see validateAuthentication above (TASK-023).
+function validateTenant(tenant, errors, fieldName = 'ado.tenant') {
   if (tenant === undefined) return undefined;
   if (typeof tenant !== 'string' || !tenant.trim()) {
-    errors.push('ado.tenant must be a non-empty string');
+    errors.push(`${fieldName} must be a non-empty string`);
     return undefined;
   }
   return tenant.trim();
+}
+
+// TASK-023: machine/CI-wide env-var fallbacks for `ado.tenant` and
+// `ado.authentication`. On a machine where `az` is constantly re-logged
+// into different client tenants, pinning `ado.tenant` in every project's
+// `.task-memory.json` doesn't scale — these let a single shell-profile (or
+// CI job) export set the default once, for every project that doesn't
+// override it explicitly. Namespaced under `TASK_MEMORY_` (not Azure's own
+// `AZURE_TENANT_ID`) so this never collides with other tooling that reads
+// the generic Azure env vars.
+export const ENV_ADO_TENANT = 'TASK_MEMORY_ADO_TENANT';
+export const ENV_ADO_AUTH = 'TASK_MEMORY_ADO_AUTH';
+
+// An env var that's set-but-blank (`export TASK_MEMORY_ADO_TENANT=""` left
+// over in a shell profile) should behave like "not set" rather than
+// producing a validation error — unlike an explicit blank string in JSON,
+// which is a deliberate typo the user should be told about. Non-strings
+// pass through unchanged (env values are always strings in practice, but
+// this keeps the helper total).
+function blankToUndefined(value) {
+  if (typeof value !== 'string') return value;
+  return value.trim() === '' ? undefined : value;
+}
+
+/**
+ * TASK-023: resolve precedence between an explicit JSON config value and an
+ * environment-variable fallback. Explicit config ALWAYS wins; the env value
+ * is used only when the JSON key is entirely absent (`undefined`). Pure —
+ * callers pass the already-read env value in (see `env` param of
+ * loadAdoConfig) rather than this function reading `process.env` itself, so
+ * it — and loadAdoConfig — are testable by injecting a plain object instead
+ * of mutating the real environment.
+ *
+ * @returns {{ value: *, fromEnv: boolean }}
+ */
+export function resolveConfigWithEnv(explicitValue, envValue) {
+  if (explicitValue !== undefined) return { value: explicitValue, fromEnv: false };
+  if (envValue !== undefined) return { value: envValue, fromEnv: true };
+  return { value: undefined, fromEnv: false };
 }
 
 function validateStateMap(stateMap, errors) {
@@ -148,12 +192,17 @@ function validateStateMap(stateMap, errors) {
 
 /**
  * Load + validate the `ado` block of a parsed `.task-memory.json` object.
- * Pure — takes the already-parsed config object, does no I/O.
+ * Pure — takes the already-parsed config object, does no I/O; `env` defaults
+ * to `process.env` but callers (tests) can inject a plain object instead so
+ * TASK_MEMORY_ADO_* fallbacks are testable without mutating the real
+ * environment.
  *
  * @param {object} rawConfigObject - parsed contents of .task-memory.json
+ * @param {object} [env] - environment to read TASK_MEMORY_ADO_* fallbacks
+ *   from (TASK-023); defaults to `process.env`.
  * @returns {{ ok: boolean, notConfigured: boolean, config: object|null, errors: string[] }}
  */
-export function loadAdoConfig(rawConfigObject) {
+export function loadAdoConfig(rawConfigObject, env = process.env) {
   const ado = rawConfigObject && rawConfigObject.ado;
   if (!isPlainObject(ado)) {
     return { ok: false, notConfigured: true, config: null, errors: [] };
@@ -171,8 +220,28 @@ export function loadAdoConfig(rawConfigObject) {
   const scope = validateScope(ado.scope, errors);
   const stateMap = validateStateMap(ado.state_map, errors);
   const mcpCommand = validateMcpCommand(ado.mcp_command, errors);
-  const authentication = validateAuthentication(ado.authentication, errors);
-  const tenant = validateTenant(ado.tenant, errors);
+
+  // TASK-023: explicit ado.authentication/ado.tenant win outright; otherwise
+  // fall back to the TASK_MEMORY_ADO_* env var (blank-string env values are
+  // treated as unset, not an error — see blankToUndefined above). Either
+  // way the resolved value still goes through the SAME validation as a JSON
+  // value would, just with the error (if any) naming the env var as the
+  // source instead of the JSON key.
+  const authResolved = resolveConfigWithEnv(ado.authentication, blankToUndefined(env && env[ENV_ADO_AUTH]));
+  if (authResolved.fromEnv) {
+    console.debug(`[config] ado.authentication from ${ENV_ADO_AUTH}`);
+  }
+  const authentication = validateAuthentication(
+    authResolved.value,
+    errors,
+    authResolved.fromEnv ? ENV_ADO_AUTH : 'ado.authentication',
+  );
+
+  const tenantResolved = resolveConfigWithEnv(ado.tenant, blankToUndefined(env && env[ENV_ADO_TENANT]));
+  if (tenantResolved.fromEnv) {
+    console.debug(`[config] ado.tenant from ${ENV_ADO_TENANT}`);
+  }
+  const tenant = validateTenant(tenantResolved.value, errors, tenantResolved.fromEnv ? ENV_ADO_TENANT : 'ado.tenant');
 
   if (errors.length > 0) {
     return { ok: false, notConfigured: false, config: null, errors };

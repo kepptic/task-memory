@@ -131,8 +131,42 @@ of the plugin works; this doc covers only the ADO bridge.
 | `repo_url` | no | `''` | Appended to the done-summary comment. |
 | `state_map` | no | `{todo:New, in-progress:Active, awaiting:Resolved, done:Closed}` | Local column id → raw ADO state string (verbatim, case-sensitive — match your process template). |
 | `mcp_command` | no | auto-detect: `npx` → `pnpm` → `bunx` (first found on PATH) | Array of `[launcher, ...fixed-prefix-args]` used to spawn the ADO MCP server — e.g. `["npx","-y"]`, `["pnpm","dlx"]`, `["bunx"]`. The bridge appends `@azure-devops/mcp <org> -d core work work-items` itself; don't include it. |
-| `authentication` | no | auto-detect: `"azcli"` if an `az login` session is detected, else `"interactive"` | One of `"interactive"` \| `"azcli"` \| `"env"` \| `"envvar"` \| `"pat"` — passed straight through as the ADO MCP server's own `-a/--authentication` flag. Set explicitly to pin the mode instead of relying on auto-detection. |
-| `tenant` | no | — | Azure AD tenant id or domain, passed as the server's `-t/--tenant` flag. Applies to both `azcli` and `interactive`. Needed when your `az login` session (or browser sign-in) is for a different tenant than the one `org` lives in. |
+| `authentication` | no | `TASK_MEMORY_ADO_AUTH` env var if set, else auto-detect: `"azcli"` if an `az login` session is detected, else `"interactive"` | One of `"interactive"` \| `"azcli"` \| `"env"` \| `"envvar"` \| `"pat"` — passed straight through as the ADO MCP server's own `-a/--authentication` flag. Set explicitly to pin the mode instead of relying on auto-detection. |
+| `tenant` | no | `TASK_MEMORY_ADO_TENANT` env var if set, else — | Azure AD tenant id or domain, passed as the server's `-t/--tenant` flag. Applies to both `azcli` and `interactive`. Needed when your `az login` session (or browser sign-in) is for a different tenant than the one `org` lives in. |
+
+**Machine/CI-wide defaults — `TASK_MEMORY_ADO_TENANT` / `TASK_MEMORY_ADO_AUTH`
+(TASK-023):** both fields also accept an environment-variable fallback, for
+pinning a default across every project on a machine (or in a CI job)
+instead of repeating `ado.tenant`/`ado.authentication` in each project's
+`.task-memory.json`. Precedence is always **explicit config value > env var
+> built-in default** — an env var only ever fills in for a key that's
+entirely *absent* from `.task-memory.json`; it never overrides one that's
+present.
+
+```bash
+# ~/.zshrc, ~/.bashrc, or a CI job's env block
+export TASK_MEMORY_ADO_TENANT="<your-ADO-tenant-id>"
+export TASK_MEMORY_ADO_AUTH="azcli"   # optional — same enum as ado.authentication
+```
+
+An env value goes through the exact same validation as the JSON field would
+— `TASK_MEMORY_ADO_AUTH` must be one of `interactive`/`azcli`/`env`/`envvar`/`pat`
+(a bad value is rejected with an error naming the env var, not the JSON
+key, so it's obvious where to fix it), and an empty/whitespace-only
+`TASK_MEMORY_ADO_TENANT` is treated as unset rather than an error (so a
+blank export left in a shell profile is harmless). task-memory logs a debug
+line (`[config] ado.tenant from TASK_MEMORY_ADO_TENANT`) whenever a value
+was actually sourced from the environment, so the fallback is discoverable
+instead of silent.
+
+**Pinning the tenant on a multi-tenant machine:** if you use `az` across
+many client tenants, `az`'s active account is unpredictable from one
+terminal session to the next — `azcli` auth silently picks up whatever
+tenant is currently logged in, which is exactly the cross-tenant gotcha
+described above. Set `export TASK_MEMORY_ADO_TENANT=<your-ADO-tenant-id>`
+once in your shell profile and every `sync:ado` run, in every project, uses
+that tenant via `azcli` regardless of the current `az` default — no need to
+add `ado.tenant` to each project's config individually.
 
 **`mcp_command` — the `-y` caveat:** `-y` is npx-specific (it answers npx's
 "ok to download this package" prompt). `pnpm dlx` and `bunx` are
