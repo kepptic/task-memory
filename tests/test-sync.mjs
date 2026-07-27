@@ -22,7 +22,15 @@ import { tmpdir } from 'node:os';
 import { join as pathJoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadAdoConfig, invertStateMap, normalizeOrgName, DEFAULT_STATE_MAP } from '../src/sync/config.js';
+import {
+  loadAdoConfig,
+  invertStateMap,
+  normalizeOrgName,
+  DEFAULT_STATE_MAP,
+  resolveConfigWithEnv,
+  ENV_ADO_TENANT,
+  ENV_ADO_AUTH,
+} from '../src/sync/config.js';
 import { createMockAdoClient, AdoUnavailableError } from '../src/sync/adoClient.js';
 import { htmlToText } from '../src/sync/htmlToText.js';
 import { findBlocks, readField, setField, setHeading, insertBlock, newAdoBlockText } from '../src/sync/board.js';
@@ -285,6 +293,117 @@ test('loadAdoConfig: tenant non-string -> rejected', () => {
   });
   assert.equal(ok, false);
   assert.ok(errors.some((e) => /ado\.tenant/.test(e)));
+});
+
+// =============================================================================
+// config.js — resolveConfigWithEnv + TASK_MEMORY_ADO_TENANT/AUTH env-var
+// fallbacks (TASK-023: machine/CI-wide defaults so `ado.tenant` doesn't have
+// to be repeated in every project when `az` bounces between client
+// tenants). loadAdoConfig() takes an injectable `env` second param so these
+// never touch the real process.env.
+// =============================================================================
+
+test('resolveConfigWithEnv: explicit value wins over env', () => {
+  assert.deepEqual(resolveConfigWithEnv('from-config', 'from-env'), {
+    value: 'from-config',
+    fromEnv: false,
+  });
+});
+
+test('resolveConfigWithEnv: env used when explicit value absent', () => {
+  assert.deepEqual(resolveConfigWithEnv(undefined, 'from-env'), {
+    value: 'from-env',
+    fromEnv: true,
+  });
+});
+
+test('resolveConfigWithEnv: neither set -> undefined, fromEnv false', () => {
+  assert.deepEqual(resolveConfigWithEnv(undefined, undefined), {
+    value: undefined,
+    fromEnv: false,
+  });
+});
+
+test('loadAdoConfig: explicit ado.tenant beats TASK_MEMORY_ADO_TENANT', () => {
+  const { ok, config } = loadAdoConfig(
+    { ado: { org: 'o', project: 'p', tenant: 'config-tenant' } },
+    { [ENV_ADO_TENANT]: 'env-tenant' },
+  );
+  assert.equal(ok, true);
+  assert.equal(config.tenant, 'config-tenant');
+});
+
+test('loadAdoConfig: explicit ado.authentication beats TASK_MEMORY_ADO_AUTH', () => {
+  const { ok, config } = loadAdoConfig(
+    { ado: { org: 'o', project: 'p', authentication: 'interactive' } },
+    { [ENV_ADO_AUTH]: 'azcli' },
+  );
+  assert.equal(ok, true);
+  assert.equal(config.authentication, 'interactive');
+});
+
+test('loadAdoConfig: TASK_MEMORY_ADO_TENANT used when ado.tenant absent', () => {
+  const { ok, config } = loadAdoConfig(
+    { ado: { org: 'o', project: 'p' } },
+    { [ENV_ADO_TENANT]: 'env-tenant' },
+  );
+  assert.equal(ok, true);
+  assert.equal(config.tenant, 'env-tenant');
+});
+
+test('loadAdoConfig: TASK_MEMORY_ADO_AUTH used when ado.authentication absent', () => {
+  const { ok, config } = loadAdoConfig(
+    { ado: { org: 'o', project: 'p' } },
+    { [ENV_ADO_AUTH]: 'azcli' },
+  );
+  assert.equal(ok, true);
+  assert.equal(config.authentication, 'azcli');
+});
+
+test('loadAdoConfig: neither config nor env -> tenant undefined, authentication undefined (auto-detect path)', () => {
+  const { ok, config } = loadAdoConfig({ ado: { org: 'o', project: 'p' } }, {});
+  assert.equal(ok, true);
+  assert.equal(config.tenant, undefined);
+  assert.equal(config.authentication, undefined);
+});
+
+test('loadAdoConfig: invalid TASK_MEMORY_ADO_AUTH value -> rejected, error names the env var', () => {
+  const { ok, errors, config } = loadAdoConfig(
+    { ado: { org: 'o', project: 'p' } },
+    { [ENV_ADO_AUTH]: 'oauth' },
+  );
+  assert.equal(ok, false);
+  assert.equal(config, null);
+  const err = errors.find((e) => /TASK_MEMORY_ADO_AUTH/.test(e));
+  assert.ok(err, `expected an error naming TASK_MEMORY_ADO_AUTH: ${errors.join(' | ')}`);
+  assert.ok(!errors.some((e) => /^ado\.authentication/.test(e)), 'error should not be attributed to ado.authentication');
+});
+
+test('loadAdoConfig: empty/whitespace TASK_MEMORY_ADO_TENANT -> treated as unset, no error', () => {
+  const { ok, errors, config } = loadAdoConfig(
+    { ado: { org: 'o', project: 'p' } },
+    { [ENV_ADO_TENANT]: '   ' },
+  );
+  assert.equal(ok, true);
+  assert.deepEqual(errors, []);
+  assert.equal(config.tenant, undefined);
+});
+
+test('loadAdoConfig: default env param falls back to process.env (does not throw when injected env omitted)', () => {
+  // Snapshot + restore process.env so this is the one test that legitimately
+  // exercises the default `env = process.env` parameter, per TASK-023's
+  // "save/restore around it" rule for any test that must touch the real env.
+  const hadTenant = Object.prototype.hasOwnProperty.call(process.env, ENV_ADO_TENANT);
+  const prevTenant = process.env[ENV_ADO_TENANT];
+  delete process.env[ENV_ADO_TENANT];
+  try {
+    const { ok, config } = loadAdoConfig({ ado: { org: 'o', project: 'p' } });
+    assert.equal(ok, true);
+    assert.equal(config.tenant, undefined);
+  } finally {
+    if (hadTenant) process.env[ENV_ADO_TENANT] = prevTenant;
+    else delete process.env[ENV_ADO_TENANT];
+  }
 });
 
 // =============================================================================
