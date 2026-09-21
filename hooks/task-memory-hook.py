@@ -184,8 +184,15 @@ def _valid_owner(value: Any) -> str | None:
     return code if OWNER_RE.match(code) else None
 
 
+_BRANCH_SENTINEL = object()
+_BRANCH_CACHE: Any = _BRANCH_SENTINEL
+
+
 def current_branch() -> str | None:
-    return _git("branch", "--show-current")
+    global _BRANCH_CACHE
+    if _BRANCH_CACHE is _BRANCH_SENTINEL:
+        _BRANCH_CACHE = _git("branch", "--show-current")
+    return _BRANCH_CACHE
 
 
 def resolve_owner() -> str | None:
@@ -366,6 +373,46 @@ def record_session_task(session_id: str, task_id: str) -> None:
     if task_id not in existing:
         with f.open("a") as fh:
             fh.write(task_id + "\n")
+
+
+# -----------------------------------------------------------------------------
+# Focus pin (v3.7.0): the explicit answer to "which task am I on?".
+# `focus-<session>.txt` is per-session; `focus.txt` is a checkout-wide fallback
+# for callers (skills) that cannot see a session id — note that it is SHARED by
+# every concurrent session on this checkout.
+# -----------------------------------------------------------------------------
+
+def focus_pin_paths(session_id: str | None) -> list[Path]:
+    paths = []
+    if session_id:
+        paths.append(state_path(f"focus-{session_id}.txt"))
+    paths.append(state_path("focus.txt"))
+    return paths
+
+
+def read_focus_pin(session_id: str | None) -> str | None:
+    for path in focus_pin_paths(session_id):
+        try:
+            if not path.is_file():
+                continue
+            for line in path.read_text().splitlines():
+                tid = line.strip()
+                if tid:
+                    return tid
+        except OSError:
+            continue
+    return None
+
+
+def set_focus_pin(session_id: str | None, task_id: str) -> bool:
+    if not task_id or not ensure_state_dir():
+        return False
+    name = f"focus-{session_id}.txt" if session_id else "focus.txt"
+    try:
+        state_path(name).write_text(task_id + "\n")
+        return True
+    except OSError:
+        return False
 
 
 def was_task_worked_on(session_id: str, task_id: str) -> bool:
@@ -1183,26 +1230,77 @@ def _extract_in_progress(content: str, source: Path) -> list[dict[str, Any]]:
     return out
 
 
-def get_current_task() -> dict[str, Any] | None:
-    """Return the first in-progress task across all task files, or None."""
-    for f in task_files():
-        content = read_tasks(f)
-        if not content:
-            continue
-        found = _extract_in_progress(content, f)
-        if found:
-            return found[0]
-    return None
+def get_all_in_progress_tasks(scope: str = "mine") -> list[dict[str, Any]]:
+    """Every in-progress task, in document order.
 
-
-def get_all_in_progress_tasks() -> list[dict[str, Any]]:
-    """Return every in-progress task across all task files."""
-    out = []
-    for f in task_files():
+    scope="mine" (default) restricts to the owner's task files; scope="all"
+    spans every discovered file. With no resolvable owner the two are the same.
+    """
+    files = task_files() if scope == "all" else my_task_files()
+    out: list[dict[str, Any]] = []
+    for f in files:
         content = read_tasks(f)
         if content:
             out.extend(_extract_in_progress(content, f))
+    for i, t in enumerate(out):
+        t["index"] = i
     return out
+
+
+def _selected(task: dict[str, Any], how: str) -> dict[str, Any]:
+    task["selection"] = how
+    return task
+
+
+def get_current_task(session_id: str | None = None) -> dict[str, Any] | None:
+    """The one task this session is driving, or None.
+
+    Resolution order, all of it scoped to the owner's own task files:
+      1. an explicit focus pin, if that task is still in-progress
+      2. the session stamp (a task this session has already worked on)
+      3. an in-progress task whose id appears in the current branch name
+      4. the most recently **Started** in-progress task
+      5. first in-progress in document order (legacy)
+
+    Epic cards drop out of steps 3-5 whenever a real work item is available —
+    an epic is a container, not something you sit down and do.
+    """
+    tasks = get_all_in_progress_tasks("mine")
+    if not tasks:
+        return None
+    by_id = {t["task_id"]: t for t in tasks}
+
+    pinned = read_focus_pin(session_id)
+    if pinned and pinned in by_id:
+        return _selected(by_id[pinned], "pinned")
+
+    if session_id:
+        f = session_task_file(session_id)
+        try:
+            stamped = f.read_text().splitlines() if f.is_file() else []
+        except OSError:
+            stamped = []
+        for tid in reversed(stamped):
+            tid = tid.strip()
+            if tid in by_id:
+                return _selected(by_id[tid], "stamped")
+
+    candidates = [t for t in tasks if not t.get("is_epic")] or tasks
+
+    branch = current_branch()
+    if branch:
+        for t in candidates:
+            if t["task_id"] in branch:
+                return _selected(t, "branch")
+
+    dated = [t for t in candidates if t.get("started")]
+    if dated:
+        # Stable two-pass: document order, then newest Started wins.
+        dated.sort(key=lambda t: t["index"])
+        dated.sort(key=lambda t: t["started"], reverse=True)
+        return _selected(dated[0], "latest")
+
+    return _selected(candidates[0], "first")
 
 
 def get_incomplete_subtasks(block: str, limit: int = 5) -> list[str]:
@@ -1401,7 +1499,7 @@ def handle_session_start() -> None:
     # filled in, and the PreCompact snapshot has a target to append to.
     for t in all_tasks:
         try:
-            _create_notes_skeleton(t["task_id"], t["title"])
+            _create_notes_skeleton(t["task_id"], t["title"], trigger="session-start")
         except Exception as e:
             print(f"[task-memory] skeleton warning ({t['task_id']}): {e}", file=sys.stderr)
 
@@ -1521,7 +1619,7 @@ def handle_pre_tool_use(tool_name: str, tool_input: dict, session_id: str) -> in
                 return 2
 
     if tool_name in ("Write", "Edit", "Bash", "Task"):
-        task = get_current_task()
+        task = get_current_task(session_id)
         if not task:
             return None
 
@@ -1561,13 +1659,38 @@ def handle_pre_tool_use(tool_name: str, tool_input: dict, session_id: str) -> in
         print("-" * 60 + "\n", file=sys.stderr)
 
 
-def _create_notes_skeleton(task_id: str, task_title: str) -> bool:
+# When notes skeletons get created. v3.3-3.6 created one for EVERY in-progress
+# task at SessionStart — and because skill-eval.sh synthesized a SessionStart
+# on every single user prompt, skeletons regrew endlessly (one real repo ended
+# up with 170 of 283 notes files as untouched skeletons).
+#   "on-start"      (default) only when a card is flipped to in-progress, or
+#                   when PreCompact / the 2-op research rule needs a target
+#   "session-start" pre-3.7 behavior: one per in-progress task at SessionStart
+#   "never"         never auto-create
+_NOTES_SKELETON_MODES = ("on-start", "session-start", "never")
+NOTES_SKELETON_MODE = str(CONFIG.get("notes_skeleton") or "on-start").strip().lower()
+if NOTES_SKELETON_MODE not in _NOTES_SKELETON_MODES:
+    NOTES_SKELETON_MODE = "on-start"
+
+
+def _skeleton_allowed(trigger: str) -> bool:
+    if NOTES_SKELETON_MODE == "never":
+        return False
+    if trigger == "session-start":
+        return NOTES_SKELETON_MODE == "session-start"
+    return True
+
+
+def _create_notes_skeleton(task_id: str, task_title: str, trigger: str = "on-demand") -> bool:
     """Create a skeleton notes file with required sections.
 
-    Returns True if created, False if it already exists or couldn't be written.
-    Structural enforcement: by pre-creating sections, Claude only has to fill
-    them in rather than remember to build the structure from scratch.
+    Returns True if created, False if it already exists, the `notes_skeleton`
+    policy forbids this trigger, or it couldn't be written. Structural
+    enforcement: by pre-creating sections, Claude only has to fill them in
+    rather than remember to build the structure from scratch.
     """
+    if not _skeleton_allowed(trigger):
+        return False
     notes_path = NOTES_DIR / f"{task_id}.md"
     if notes_path.is_file():
         return False
@@ -1622,12 +1745,70 @@ _Things to verify, confirm, or ask about before finalizing._
         return False
 
 
+def _mentions_in_progress(text: str) -> bool:
+    """True when the text carries a `**Status**:` line meaning in-progress."""
+    for m in STATUS_FIELD_RE.finditer(text or ""):
+        if canonical_status(m.group(1)) == "in-progress":
+            return True
+    return False
+
+
+def _maybe_auto_focus(target: Path, tool_input: dict, session_id: str) -> str | None:
+    """Pin the session's focus to a card that was just flipped to in-progress.
+
+    This is the moment intent is unambiguous: the assistant (or the user) has
+    just written `**Status**: in-progress` into one of the owner's own task
+    files. Pinning here means every later hook in the session agrees on which
+    task is current, instead of re-deriving it from document order.
+    """
+    new_text = tool_input.get("new_string") or tool_input.get("content") or ""
+    old_text = tool_input.get("old_string") or ""
+    if not _mentions_in_progress(new_text):
+        return None
+    if old_text and _mentions_in_progress(old_text):
+        return None  # already in-progress before this edit — not a flip
+
+    try:
+        mine = {f.resolve() for f in my_task_files()}
+        if target.resolve() not in mine:
+            return None
+    except OSError:
+        return None
+
+    content = read_tasks(target)
+    if not content:
+        return None
+    in_progress = {t["task_id"]: t for t in _extract_in_progress(content, target)}
+    if not in_progress:
+        return None
+
+    chosen = None
+    needle = new_text.strip()
+    idx = content.find(needle) if needle else -1
+    if idx >= 0:
+        prior = [m for m in TASK_HEADING_RE.finditer(content) if m.start() <= idx]
+        if prior and prior[-1].group(1) in in_progress:
+            chosen = prior[-1].group(1)
+    if chosen is None and len(in_progress) == 1:
+        chosen = next(iter(in_progress))
+    if chosen is None:
+        return None
+
+    if not set_focus_pin(session_id, chosen):
+        return None
+    try:
+        _create_notes_skeleton(chosen, in_progress[chosen]["title"], trigger="on-start")
+    except Exception:
+        pass
+    return chosen
+
+
 def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, session_id: str) -> None:
     # WebFetch / WebSearch => Visual Operations Log (captures the FINDING, post-execution)
     if tool_name in ("WebFetch", "WebSearch"):
         ensure_tasks_structure()
         count = increment_counter(RESEARCH_COUNTER)
-        task = get_current_task()
+        task = get_current_task(session_id)
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         snippet = ""
@@ -1732,8 +1913,17 @@ def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, s
                             pass
                 except Exception as e:
                     print(f"[task-memory] reorganize failed: {e}", file=sys.stderr)
+                try:
+                    focused = _maybe_auto_focus(target, tool_input, session_id)
+                    if focused:
+                        print(
+                            f"[task-memory] focus → {focused} (flipped to in-progress)",
+                            file=sys.stderr,
+                        )
+                except Exception as e:
+                    print(f"[task-memory] auto-focus failed: {e}", file=sys.stderr)
 
-        task = get_current_task()
+        task = get_current_task(session_id)
         if not task or task["total"] == 0 or task["completed"] == task["total"]:
             return
         count = increment_counter(PROGRESS_COUNTER)
@@ -1762,7 +1952,7 @@ def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, s
                     text += v + "\n"
         if not re.search(r"error|failed|not found|denied|exception", text, re.IGNORECASE):
             return
-        task = get_current_task()
+        task = get_current_task(session_id)
         if not task:
             return
         m = re.search(r"^.*(?:error|failed|not found|denied|exception).*$", text, re.IGNORECASE | re.MULTILINE)
@@ -1852,10 +2042,10 @@ def mirror_todowrite(todos: list[dict]) -> None:
 # PreCompact (finding #2)
 # =============================================================================
 
-def handle_pre_compact(payload: dict) -> None:
+def handle_pre_compact(payload: dict, session_id: str = "") -> None:
     """Dump current in-progress task + research + todos to a snapshot file."""
     ensure_tasks_structure()
-    task = get_current_task()
+    task = get_current_task(session_id)
     task_id = task["task_id"] if task else "UNKNOWN"
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     snapshot = NOTES_DIR / f"{task_id}-precompact-{ts}.md"
@@ -2007,7 +2197,7 @@ def _actionable_off_topic_hint(session_id: str) -> str:
 
 
 def handle_stop(session_id: str) -> None:
-    task = get_current_task()
+    task = get_current_task(session_id)
     if not task:
         return
 
@@ -2165,7 +2355,7 @@ def main() -> int:
         if hook_event in ("SessionStart", "PostCompact"):
             handle_session_start()
         elif hook_event == "PreCompact":
-            handle_pre_compact(payload)
+            handle_pre_compact(payload, session_id)
         elif hook_event == "PreToolUse":
             rc = handle_pre_tool_use(tool_name, tool_input, session_id)
             if isinstance(rc, int) and rc != 0:
