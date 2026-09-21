@@ -727,6 +727,67 @@ def derive_column_id(name: str) -> str:
     return s or "column"
 
 
+# One status vocabulary for the whole hook. Boards in the wild write
+# `**Status**: 🚀 In Progress`, `📝 To Do`, `Not Started`, `✅ Done`, and
+# `done — evidence in notes/…`. Before v3.7.0 the in-progress and awaiting
+# scanners matched `([a-z-]+)` and compared with `==`, so every one of those
+# boards was invisible to the hook.
+_STATUS_SYNONYMS: dict[str, str] = {
+    "to do": "todo",
+    "todo": "todo",
+    "not started": "todo",
+    "backlog": "todo",
+    "in progress": "in-progress",
+    "doing": "in-progress",
+    "wip": "in-progress",
+    "in review": "in-review",
+    "review": "in-review",
+    "done": "done",
+    "complete": "done",
+    "completed": "done",
+    "closed": "done",
+    "blocked": "blocked",
+    "awaiting": "awaiting",
+    "parked": "awaiting",
+    "waiting": "awaiting",
+}
+
+# Longest phrases first so "in review" wins over "review" and "not started"
+# over "started".
+_STATUS_KEYS = sorted(_STATUS_SYNONYMS, key=len, reverse=True)
+
+# `**Status**: <value>` — captures the whole value up to a `|` column break or
+# end of line, so emoji and trailing prose both survive to canonical_status().
+STATUS_FIELD_RE = re.compile(r"\*\*Status\*\*:\s*([^\n|]+)")
+
+
+def canonical_status(raw: str | None) -> str:
+    """Map any written status to the canonical vocabulary.
+
+    "🚀 In Progress" / "in_progress" / "WIP"        -> "in-progress"
+    "📝 To Do" / "Not Started" / "backlog"          -> "todo"
+    "✅ Done" / "done — evidence in notes/x.md"     -> "done"
+    Anything unrecognized comes back cleaned and hyphenated, unchanged in
+    meaning, so custom columns keep working.
+    """
+    if not raw:
+        return ""
+    cleaned = re.sub(r"[^0-9A-Za-z]+", " ", _strip_emoji(str(raw))).strip().lower()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned:
+        return ""
+    for key in _STATUS_KEYS:
+        if cleaned == key or cleaned.startswith(key + " "):
+            return _STATUS_SYNONYMS[key]
+    return cleaned.replace(" ", "-")
+
+
+def status_of(block: str) -> str:
+    """Canonical status of a task block ("" when the field is absent)."""
+    m = STATUS_FIELD_RE.search(block)
+    return canonical_status(m.group(1)) if m else ""
+
+
 def normalize_status(value: str | None, valid_ids: set[str] | None = None) -> str:
     """Normalize a Status field value to a canonical column ID.
 
@@ -739,14 +800,25 @@ def normalize_status(value: str | None, valid_ids: set[str] | None = None) -> st
     """
     if not value:
         return ""
-    v = derive_column_id(value.strip().lower().replace("_", "-"))
-    if not valid_ids or v in valid_ids:
-        return v
-    stripped = v.replace("-", "")
-    for cid in valid_ids:
-        if cid.replace("-", "") == stripped:
-            return cid
-    return v
+    # Literal column id first: a board with its own `## Backlog` column and
+    # `**Status**: backlog` must keep landing in Backlog, not in To Do.
+    literal = derive_column_id(value.strip().lower().replace("_", "-"))
+    if valid_ids and literal in valid_ids:
+        return literal
+
+    canon = canonical_status(value)
+    if not valid_ids:
+        return canon or literal
+    if canon in valid_ids:
+        return canon
+    for candidate in (canon, literal):
+        stripped = candidate.replace("-", "")
+        if not stripped:
+            continue
+        for cid in valid_ids:
+            if cid.replace("-", "") == stripped:
+                return cid
+    return canon or literal
 
 
 def parse_configured_columns(content: str) -> list[tuple[str, str]]:
@@ -859,7 +931,7 @@ def reorganize_tasks_file(path: Path | None = None) -> bool:
     for src_idx, src_section in column_sections:
         # Iterate snapshot — assigned[src_idx] mutates as we move tasks out
         for blk in list(assigned[src_idx]):
-            status_m = re.search(r"\*\*Status\*\*:\s*([\w-]+)", blk)
+            status_m = STATUS_FIELD_RE.search(blk)
             target_id = normalize_status(
                 status_m.group(1) if status_m else None,
                 column_id_set,
@@ -892,6 +964,153 @@ def reorganize_tasks_file(path: Path | None = None) -> bool:
     return True
 
 
+# -----------------------------------------------------------------------------
+# Task-block anatomy: sections, subtasks, dates, epics (v3.7.0)
+# -----------------------------------------------------------------------------
+
+# A line opening a named field/section: `**Subtasks**:`, `**Notes**:`,
+# `**Priority**: High | **Status**: todo`.
+SECTION_MARKER_RE = re.compile(r"^\s*\*\*([^*\n]+)\*\*:")
+CHECKBOX_RE = re.compile(r"^\s*- \[([ xX])\]")
+
+
+def _block_sections(block: str) -> list[tuple[str, list[str]]]:
+    """Split a task block into (section_name, lines) runs.
+
+    Text before the first `**Field**:` marker is section "" (the heading and
+    free-form description).
+    """
+    sections: list[tuple[str, list[str]]] = [("", [])]
+    for line in block.splitlines():
+        m = SECTION_MARKER_RE.match(line)
+        if m:
+            sections.append((m.group(1).strip().lower(), [line]))
+        else:
+            sections[-1][1].append(line)
+    return sections
+
+
+def count_subtasks(block: str) -> tuple[int, int]:
+    """(completed, total) checkboxes that actually represent subtasks.
+
+    Only boxes under `**Subtasks**:` count. Before v3.7.0 every `- [ ]` in the
+    block counted, so a Pre-Work Checklist inflated the denominator and the
+    Stop gate nagged about "incomplete subtasks" that were process checkboxes.
+    When a block has no `**Subtasks**:` section at all, fall back to the whole
+    block minus the Pre-Work Checklist.
+    """
+    sections = _block_sections(block)
+    chosen: list[str] = []
+    for name, lines in sections:
+        if name == "subtasks":
+            chosen.extend(lines)
+    if not chosen:
+        for name, lines in sections:
+            if name == "pre-work checklist":
+                continue
+            chosen.extend(lines)
+
+    completed = total = 0
+    for line in chosen:
+        m = CHECKBOX_RE.match(line)
+        if not m:
+            continue
+        total += 1
+        if m.group(1).lower() == "x":
+            completed += 1
+    return completed, total
+
+
+STARTED_FIELD_RE = re.compile(r"\*\*Started\*\*:\s*(\d{4}-\d{2}-\d{2})")
+
+
+def _extract_started(block: str) -> str:
+    m = STARTED_FIELD_RE.search(block)
+    return m.group(1) if m else ""
+
+
+def days_since(iso_date: str) -> int | None:
+    if not iso_date:
+        return None
+    try:
+        started = date.fromisoformat(iso_date)
+    except ValueError:
+        return None
+    return (date.today() - started).days
+
+
+# Epics: a container card whose children carry `**Epic**: <id>`. The reference
+# may be written `TASK-DG-772`, `DG-772`, or bare `772` (same prefix as the
+# child's own id).
+EPIC_FIELD_RE = re.compile(r"\*\*Epic\*\*:\s*([A-Za-z0-9_-]+)")
+_ID_PREFIX_RE = re.compile(r"^TASK-([A-Z]{2,4})-[0-9]+$")
+_SHORT_REF_RE = re.compile(r"^[A-Z]{2,4}-[0-9]+$")
+
+
+def _id_prefix(task_id: str) -> str | None:
+    m = _ID_PREFIX_RE.match(task_id or "")
+    return m.group(1) if m else None
+
+
+def extract_epic_ref(block: str, task_id: str = "") -> str | None:
+    """Full task id this block declares as its parent epic, or None."""
+    m = EPIC_FIELD_RE.search(block)
+    if not m:
+        return None
+    raw = m.group(1).strip().upper()
+    if not raw:
+        return None
+    if raw.startswith("TASK-") or raw.startswith("ADO-"):
+        return raw
+    if _SHORT_REF_RE.match(raw):
+        return "TASK-" + raw
+    if raw.isdigit():
+        prefix = _id_prefix(task_id)
+        return f"TASK-{prefix}-{raw}" if prefix else f"TASK-{raw}"
+    return None
+
+
+_EPIC_REFS_SENTINEL = object()
+_EPIC_REFS_CACHE: Any = _EPIC_REFS_SENTINEL
+
+
+def epic_referenced_ids() -> set[str]:
+    """Every id named as `**Epic**:` by some card, across all task files."""
+    global _EPIC_REFS_CACHE
+    if _EPIC_REFS_CACHE is not _EPIC_REFS_SENTINEL:
+        return _EPIC_REFS_CACHE
+    refs: set[str] = set()
+    for f in task_files():
+        content = read_tasks(f)
+        if not content:
+            continue
+        for tid, _heading, block in _iter_task_blocks(content):
+            ref = extract_epic_ref(block, tid)
+            if ref and ref != tid:
+                refs.add(ref)
+    _EPIC_REFS_CACHE = refs
+    return refs
+
+
+def _title_of_block(block: str) -> str:
+    first = block.splitlines()[0] if block else ""
+    return first.split("|", 1)[1].strip() if "|" in first else ""
+
+
+def is_epic(block: str, task_id: str = "") -> bool:
+    """True when this card is a container, not a work item.
+
+    Either its title starts with EPIC, or some other card names it as its
+    parent epic.
+    """
+    if re.match(r"\s*EPIC\b", _title_of_block(block), re.IGNORECASE):
+        return True
+    if not task_id:
+        m = TASK_HEADING_RE.search(block)
+        task_id = m.group(1) if m else ""
+    return bool(task_id) and task_id in epic_referenced_ids()
+
+
 def _extract_silence_deadline(block: str) -> str | None:
     """Pull the silence-deadline date out of an Outcome Branches block.
 
@@ -915,8 +1134,7 @@ def _extract_awaiting_overdue(content: str, source: Path) -> list[dict[str, Any]
     today = date.today().isoformat()
     out = []
     for task_id, heading, block in _iter_task_blocks(content):
-        m = re.search(r"\*\*Status\*\*:\s*([a-z-]+)", block)
-        if not m or m.group(1) != "awaiting":
+        if status_of(block) != "awaiting":
             continue
         deadline = _extract_silence_deadline(block)
         if not deadline or deadline > today:
@@ -946,12 +1164,10 @@ def _extract_in_progress(content: str, source: Path) -> list[dict[str, Any]]:
     """Return all in-progress tasks in a content blob, annotated with source path."""
     out = []
     for task_id, heading, block in _iter_task_blocks(content):
-        m = re.search(r"\*\*Status\*\*:\s*([a-z-]+)", block)
-        if not m or m.group(1) != "in-progress":
+        if status_of(block) != "in-progress":
             continue
         title = heading.split("|", 1)[1].strip() if "|" in heading else ""
-        completed = len(re.findall(r"- \[x\]", block, re.IGNORECASE))
-        total = len(re.findall(r"- \[[x ]\]", block, re.IGNORECASE))
+        completed, total = count_subtasks(block)
         out.append({
             "task_id": task_id,
             "title": title,
@@ -960,6 +1176,9 @@ def _extract_in_progress(content: str, source: Path) -> list[dict[str, Any]]:
             "block": block,
             "source": source,
             "label": _label_for(source),
+            "started": _extract_started(block),
+            "epic": extract_epic_ref(block, task_id),
+            "is_epic": is_epic(block, task_id),
         })
     return out
 
