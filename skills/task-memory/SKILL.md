@@ -30,10 +30,12 @@ You do NOT need to do these things — the hook handles them:
 |-------|--------------------|-------|
 | Every WebFetch | Timestamp, URL, response snippet (≤120 chars) | `**Visual Operations Log**:` in tasks.md |
 | Every WebSearch | Timestamp, query, result snippet | `**Visual Operations Log**:` in tasks.md |
+| Card flipped to in-progress | Creates `planning/notes/TASK-XXX.md` skeleton and pins the session's focus to that task | notes/ |
 | Every 2 research ops | Creates `planning/notes/TASK-XXX.md` skeleton if missing | notes/ |
 | Bash command with error | Error line appended to Errors Log | `**Errors Log**:` in tasks.md |
-| PreCompact event | Snapshot saved to `notes/TASK-XXX-precompact-TIMESTAMP.md` + ops log appended to main notes file | notes/ |
+| PreCompact event | Snapshot saved to `notes/archive/TASK-XXX-precompact-TIMESTAMP.md` + ops log appended to main notes file. Skipped when identical to the last one, and skipped entirely when no task is in progress. | notes/ |
 | Session start | Displays current task + loaded notes summary OR warns about missing notes | stderr |
+| Every user prompt | One compact read-only banner: owner, focus and why it was picked, progress, open subtasks, stale/overdue warnings | stderr |
 | Attempted Stop with empty notes + research ops | BLOCKS with "fill notes before stopping" | — |
 
 ### What YOU must still do
@@ -87,7 +89,9 @@ The `**Status**:` field determines task state. The UI reads this field and auto-
 
 ### Rule 3: PRESERVE RESEARCH — STRUCTURAL, NOT ADVISORY
 
-The hook creates the notes skeleton on SessionStart for every in-progress task (v3.3+). You fill it in with synthesized insights, not raw quotes.
+The hook creates the notes skeleton the moment you flip a card to in-progress (v3.7+), and again if two research ops go by without one. You fill it in with synthesized insights, not raw quotes.
+
+Earlier versions created a skeleton for *every* in-progress task at session start, and — because the prompt hook faked a session start on every prompt — did it again on every prompt. Set `"notes_skeleton": "session-start"` in `.task-memory.json` to restore that, or `"never"` to turn auto-creation off.
 
 **Synthesis checklist (applied after every research batch):**
 
@@ -190,9 +194,10 @@ The hook supports this via the `task_files_glob` field in
 When set, the hook:
 
 - Discovers every file matching the glob (sorted for deterministic output).
-- On `SessionStart`, lists **all** in-progress tasks from every file, each
-  annotated with its parent-directory label so you can see at a glance
-  which file owns what:
+- On `SessionStart`, lists in-progress tasks grouped by owner — yours first,
+  then everyone else's — with children nested under their epic, each annotated
+  with its parent-directory label so you can see at a glance which file owns
+  what:
   ```
   📋 In-progress (3):
     • TASK-491 | Our Crew page redesign… [2/5] (admin)
@@ -441,10 +446,10 @@ The `planning/notes/` folder stores task-related documentation that persists acr
 
 ### Notes File Lifecycle
 
-1. **Created automatically** by the hook after 2 research operations (WebFetch/WebSearch). Skeleton has Summary, Patterns Discovered, Gotchas, Decisions, Resources, Open Questions.
+1. **Created automatically** by the hook when the card is flipped to in-progress, or after 2 research operations (WebFetch/WebSearch). Skeleton has Summary, Patterns Discovered, Gotchas, Decisions, Resources, Open Questions. Governed by the `notes_skeleton` config key.
 2. **Filled in by you** with synthesized insights — not raw quotes. Each section has a placeholder italic describing what goes there.
 3. **Appended to by PreCompact** — recent operations log entries are merged into the notes file as a timestamped appendix so nothing is lost during compaction.
-4. **Validated at Stop** — if research ops ≥ 2 OR Complexity ∈ {Standard, Complex}, the Stop hook blocks with "fill notes before stopping" when the file is empty or skeleton-only.
+4. **Validated at Stop** — if research ops ≥ 2 OR the card **explicitly declares** Complexity ∈ {Standard, Complex}, the Stop hook blocks with "fill notes before stopping" when the file is empty or skeleton-only. A card with no `**Complexity**` field is not assumed to be Standard (changed in v3.7.0).
 5. **Loaded at SessionStart** — the next session's hook displays the notes summary so you can pick up where you left off.
 
 ### Insight Synthesis Template

@@ -5,6 +5,38 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-09-21
+
+### Added
+
+- **Owner resolution.** The hook now works out who is driving a checkout and scopes itself to their task files. In a two-developer repo with `task_files_glob: "docs/planning/*/tasks*.md"` and files `tasks-dg.md` / `tasks-gr.md`, *every* behavioral path previously keyed off "the first in-progress task in the first globbed file" — which is always the other developer's card, because `dg` sorts before `gr`. Resolution order: `TASK_MEMORY_OWNER` → `owner` in `.task-memory.local.json` → `owner` in `.task-memory.json` → `owner_branch_pattern` (a regex with one capture group, matched against the current git branch) → `owner_git_users` (git `user.name`/`user.email` → owner code). Nothing resolves → legacy behavior, unchanged. Git runs with a 2-second timeout; any failure just skips that step.
+- **`.task-memory.local.json`** — an optional, gitignored, shallow overlay on `.task-memory.json`. Same schema, its keys win. It exists because the same checkout is a different developer on a different machine.
+- **Focus pins.** `.claude/state/task-memory/focus-<session_id>.txt` (per session) and `focus.txt` (session-independent, shared by concurrent sessions on the checkout). The per-session pin is written automatically when a `Write`/`Edit` flips a card in your own board to in-progress. New **`/task-memory:tm-focus`** skill writes the shared pin by hand.
+- **Epics.** `**Epic**: DG-772` on a child card (accepts `TASK-DG-772`, `DG-772`, or a bare `772`), and an `EPIC:` title on the parent. Epics are skipped by current-task selection and by the Stop gate whenever a real work item is available, and the SessionStart banner nests children under their parent.
+- **Staleness warnings.** New `stale_in_progress_days` (default 21): an in-progress card whose `**Started**` date has aged out gets a one-line warning in both banners.
+- **`notes_skeleton` config** — `"on-start"` (default), `"session-start"` (pre-3.7 behavior), `"never"`.
+- **`precompact_dir` config** — where pre-compact snapshots land, relative to `planning_dir`. Default `notes/archive`, so timestamped snapshots stop burying the hand-written notes beside them.
+- **`PostCompact` hook registration.** The script has always handled the event; `hooks.json` never wired it up, so the full banner did not reappear after a compaction.
+
+### Changed
+
+- **`UserPromptSubmit` no longer synthesizes a `SessionStart`.** `skill-eval.sh` used to fake one, with an empty `session_id`, on every single prompt — running the stale-state GC and manufacturing a notes skeleton per in-progress task each time (one real repo ended up with 170 of 283 notes files as untouched skeletons), while leaving the hook unable to tell which task the session was on. It now sends a real `UserPromptSubmit` carrying the real session id, handled by a read-only path that creates nothing, deletes nothing, and caps its output at ~40 lines: owner, focus and why it was picked, progress, up to five open subtasks, the rest of your in-progress ids, a bare count for everyone else, then the warnings. **This is a behavior change** for anyone who depended on per-prompt skeleton creation; set `"notes_skeleton": "session-start"` to get it back.
+- **One status vocabulary.** The in-progress and awaiting scanners matched `**Status**: ([a-z-]+)` and compared with `==`, so a board writing `🚀 In Progress`, `📝 To Do`, `Not Started`, `✅ Done`, or `done — evidence in notes/x.md` had no in-progress tasks at all as far as the hook was concerned. `canonical_status()` now normalizes emoji, casing, underscores, synonyms and trailing prose, and every status comparison runs through it. The reorganizer still prefers a literal column id first, so a board with its own `## Backlog` column keeps its Backlog tasks there.
+- **Subtasks are counted from the `**Subtasks**:` section only.** Pre-Work Checklist boxes no longer inflate progress or get reported as remaining work.
+- **`todowrite_mirror_file` accepts an object** keyed by owner code — `{"GR": "…", "DG": "…"}` — alongside the legacy string. Absent, the mirror targets the owner's own first task file.
+- **`state_path()` no longer creates the state directory**; creation moved to the write sites, so read-only paths are genuinely side-effect free.
+- **Skill frontmatter versions** were drifting (3.0.0, 2.0.0, absent); all skills now carry the plugin version.
+- **`MONOREPO.md` Option C** documented a `planning_dirs` map that no version of the hook has ever read. Replaced with the `planning_dir` + `task_files_glob` configuration that does exist, and the unimplemented key is called out.
+
+### Fixed
+
+- **Current-task selection.** `get_current_task()` returned the first in-progress card in the first file. It now resolves, within the owner's own files: focus pin → session stamp → a task id in the branch name → most recently `**Started**` → document order. Every caller (PreToolUse stamping, research-log routing, the subtask nudge, PreCompact, the Stop gate) now passes the session id and gets a consistent answer.
+- **Research-log duplication.** `append_log_entry` had no dedupe — one repeated WebSearch line had landed 21 times across a board's notes. New entries are compared against the section's existing entries with timestamps stripped.
+- **Pre-compact snapshot duplication.** Compaction fires repeatedly in a long session and the task block rarely changes between two of them, so byte-identical snapshots piled up under different timestamps. Snapshots now carry a sha256 of their own substance (timestamp header excluded) and are skipped when an identical one exists. The ops-log appendix is likewise skipped when an identical body is already in the notes file.
+- **`UNKNOWN-precompact-*.md` files.** With no in-progress task, PreCompact wrote a snapshot with no task, no context and nothing to resume from. It now writes nothing.
+- **The Stop gate demanded notes from almost every card.** `_detect_complexity()` defaulted to `"Standard"`, so any card that simply never declared a complexity — nearly all of them — required a filled notes file. An absent field now says nothing; only research activity or an explicit `Standard`/`Complex` raises the requirement.
+- **Stale test assertions.** `tests/test-hooks.sh` asserted on output strings removed back in 3.0 (`2-ACTION RULE` on `PreToolUse`, `INCOMPLETE:`, `TASK COMPLETION CHECK`, exit code 1 for a Stop block) and had been failing since. Assertions updated to current behavior, plus new coverage for owner resolution, focus-pin selection, emoji statuses, the read-only prompt path, skeleton policy, both dedupes, the epic Stop skip, and per-owner mirror files.
+
 ## [3.6.7] - 2026-07-27
 
 ### Added

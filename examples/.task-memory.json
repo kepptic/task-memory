@@ -1,6 +1,19 @@
 {
   "planning_dir": "planning",
-  "task_prefix": "TASK",
+  "task_files_glob": "planning/tasks-*.md",
+  "owner_branch_pattern": "^v5\\.([a-z]{2})\\d*-dev$",
+  "owner_git_users": {
+    "your-git-username": "GR",
+    "you@example.com": "GR",
+    "Teammate Name": "DG"
+  },
+  "todowrite_mirror_file": {
+    "GR": "planning/tasks-gr.md",
+    "DG": "planning/tasks-dg.md"
+  },
+  "notes_skeleton": "on-start",
+  "precompact_dir": "notes/archive",
+  "stale_in_progress_days": 21,
   "min_engagements_to_block": 3,
   "session_state_max_age_hours": 24,
   "ado": {
