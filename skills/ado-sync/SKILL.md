@@ -1,5 +1,6 @@
 ---
 name: ado-sync
+version: "3.7.0"
 description: Bridge task-memory's board to Azure DevOps — pull sprint/assigned work items into planning/tasks.md, distill notes into a done-summary before pushing, resolve conflicts, and promote a local TASK-* into a new or existing ADO work item. Use when the project's .task-memory.json has an "ado" config block and the user asks to sync/pull/push with Azure DevOps, or to promote a task to ADO.
 user-invocable: true
 allowed-tools:

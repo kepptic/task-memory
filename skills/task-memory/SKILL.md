@@ -1,6 +1,6 @@
 ---
 name: task-memory
-version: "3.0.0"
+version: "3.7.0"
 description: Provides task planning and context preservation for development workflows. Creates structured tasks in planning/tasks.md with subtasks, dependencies, and progress tracking. Use when implementing features, fixing bugs, refactoring code, or any work requiring task tracking. Supports workflow classification (Feature, Refactor, Investigation, Migration, Simple) and complexity assessment. Inspired by Auto-Claude patterns.
 user-invocable: true
 allowed-tools:
