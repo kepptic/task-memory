@@ -1037,10 +1037,10 @@ def _block_sections(block: str) -> list[tuple[str, list[str]]]:
     return sections
 
 
-def count_subtasks(block: str) -> tuple[int, int]:
-    """(completed, total) checkboxes that actually represent subtasks.
+def subtask_lines(block: str) -> list[str]:
+    """The lines that may hold real subtasks.
 
-    Only boxes under `**Subtasks**:` count. Before v3.7.0 every `- [ ]` in the
+    Only the `**Subtasks**:` section counts. Before v3.7.0 every `- [ ]` in the
     block counted, so a Pre-Work Checklist inflated the denominator and the
     Stop gate nagged about "incomplete subtasks" that were process checkboxes.
     When a block has no `**Subtasks**:` section at all, fall back to the whole
@@ -1051,14 +1051,19 @@ def count_subtasks(block: str) -> tuple[int, int]:
     for name, lines in sections:
         if name == "subtasks":
             chosen.extend(lines)
-    if not chosen:
-        for name, lines in sections:
-            if name == "pre-work checklist":
-                continue
-            chosen.extend(lines)
+    if chosen:
+        return chosen
+    for name, lines in sections:
+        if name == "pre-work checklist":
+            continue
+        chosen.extend(lines)
+    return chosen
 
+
+def count_subtasks(block: str) -> tuple[int, int]:
+    """(completed, total) checkboxes that actually represent subtasks."""
     completed = total = 0
-    for line in chosen:
+    for line in subtask_lines(block):
         m = CHECKBOX_RE.match(line)
         if not m:
             continue
@@ -1207,6 +1212,24 @@ def get_awaiting_overdue() -> list[dict[str, Any]]:
     return out
 
 
+# An in-progress card nobody has touched in three weeks is not in progress.
+STALE_IN_PROGRESS_DAYS = int(CONFIG.get("stale_in_progress_days") or 21)
+
+STALE_HINT = "move it to awaiting/todo, or split it into something finishable"
+
+
+def stale_in_progress(tasks: list[dict[str, Any]]) -> list[tuple[dict[str, Any], int]]:
+    """(task, age_in_days) for in-progress tasks Started longer ago than the
+    configured threshold. Tasks with no Started date are not judged."""
+    out = []
+    for t in tasks:
+        age = days_since(t.get("started", ""))
+        if age is not None and age > STALE_IN_PROGRESS_DAYS:
+            out.append((t, age))
+    out.sort(key=lambda pair: pair[1], reverse=True)
+    return out
+
+
 def _extract_in_progress(content: str, source: Path) -> list[dict[str, Any]]:
     """Return all in-progress tasks in a content blob, annotated with source path."""
     out = []
@@ -1305,7 +1328,7 @@ def get_current_task(session_id: str | None = None) -> dict[str, Any] | None:
 
 def get_incomplete_subtasks(block: str, limit: int = 5) -> list[str]:
     out = []
-    for line in block.splitlines():
+    for line in subtask_lines(block):
         m = re.match(r"\s*- \[ \]\s*(.+)", line)
         if m:
             out.append(m.group(1))
@@ -1434,6 +1457,109 @@ def _count_research_ops(block: str) -> int:
     return len(re.findall(r"- \d{4}-\d{2}-\d{2}.*(?:WebFetch|WebSearch)", block))
 
 
+def _group_by_epic(
+    tasks: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Split tasks into (epics, {epic_id: children}, everything else)."""
+    present = {t["task_id"] for t in tasks}
+    epics = [t for t in tasks if t.get("is_epic")]
+    children: dict[str, list[dict[str, Any]]] = {}
+    loose: list[dict[str, Any]] = []
+    for t in tasks:
+        if t.get("is_epic"):
+            continue
+        parent = t.get("epic")
+        if parent and parent in present:
+            children.setdefault(parent, []).append(t)
+        else:
+            loose.append(t)
+    return epics, children, loose
+
+
+def _task_line(t: dict[str, Any], width: int = 60, bullet: str = "•") -> str:
+    title = (t.get("title") or "")[:width]
+    progress = f" [{t['completed']}/{t['total']}]" if t.get("total") else ""
+    label = f" ({t['label']})" if t.get("label") else ""
+    return f"{bullet} {t['task_id']} | {title}{progress}{label}"
+
+
+def _render_group(tasks: list[dict[str, Any]], out: list[str], width: int = 60) -> None:
+    """Render a set of tasks with children nested under their epic."""
+    epics, children, loose = _group_by_epic(tasks)
+    for e in epics:
+        out.append("  " + _task_line(e, width))
+        for c in children.get(e["task_id"], []):
+            out.append("    ↳ " + _task_line(c, width, bullet="").lstrip())
+    for t in loose:
+        out.append("  " + _task_line(t, width))
+
+
+def _warning_lines(mine: list[dict[str, Any]]) -> list[str]:
+    """Stale-in-progress and overdue-awaiting warnings, one line per task."""
+    out: list[str] = []
+    for t, age in stale_in_progress(mine):
+        out.append(f"⏳ {t['task_id']} stale {age} days — {STALE_HINT}")
+    for t in get_awaiting_overdue():
+        out.append(
+            f"🔔 {t['task_id']} awaiting past deadline {t['deadline']} — "
+            f"run its Outcome Branches silence path or extend the date"
+        )
+    return out
+
+
+def handle_prompt_context(session_id: str) -> None:
+    """UserPromptSubmit banner. Read-only, cheap, and capped.
+
+    v3.7.0: skill-eval.sh used to synthesize a fake SessionStart on EVERY user
+    prompt, which meant a full GC pass plus a notes skeleton per in-progress
+    task per prompt. This path creates nothing, deletes nothing, and never
+    touches the filesystem beyond reading task files and the focus pin.
+    """
+    owner = resolve_owner()
+    mine = get_all_in_progress_tasks("mine")
+    lines: list[str] = []
+
+    task = get_current_task(session_id)
+    header = "TASK-MEMORY"
+    if owner:
+        header += f" | owner {owner}"
+    if task:
+        header += f" | focus {task['task_id']} ({task.get('selection', 'first')})"
+    else:
+        header += " | no task in progress"
+    lines.append(header)
+
+    note = owner_scope_note()
+    if note:
+        lines.append(f"  ⚠️  {note}")
+
+    if task:
+        progress = f"  [{task['completed']}/{task['total']}]" if task["total"] else ""
+        lines.append(f"  {task['title']}{progress}")
+        for sub in get_incomplete_subtasks(task["block"], limit=5):
+            lines.append(f"    - [ ] {sub}")
+
+    rest = [t for t in mine if not task or t["task_id"] != task["task_id"]]
+    if rest:
+        lines.append(f"Other in-progress (mine): {len(rest)}")
+        for t in rest:
+            lines.append(f"  • {t['task_id']} | {(t.get('title') or '')[:50]}")
+
+    if owner:
+        every = get_all_in_progress_tasks("all")
+        mine_ids = {t["task_id"] for t in mine}
+        others = [t for t in every if t["task_id"] not in mine_ids]
+        if others:
+            lines.append(f"Other in-progress (others): {len(others)}")
+
+    lines.extend(_warning_lines(mine))
+
+    if len(lines) > 40:
+        lines = lines[:39] + [f"… {len(lines) - 39} more line(s) suppressed"]
+    for line in lines:
+        print(line, file=sys.stderr)
+
+
 def handle_session_start() -> None:
     # v3.3.0: sweep orphaned session state from crashed/forced-exit sessions
     # before rendering the banner. SessionEnd doesn't always fire.
@@ -1472,7 +1598,27 @@ def handle_session_start() -> None:
         print("=" * 60 + "\n", file=sys.stderr)
         return
 
-    all_tasks = get_all_in_progress_tasks()
+    owner = resolve_owner()
+    if owner:
+        print(f"\nOwner: {owner} (task files scoped to this developer)", file=sys.stderr)
+        note = owner_scope_note()
+        if note:
+            print(f"⚠️  {note}", file=sys.stderr)
+
+    all_tasks = get_all_in_progress_tasks("mine")
+    everyones = get_all_in_progress_tasks("all")
+    mine_ids = {t["task_id"] for t in all_tasks}
+    others = [t for t in everyones if t["task_id"] not in mine_ids]
+
+    stale = stale_in_progress(all_tasks)
+    if stale:
+        print(f"\n⏳ STALE — {len(stale)} in-progress task(s) older than "
+              f"{STALE_IN_PROGRESS_DAYS} days:", file=sys.stderr)
+        for t, age in stale:
+            print(f"  • {t['task_id']} | {t['title'][:60]}  started {t['started']} "
+                  f"({age} days)", file=sys.stderr)
+        print(f"  → {STALE_HINT}.", file=sys.stderr)
+
     overdue = get_awaiting_overdue()
     if overdue:
         print(
@@ -1514,14 +1660,19 @@ def handle_session_start() -> None:
             print("=" * 60 + "\n", file=sys.stderr)
             return
 
-        print(f"\n📋 In-progress ({len(all_tasks)}):", file=sys.stderr)
-        for t in all_tasks:
-            title = t["title"][:60]
-            suffix = f" ({t['label']})" if t["label"] else ""
-            progress = ""
-            if t["total"] > 0:
-                progress = f" [{t['completed']}/{t['total']}]"
-            print(f"  • {t['task_id']} | {title}…{progress}{suffix}", file=sys.stderr)
+        heading = "📋 In-progress (mine)" if owner else "📋 In-progress"
+        print(f"\n{heading} ({len(all_tasks)}):", file=sys.stderr)
+        group: list[str] = []
+        _render_group(all_tasks, group)
+        for line in group:
+            print(line, file=sys.stderr)
+
+        if others:
+            print(f"\n👥 In-progress (others) ({len(others)}):", file=sys.stderr)
+            group = []
+            _render_group(others, group)
+            for line in group:
+                print(line, file=sys.stderr)
 
         # Show notes status for each task
         for t in all_tasks:
@@ -2352,7 +2503,9 @@ def main() -> int:
         tool_input = {}
 
     try:
-        if hook_event in ("SessionStart", "PostCompact"):
+        if hook_event == "UserPromptSubmit":
+            handle_prompt_context(session_id)
+        elif hook_event in ("SessionStart", "PostCompact"):
             handle_session_start()
         elif hook_event == "PreCompact":
             handle_pre_compact(payload, session_id)
