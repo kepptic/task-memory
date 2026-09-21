@@ -25,6 +25,10 @@ archive.md
 .env
 .env.local
 __pycache__/
+*.pyc
+
+# Machine-local config overlay (owner identity, per-machine paths)
+.task-memory.local.json
 
 # Build artifacts
 task-memory.html
