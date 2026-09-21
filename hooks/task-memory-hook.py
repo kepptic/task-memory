@@ -17,6 +17,7 @@ Dependencies: Python 3.11+ stdlib only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -116,6 +117,18 @@ def find_planning_dir() -> Path:
 PLANNING_DIR = find_planning_dir()
 TASKS_FILE = PLANNING_DIR / "tasks.md"
 NOTES_DIR = PLANNING_DIR / "notes"
+
+
+def _precompact_dir() -> Path:
+    """Where pre-compact snapshots land. Config `precompact_dir`, relative to
+    planning_dir; default notes/archive so timestamped snapshots stop burying
+    the hand-written notes files they sit next to."""
+    raw = str(CONFIG.get("precompact_dir") or "notes/archive").strip()
+    p = Path(raw)
+    return p if p.is_absolute() else (PLANNING_DIR / p)
+
+
+PRECOMPACT_DIR = _precompact_dir()
 
 # Multi-file mode: if task_files_glob is set, discover all matching tasks files
 # relative to PROJECT_DIR. Single-file mode keeps existing behavior.
@@ -1382,10 +1395,40 @@ def ensure_tasks_structure() -> None:
         print(f"Created {archive}", file=sys.stderr)
 
 
+# `- 2026-07-19 10:00:00 - WebSearch: "x" => …` -> `WebSearch: "x" => …`
+_LOG_TS_RE = re.compile(
+    r"^\s*-\s*\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\s*-\s*"
+)
+
+
+def _log_entry_body(line: str) -> str:
+    return _LOG_TS_RE.sub("", line).strip()
+
+
+def _section_entry_bodies(block: str, section: str) -> set[str]:
+    """Timestamp-stripped bodies of the entries already in a log section."""
+    m = re.search(rf"\*\*{re.escape(section)}\*\*:[^\n]*\n", block)
+    if not m:
+        return set()
+    bodies = set()
+    for line in block[m.end():].splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if SECTION_MARKER_RE.match(line):
+            break
+        if not stripped.startswith("- "):
+            break
+        bodies.add(_log_entry_body(line))
+    return bodies
+
+
 def append_log_entry(task_id: str, log_line: str, section: str = "Visual Operations Log") -> bool:
     """Append a log line to a named section inside a task block.
 
-    Searches all task files, writes to whichever file owns the task.
+    Searches all task files, writes to whichever file owns the task. Returns
+    False when the same entry (ignoring its timestamp) is already there — one
+    repeated WebSearch had landed 21 times across a real board's notes.
     """
     for f in task_files():
         content = read_tasks(f)
@@ -1396,6 +1439,9 @@ def append_log_entry(task_id: str, log_line: str, section: str = "Visual Operati
         for tid, heading, block in _iter_task_blocks(content):
             if tid != task_id:
                 continue
+
+            if _log_entry_body(log_line) in _section_entry_bodies(block, section):
+                return False
 
             section_marker = f"**{section}**:"
             if section_marker in block:
@@ -2193,41 +2239,73 @@ def mirror_todowrite(todos: list[dict]) -> None:
 # PreCompact (finding #2)
 # =============================================================================
 
+SNAPSHOT_HASH_MARKER = "<!-- task-memory-snapshot-sha256:"
+
+
+def _snapshot_fingerprint(text: str) -> str:
+    """Hash of a snapshot's substance — timestamp header and marker excluded.
+
+    Compaction fires repeatedly in a long session, and the task block rarely
+    changes between two of them, so byte-identical snapshots used to pile up
+    under different timestamps.
+    """
+    keep = [
+        line for line in text.splitlines()
+        if not line.startswith("_Generated:")
+        and not line.startswith(SNAPSHOT_HASH_MARKER)
+    ]
+    return hashlib.sha256("\n".join(keep).encode("utf-8")).hexdigest()
+
+
+def _existing_ops_log_bodies(notes_text: str) -> list[str]:
+    """Bodies of every `## Pre-Compact Ops Log (...)` section already present."""
+    bodies = []
+    parts = re.split(r"^## Pre-Compact Ops Log[^\n]*$", notes_text, flags=re.MULTILINE)
+    for part in parts[1:]:
+        nxt = re.search(r"^## ", part, re.MULTILINE)
+        bodies.append((part[:nxt.start()] if nxt else part).strip())
+    return bodies
+
+
 def handle_pre_compact(payload: dict, session_id: str = "") -> None:
-    """Dump current in-progress task + research + todos to a snapshot file."""
+    """Dump current in-progress task + research to a snapshot file.
+
+    No current task means no snapshot. Before v3.7.0 this wrote
+    `UNKNOWN-precompact-<ts>.md` instead — a file with no task, no context and
+    nothing to resume from.
+    """
     ensure_tasks_structure()
     task = get_current_task(session_id)
-    task_id = task["task_id"] if task else "UNKNOWN"
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    snapshot = NOTES_DIR / f"{task_id}-precompact-{ts}.md"
+    if not task:
+        print(
+            "[task-memory] Pre-compact: no in-progress task — nothing to snapshot.",
+            file=sys.stderr,
+        )
+        return
+
+    task_id = task["task_id"]
+    now = datetime.now()
 
     parts = [
         f"# Pre-Compact Snapshot — {task_id}",
         "",
-        f"_Generated: {datetime.now().isoformat()}_",
+        f"_Generated: {now.isoformat()}_",
+        "",
+        "## Current Task",
+        "",
+        f"**{task['task_id']}**: {task['title']}",
+        f"Progress: {task['completed']}/{task['total']}",
+        "",
+        "### Task Block",
+        "",
+        "```markdown",
+        task["block"].rstrip(),
+        "```",
         "",
     ]
 
-    if task:
-        parts += [
-            "## Current Task",
-            "",
-            f"**{task['task_id']}**: {task['title']}",
-            f"Progress: {task['completed']}/{task['total']}",
-            "",
-            "### Task Block",
-            "",
-            "```markdown",
-            task["block"].rstrip(),
-            "```",
-            "",
-        ]
-    else:
-        parts += ["## Current Task", "", "_No in-progress task._", ""]
-
-    # Recent research log (last 20 entries) — pull from the file that owns
-    # the active task, falling back to the primary file.
-    source = (task.get("source") if task else None) or primary_task_file()
+    # Recent research log (last 20 entries) from the file that owns the task.
+    source = task.get("source") or primary_task_file()
     content = read_tasks(source)
     for section in ("Visual Operations Log", "Errors Log"):
         m = re.search(rf"\*\*{re.escape(section)}\*\*:\s*\n((?:- .+\n)+)", content)
@@ -2241,44 +2319,85 @@ def handle_pre_compact(payload: dict, session_id: str = "") -> None:
     if payload.get("custom_instructions"):
         parts += ["## Custom Instructions\n", str(payload["custom_instructions"]), ""]
 
+    body = "\n".join(parts)
+    fingerprint = _snapshot_fingerprint(body)
+
+    target_dir = PRECOMPACT_DIR
     try:
-        snapshot.write_text("\n".join(parts))
-        print(f"\n[task-memory] Pre-compact snapshot: {snapshot}\n", file=sys.stderr)
-    except OSError as e:
-        print(f"[task-memory] Failed to write snapshot: {e}", file=sys.stderr)
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        target_dir = NOTES_DIR
+
+    duplicate = None
+    try:
+        for existing in sorted(target_dir.glob(f"{task_id}-precompact-*.md")):
+            try:
+                if _snapshot_fingerprint(existing.read_text()) == fingerprint:
+                    duplicate = existing
+                    break
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+    if duplicate is not None:
+        print(
+            f"[task-memory] Pre-compact snapshot unchanged since {duplicate.name} "
+            f"— not writing a duplicate.",
+            file=sys.stderr,
+        )
+    else:
+        snapshot = target_dir / f"{task_id}-precompact-{now.strftime('%Y%m%d-%H%M%S')}.md"
+        try:
+            snapshot.write_text(f"{SNAPSHOT_HASH_MARKER} {fingerprint} -->\n" + body)
+            print(f"\n[task-memory] Pre-compact snapshot: {snapshot}\n", file=sys.stderr)
+        except OSError as e:
+            print(f"[task-memory] Failed to write snapshot: {e}", file=sys.stderr)
 
     # Also append the operations log into the main notes file so insights
     # survive compaction in a discoverable place (not just a timestamped
     # snapshot). The snapshot is a safety net; the notes file is canonical.
-    if task and task_id != "UNKNOWN":
-        notes_path = NOTES_DIR / f"{task_id}.md"
-        if not notes_path.is_file():
-            _create_notes_skeleton(task_id, task.get("title", ""))
+    notes_path = NOTES_DIR / f"{task_id}.md"
+    if not notes_path.is_file():
+        _create_notes_skeleton(task_id, task.get("title", ""), trigger="precompact")
 
-        if notes_path.is_file():
-            try:
-                existing_notes = notes_path.read_text()
-            except OSError:
-                existing_notes = ""
+    if not notes_path.is_file():
+        return
+    try:
+        existing_notes = notes_path.read_text()
+    except OSError:
+        existing_notes = ""
 
-            ops_heading = f"## Pre-Compact Ops Log ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
-            appendix_parts = ["", ops_heading, ""]
-            for section in ("Visual Operations Log", "Errors Log"):
-                m = re.search(rf"\*\*{re.escape(section)}\*\*:\s*\n((?:- .+\n)+)", content)
-                if m:
-                    entries = m.group(1).strip().splitlines()[-20:]
-                    appendix_parts += [f"### {section}", "", *entries, ""]
+    appendix_parts = []
+    for section in ("Visual Operations Log", "Errors Log"):
+        m = re.search(rf"\*\*{re.escape(section)}\*\*:\s*\n((?:- .+\n)+)", content)
+        if m:
+            entries = m.group(1).strip().splitlines()[-20:]
+            appendix_parts += [f"### {section}", "", *entries, ""]
 
-            if len(appendix_parts) > 3:  # more than just the heading
-                appendix_parts += [
-                    "_Synthesize these into Patterns/Gotchas/Decisions above before they age out._",
-                    "",
-                ]
-                try:
-                    notes_path.write_text(existing_notes.rstrip() + "\n" + "\n".join(appendix_parts))
-                    print(f"[task-memory] Appended ops log to {notes_path}", file=sys.stderr)
-                except OSError as e:
-                    print(f"[task-memory] Failed to append to notes: {e}", file=sys.stderr)
+    if not appendix_parts:
+        return
+
+    appendix_parts += [
+        "_Synthesize these into Patterns/Gotchas/Decisions above before they age out._",
+        "",
+    ]
+    new_body = "\n".join(appendix_parts).strip()
+    if new_body in _existing_ops_log_bodies(existing_notes):
+        print(
+            f"[task-memory] Ops log already appended to {notes_path} — skipping.",
+            file=sys.stderr,
+        )
+        return
+
+    ops_heading = f"## Pre-Compact Ops Log ({now.strftime('%Y-%m-%d %H:%M')})"
+    try:
+        notes_path.write_text(
+            existing_notes.rstrip() + "\n\n" + ops_heading + "\n\n" + new_body + "\n"
+        )
+        print(f"[task-memory] Appended ops log to {notes_path}", file=sys.stderr)
+    except OSError as e:
+        print(f"[task-memory] Failed to append to notes: {e}", file=sys.stderr)
 
 
 # =============================================================================
@@ -2314,11 +2433,15 @@ def _notes_has_content(task_id: str) -> bool:
 
 
 def _detect_complexity(block: str) -> str:
-    """Extract Complexity field from a task block. Defaults to 'Standard'."""
+    """The task's declared **Complexity**, or "" when the field is absent.
+
+    Before v3.7.0 this defaulted to "Standard", which made the Stop gate demand
+    a filled notes file from every card that simply never declared a
+    complexity — the overwhelming majority of them. An absent field now says
+    nothing, and only research activity can raise the notes requirement.
+    """
     m = re.search(r"\*\*Complexity\*\*:\s*([A-Za-z]+)", block)
-    if m:
-        return m.group(1).strip()
-    return "Standard"
+    return m.group(1).strip() if m else ""
 
 
 def _actionable_pause_hint(task: dict) -> str:
@@ -2354,6 +2477,11 @@ def handle_stop(session_id: str) -> None:
 
     # Explicit opt-out wins over everything.
     if is_off_topic(session_id):
+        return
+
+    # An epic is a container for other cards, not a thing you finish in a
+    # sitting. Only gate on one when it is the only in-progress task there is.
+    if task.get("is_epic") and len(get_all_in_progress_tasks("mine")) > 1:
         return
 
     if not was_task_worked_on(session_id, task["task_id"]):
