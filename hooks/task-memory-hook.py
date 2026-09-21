@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import date, datetime, timezone
@@ -38,21 +39,51 @@ PROGRESS_COUNTER = STATE_DIR / "progress-count"
 
 
 def state_path(name: str) -> Path:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    """Path inside STATE_DIR. Read-only — does NOT create the directory.
+
+    v3.7.0: creation moved to the write sites (record_session_task,
+    bump_engagement, mark_released, the stop-block counter, focus pins) so
+    read-only paths — above all the per-prompt banner — have zero filesystem
+    side effects.
+    """
     return STATE_DIR / name
 
 
-def _load_config() -> dict:
-    """Read .task-memory.json from project root (empty dict on any error)."""
-    config_file = PROJECT_DIR / ".task-memory.json"
-    if config_file.is_file():
+def ensure_state_dir() -> bool:
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def _read_json(path: Path) -> dict:
+    """Parse a JSON object from disk (empty dict on any error)."""
+    if path.is_file():
         try:
-            cfg = json.loads(config_file.read_text())
+            cfg = json.loads(path.read_text())
             if isinstance(cfg, dict):
                 return cfg
         except (json.JSONDecodeError, OSError):
             pass
     return {}
+
+
+def _load_config() -> dict:
+    """Read .task-memory.json, shallow-merged under .task-memory.local.json.
+
+    `.task-memory.local.json` (v3.7.0) is an optional, gitignored, machine-local
+    overlay: same schema, keys win over the committed file. Its reason to exist
+    is `owner` — the same checkout is a different developer on a different
+    machine, and that fact does not belong in version control.
+    """
+    base = _read_json(PROJECT_DIR / ".task-memory.json")
+    local = _read_json(PROJECT_DIR / ".task-memory.local.json")
+    if local:
+        merged = dict(base)
+        merged.update(local)
+        return merged
+    return base
 
 
 CONFIG = _load_config()
@@ -108,17 +139,203 @@ def task_files() -> list[Path]:
     return [TASKS_FILE] if TASKS_FILE.is_file() else []
 
 
+
+
+# =============================================================================
+# Owner resolution (v3.7.0)
+# =============================================================================
+# A two-developer repo with `task_files_glob: "docs/planning/*/tasks*.md"` and
+# files tasks-dg.md / tasks-gr.md always resolved "the current task" to the
+# first in-progress card in the alphabetically-first file — i.e. always the
+# OTHER developer's card. Owner resolution scopes every behavioral path to the
+# files that belong to whoever is driving this checkout.
+#
+# Unresolvable owner (the common single-developer case) => None => legacy
+# semantics, unchanged: all files, document order.
+
+OWNER_RE = re.compile(r"^[A-Z]{2,4}$")
+
+_OWNER_SENTINEL = object()
+_OWNER_CACHE: Any = _OWNER_SENTINEL
+
+
+def _git(*args: str) -> str | None:
+    """Run a git command in PROJECT_DIR. None on any failure or timeout."""
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if proc.returncode != 0:
+        return None
+    out = (proc.stdout or "").strip()
+    return out or None
+
+
+def _valid_owner(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    code = value.strip().upper()
+    return code if OWNER_RE.match(code) else None
+
+
+def current_branch() -> str | None:
+    return _git("branch", "--show-current")
+
+
+def resolve_owner() -> str | None:
+    """Who is driving this checkout? A 2-4 uppercase-letter code, or None.
+
+    Resolution order (first valid wins; an invalid value is skipped, not fatal):
+      1. env TASK_MEMORY_OWNER
+      2. `owner` in .task-memory.local.json  (overlaid onto CONFIG at load)
+      3. `owner` in .task-memory.json
+      4. `owner_branch_pattern` — regex with ONE capture group, applied to the
+         current git branch. e.g. "^v5\\.([a-z]{2})\\d*-dev$" on `v5.gr1-dev`
+         yields GR.
+      5. `owner_git_users` — {git user.name or user.email -> owner code},
+         matched case-insensitively and exactly.
+      6. None -> legacy behavior.
+    """
+    global _OWNER_CACHE
+    if _OWNER_CACHE is not _OWNER_SENTINEL:
+        return _OWNER_CACHE
+
+    owner = _valid_owner(os.environ.get("TASK_MEMORY_OWNER"))
+
+    # CONFIG already carries the .task-memory.local.json overlay on top of
+    # .task-memory.json, so one lookup covers precedence steps 2 and 3.
+    if not owner:
+        owner = _valid_owner(CONFIG.get("owner"))
+
+    if not owner:
+        pattern = CONFIG.get("owner_branch_pattern")
+        if isinstance(pattern, str) and pattern.strip():
+            branch = current_branch()
+            if branch:
+                try:
+                    m = re.search(pattern, branch)
+                except re.error:
+                    m = None
+                if m and m.groups():
+                    owner = _valid_owner(m.group(1))
+
+    if not owner:
+        table = CONFIG.get("owner_git_users")
+        if isinstance(table, dict) and table:
+            lookup = {
+                str(k).strip().lower(): v
+                for k, v in table.items()
+                if isinstance(k, str)
+            }
+            for ident in (_git("config", "user.name"), _git("config", "user.email")):
+                if not ident:
+                    continue
+                hit = lookup.get(ident.strip().lower())
+                if hit:
+                    owner = _valid_owner(hit)
+                    if owner:
+                        break
+
+    _OWNER_CACHE = owner
+    return owner
+
+
+_FILE_OWNER_CACHE: dict[str, str | None] = {}
+
+FILE_PREFIX_HEADER_RE = re.compile(r"Task Prefix:\s*([A-Za-z]{2,4})\b")
+FILE_OWNER_NAME_RE = re.compile(r"^tasks?-([A-Za-z]{2,4})\.md$", re.IGNORECASE)
+
+
+def file_owner(path: Path) -> str | None:
+    """Owner code for a task file: its `Task Prefix:` header, else its filename.
+
+    `<!-- Config: Task Prefix: GR | Last Task ID: 894 -->` -> "GR".
+    `tasks-gr.md` -> "GR". Neither -> None (file belongs to nobody in
+    particular and is therefore visible to everybody).
+    """
+    key = str(path)
+    if key in _FILE_OWNER_CACHE:
+        return _FILE_OWNER_CACHE[key]
+
+    owner: str | None = None
+    try:
+        head = path.read_text()[:4096]
+    except OSError:
+        head = ""
+    m = FILE_PREFIX_HEADER_RE.search(head)
+    if m:
+        owner = _valid_owner(m.group(1))
+    if not owner:
+        nm = FILE_OWNER_NAME_RE.match(path.name)
+        if nm:
+            owner = _valid_owner(nm.group(1))
+
+    _FILE_OWNER_CACHE[key] = owner
+    return owner
+
+
+def my_task_files() -> list[Path]:
+    """Task files belonging to the resolved owner.
+
+    Falls back to every task file when the owner is unresolvable, or when the
+    owner resolves but owns none of the discovered files — never returning an
+    empty list for a reason the user can't see.
+    """
+    files = task_files()
+    owner = resolve_owner()
+    if not owner or not files:
+        return files
+    mine = [f for f in files if file_owner(f) == owner]
+    return mine or files
+
+
+def owner_scope_note() -> str | None:
+    """One-line warning when the owner resolved but owns none of the files."""
+    owner = resolve_owner()
+    if not owner:
+        return None
+    files = task_files()
+    if not files:
+        return None
+    if any(file_owner(f) == owner for f in files):
+        return None
+    return (
+        f"owner {owner} resolved but no task file declares it "
+        f"(`Task Prefix: {owner}` header or tasks-{owner.lower()}.md) — "
+        f"falling back to all {len(files)} file(s)."
+    )
+
+
 def primary_task_file() -> Path:
     """The write target for TodoWrite mirror and other single-file operations.
 
-    Config can override with `todowrite_mirror_file` (relative to PROJECT_DIR).
-    Otherwise: first task file in multi-file mode, or TASKS_FILE default.
+    `todowrite_mirror_file` accepts either form:
+      "planning/tasks.md"                    (legacy, applies to everyone)
+      {"GR": "docs/planning/tasks-gr.md",    (v3.7.0, per owner)
+       "DG": "docs/planning/tasks-dg.md"}
+
+    With no override, the target is the first of the owner's own task files —
+    so a shared checkout never mirrors one developer's TodoWrite into another
+    developer's board.
     """
-    override = (CONFIG.get("todowrite_mirror_file") or "").strip()
-    if override:
-        p = Path(override)
+    override = CONFIG.get("todowrite_mirror_file")
+    raw = ""
+    if isinstance(override, dict):
+        owner = resolve_owner()
+        if owner:
+            raw = str(override.get(owner) or "").strip()
+    elif isinstance(override, str):
+        raw = override.strip()
+    if raw:
+        p = Path(raw)
         return p if p.is_absolute() else (PROJECT_DIR / p)
-    files = task_files()
+    files = my_task_files()
     if files:
         return files[0]
     return TASKS_FILE
@@ -141,6 +358,8 @@ def session_task_file(session_id: str) -> Path:
 
 def record_session_task(session_id: str, task_id: str) -> None:
     if not (session_id and task_id):
+        return
+    if not ensure_state_dir():
         return
     f = session_task_file(session_id)
     existing = f.read_text().splitlines() if f.exists() else []
@@ -299,6 +518,8 @@ def engagement_counter_path(session_id: str, task_id: str) -> Path:
 def bump_engagement(session_id: str, task_id: str) -> int:
     if not (session_id and task_id):
         return 0
+    if not ensure_state_dir():
+        return 0
     f = engagement_counter_path(session_id, task_id)
     n = 0
     if f.exists():
@@ -343,6 +564,8 @@ def is_released(session_id: str, task_id: str) -> bool:
 
 def mark_released(session_id: str, task_id: str) -> None:
     if not (session_id and task_id):
+        return
+    if not ensure_state_dir():
         return
     try:
         released_flag_path(session_id, task_id).write_text(
@@ -1665,6 +1888,7 @@ def handle_stop(session_id: str) -> None:
 
     if counter:
         try:
+            ensure_state_dir()
             counter.write_text(str(block_count + 1))
         except OSError:
             pass
