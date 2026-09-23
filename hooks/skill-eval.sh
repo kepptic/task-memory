@@ -17,11 +17,19 @@ parse() {
 
 hook_event="$(parse hook_event_name)"
 prompt="$(parse prompt)"
+session_id="$(parse session_id)"
 [ "$hook_event" = "UserPromptSubmit" ] || exit 0
 [[ "$prompt" == /* ]] && exit 0
 
-# Delegate task context rendering to the main Python hook via a synthesized event.
+# Delegate task context rendering to the main Python hook.
+#
+# Until v3.7.0 this synthesized a SessionStart with an empty session_id, so
+# every single user prompt ran a full session-start pass: stale-state GC plus
+# a notes skeleton for every in-progress task, and with no session id the hook
+# could never tell which task this session was actually on. UserPromptSubmit
+# now maps to its own read-only handler, and the real session id goes with it
+# so the focus pin and session stamp resolve.
 HOOK="$(dirname "$0")/task-memory-hook.py"
 [ -x "$HOOK" ] || chmod +x "$HOOK" 2>/dev/null
-printf '{"hook_event_name":"SessionStart","session_id":""}' | "$HOOK" 2>&1
+printf '{"hook_event_name":"UserPromptSubmit","session_id":"%s"}' "$session_id" | "$HOOK" 2>&1
 exit 0

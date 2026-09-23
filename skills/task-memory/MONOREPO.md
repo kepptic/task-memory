@@ -59,18 +59,7 @@ Cross-domain work: Create tasks in ALL relevant files.
 
 ## Option C: Configuration-Based
 
-Explicit mapping in `.task-memory.json` for complete control.
-
-```json
-{
-  "planning_dir": "docs/todo",
-  "planning_dirs": {
-    "api": "packages/api/planning",
-    "admin": "packages/admin/planning",
-    "default": "planning"
-  }
-}
-```
+Explicit configuration in `.task-memory.json`.
 
 **Single directory override:**
 ```json
@@ -78,6 +67,43 @@ Explicit mapping in `.task-memory.json` for complete control.
   "planning_dir": "docs/planning"
 }
 ```
+
+**Several boards at once** — one glob, one aggregated view:
+```json
+{
+  "planning_dir": "docs/todo",
+  "task_files_glob": "docs/todo/*/tasks.md"
+}
+```
+
+The hook reads in-progress tasks from every match, routes log appends to the
+file that owns the task, and pins the TodoWrite mirror with
+`todowrite_mirror_file`. Set `planning_dir` alongside the glob — without it,
+notes default to `<root>/planning/notes/`, which may not be where the task
+files live.
+
+**Per-developer boards** (`tasks-gr.md`, `tasks-dg.md`) additionally want an
+owner, so each machine's session works on its own board rather than whichever
+file sorts first:
+
+```json
+{
+  "task_files_glob": "docs/planning/*/tasks-*.md",
+  "owner_git_users": { "your-git-username": "GR", "Teammate Name": "DG" },
+  "todowrite_mirror_file": {
+    "GR": "docs/planning/admin/tasks-gr.md",
+    "DG": "docs/planning/admin/tasks-dg.md"
+  }
+}
+```
+
+See [REFERENCE.md](../../docs/REFERENCE.md#owner-resolution-v370) for the full
+resolution order.
+
+> **Not implemented:** a `planning_dirs` map (per-package planning directories
+> selected by name). Older copies of this guide showed one; no version of the
+> hook has ever read it. Use `planning_dir` plus `task_files_glob`, or Option A's
+> nearest-ancestor auto-detection.
 
 ## CLAUDE.md Fallback
 

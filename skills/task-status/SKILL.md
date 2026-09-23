@@ -1,6 +1,6 @@
 ---
 name: task-status
-version: "2.0.0"
+version: "3.7.0"
 description: Provides quick context verification using the 5-Question Reboot Test plus Context Health Score. Validates that notes files exist and have substantive content, flags research gaps (ops logged without notes), shows workflow type, complexity, phase dependencies, and remaining subtasks. Use when starting new sessions, resuming after breaks, when context feels uncertain, or before making major implementation decisions.
 user-invocable: true
 allowed-tools:

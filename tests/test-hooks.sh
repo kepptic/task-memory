@@ -100,6 +100,7 @@ setup_test_env() {
 
 teardown_test_env() {
     rm -rf "$FIXTURES_DIR/planning"
+    rm -rf "$FIXTURES_DIR/owner"
     rm -f /tmp/task-memory-research-count
     rm -f /tmp/task-memory-progress-count
     rm -rf "$FIXTURES_DIR/.claude"
@@ -330,25 +331,28 @@ test_pre_tool_use_write() {
     assert_contains "$output" "Progress: 1/3" "Progress shown"
 }
 
-test_pre_tool_use_webfetch() {
-    log_test "PreToolUse with WebFetch tool"
+# Research logging is a PostToolUse concern — it captures the FINDING, so it
+# has to run after the tool. These asserted on PreToolUse until v3.7.0 and had
+# been failing since 3.0.
+test_post_tool_use_webfetch() {
+    log_test "PostToolUse with WebFetch tool logs the URL to the current task"
 
     create_test_tasks_file
 
     local output
-    output=$(echo '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com/docs"}}' | "$HOOK_SCRIPT" 2>&1) || true
+    output=$(echo '{"hook_event_name":"PostToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com/docs"},"tool_response":"fetched"}' | "$HOOK_SCRIPT" 2>&1) || true
 
     assert_contains "$output" "Logged to TASK-002" "Research logged"
     assert_contains "$output" "WebFetch: https://example.com/docs" "URL logged"
 }
 
-test_pre_tool_use_websearch() {
-    log_test "PreToolUse with WebSearch tool"
+test_post_tool_use_websearch() {
+    log_test "PostToolUse with WebSearch tool logs the query to the current task"
 
     create_test_tasks_file
 
     local output
-    output=$(echo '{"hook_event_name":"PreToolUse","tool_name":"WebSearch","tool_input":{"query":"test query"}}' | "$HOOK_SCRIPT" 2>&1) || true
+    output=$(echo '{"hook_event_name":"PostToolUse","tool_name":"WebSearch","tool_input":{"query":"test query"},"tool_response":"results"}' | "$HOOK_SCRIPT" 2>&1) || true
 
     assert_contains "$output" "Logged to TASK-002" "Research logged"
     assert_contains "$output" "WebSearch:" "Query logged"
@@ -358,16 +362,14 @@ test_2_action_rule() {
     log_test "2-Action Rule triggers after 2 research operations"
 
     create_test_tasks_file
+    rm -f "$FIXTURES_DIR/.claude/state/task-memory/research-count"
 
-    # Reset counter
-    rm -f /tmp/task-memory-research-count
+    # Two DIFFERENT urls: identical entries are deduped since v3.7.0, but the
+    # research counter increments either way.
+    echo '{"hook_event_name":"PostToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com/1"},"tool_response":"a"}' | "$HOOK_SCRIPT" 2>&1 || true
 
-    # First WebFetch
-    echo '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com/1"}}' | "$HOOK_SCRIPT" 2>&1 || true
-
-    # Second WebFetch - should trigger 2-action rule
     local output
-    output=$(echo '{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com/2"}}' | "$HOOK_SCRIPT" 2>&1) || true
+    output=$(echo '{"hook_event_name":"PostToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com/2"},"tool_response":"b"}' | "$HOOK_SCRIPT" 2>&1) || true
 
     assert_contains "$output" "2-ACTION RULE" "2-Action Rule reminder shown"
 }
@@ -401,31 +403,57 @@ test_post_tool_use_error_logging() {
     assert_contains "$output" "Error logged to TASK-002" "Error logged"
 }
 
+# Stop signals a block with {"decision":"block"} on stdout and exit 0 — the
+# exit-1 protocol and the "INCOMPLETE:" / "TASK COMPLETION CHECK" banners were
+# removed in 3.0. It also needs the session to have actually engaged with the
+# task (v3.3 relevance gate + engagement threshold).
 test_stop_incomplete_tasks() {
-    log_test "Stop event with incomplete subtasks"
+    log_test "Stop event with incomplete subtasks blocks with JSON"
 
     create_test_tasks_file
+    reset_v33_state
+
+    local sid="stop-incomplete-session"
+    for _ in 1 2 3 4; do
+        echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"grep TASK-002 planning/tasks.md"}}' \
+            | "$HOOK_SCRIPT" 2>&1 || true
+    done
 
     local exit_code=0
     local output
-    output=$(echo '{"hook_event_name":"Stop"}' | "$HOOK_SCRIPT" 2>&1) || exit_code=$?
+    output=$(echo '{"hook_event_name":"Stop","session_id":"'"$sid"'"}' | "$HOOK_SCRIPT" 2>&1) || exit_code=$?
 
-    assert_contains "$output" "INCOMPLETE: TASK-002" "Incomplete status shown"
-    assert_contains "$output" "Progress: 1/3" "Progress shown"
-    assert_exit_code "$exit_code" 1 "Exit code is 1 (blocking)"
+    assert_contains "$output" '"decision": "block"' "Stop emits a block decision"
+    assert_contains "$output" "TASK-002 has 2 incomplete subtasks" "Block reason names the task and the remaining count"
+    assert_exit_code "$exit_code" 0 "Exit code is 0 (block is signalled via JSON, not exit status)"
 }
 
-test_session_end_same_as_stop() {
-    log_test "SessionEnd event behaves same as Stop"
+test_session_end_never_blocks() {
+    log_test "SessionEnd flushes state and never blocks"
 
     create_test_tasks_file
+    reset_v33_state
+
+    local sid="session-end-session"
+    echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"grep TASK-002 planning/tasks.md"}}' \
+        | "$HOOK_SCRIPT" 2>&1 || true
 
     local exit_code=0
     local output
-    output=$(echo '{"hook_event_name":"SessionEnd"}' | "$HOOK_SCRIPT" 2>&1) || exit_code=$?
+    output=$(echo '{"hook_event_name":"SessionEnd","session_id":"'"$sid"'"}' | "$HOOK_SCRIPT" 2>&1) || exit_code=$?
 
-    assert_contains "$output" "TASK COMPLETION CHECK" "Completion check shown"
-    assert_exit_code "$exit_code" 1 "Exit code is 1 (blocking)"
+    if echo "$output" | grep -q '"decision"'; then
+        log_fail "SessionEnd must never emit a decision - got: ${output:0:120}"
+    else
+        log_pass "SessionEnd emits no decision"
+    fi
+    assert_exit_code "$exit_code" 0 "Exit code is 0"
+
+    if [ -f "$FIXTURES_DIR/.claude/state/task-memory/session-$sid.txt" ]; then
+        log_fail "SessionEnd left the session stamp behind"
+    else
+        log_pass "SessionEnd removed the session stamp"
+    fi
 }
 
 test_multifile_session_start() {
@@ -624,13 +652,17 @@ EOF
 }
 
 test_prefixed_notes_skeleton() {
-    log_test "TASK-017: SessionStart creates a notes skeleton for a namespaced task id"
+    log_test "TASK-017: a notes skeleton is created for a namespaced task id"
 
     create_prefixed_tasks_file
     reset_v33_state
     rm -f "$FIXTURES_DIR/planning/notes/TASK-GR-678.md"
+    cat > "$FIXTURES_DIR/.task-memory.json" << 'EOF'
+{ "notes_skeleton": "session-start" }
+EOF
 
     echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1 > /dev/null || true
+    rm -f "$FIXTURES_DIR/.task-memory.json"
 
     if [ -f "$FIXTURES_DIR/planning/notes/TASK-GR-678.md" ]; then
         log_pass "notes skeleton created at planning/notes/TASK-GR-678.md"
@@ -656,14 +688,16 @@ test_prefixed_precompact() {
 
     create_prefixed_tasks_file
     rm -f "$FIXTURES_DIR/planning/notes/TASK-GR-678"*.md
+    rm -rf "$FIXTURES_DIR/planning/notes/archive"
 
     local output
     output=$(echo '{"hook_event_name":"PreCompact","trigger":"manual"}' | "$HOOK_SCRIPT" 2>&1) || true
 
     assert_contains "$output" "Pre-compact snapshot:" "Snapshot message shown"
 
+    # v3.7.0: snapshots land under planning/notes/archive/ (precompact_dir).
     local snapshot
-    snapshot=$(ls "$FIXTURES_DIR/planning/notes/TASK-GR-678-precompact-"*.md 2>/dev/null | head -1)
+    snapshot=$(ls "$FIXTURES_DIR/planning/notes/archive/TASK-GR-678-precompact-"*.md 2>/dev/null | head -1)
     if [ -n "$snapshot" ] && [ -f "$snapshot" ]; then
         log_pass "precompact snapshot written with the prefixed id in its filename"
     else
@@ -1074,27 +1108,47 @@ test_sticky_release_after_max_blocks() {
     fi
 }
 
-test_session_start_creates_notes_skeleton() {
-    log_test "v3.3: SessionStart proactively creates notes skeleton for in-progress task"
+test_session_start_no_skeleton_under_on_start() {
+    log_test "v3.7: SessionStart creates NO notes skeleton under the default on-start policy"
 
     create_test_tasks_file
     reset_v33_state
     rm -f "$FIXTURES_DIR/planning/notes/TASK-002.md"
+    rm -f "$FIXTURES_DIR/.task-memory.json"
 
     echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1 > /dev/null || true
 
     if [ -f "$FIXTURES_DIR/planning/notes/TASK-002.md" ]; then
-        log_pass "notes skeleton created on SessionStart"
+        log_fail "SessionStart created a skeleton under notes_skeleton=on-start"
     else
-        log_fail "notes skeleton not created at planning/notes/TASK-002.md"
-        return
+        log_pass "SessionStart created no skeleton under notes_skeleton=on-start"
+    fi
+}
+
+test_session_start_skeleton_under_session_start_policy() {
+    log_test "v3.7: notes_skeleton=session-start restores pre-3.7 SessionStart skeleton creation"
+
+    create_test_tasks_file
+    reset_v33_state
+    rm -f "$FIXTURES_DIR/planning/notes/TASK-002.md"
+    cat > "$FIXTURES_DIR/.task-memory.json" << 'EOF'
+{ "notes_skeleton": "session-start" }
+EOF
+
+    echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1 > /dev/null || true
+
+    if [ -f "$FIXTURES_DIR/planning/notes/TASK-002.md" ]; then
+        log_pass "notes skeleton created on SessionStart under the session-start policy"
+        local content
+        content=$(cat "$FIXTURES_DIR/planning/notes/TASK-002.md")
+        assert_contains "$content" "Patterns Discovered" "Skeleton has Patterns section"
+        assert_contains "$content" "Gotchas" "Skeleton has Gotchas section"
+        assert_contains "$content" "Decisions" "Skeleton has Decisions section"
+    else
+        log_fail "notes skeleton not created under notes_skeleton=session-start"
     fi
 
-    local content
-    content=$(cat "$FIXTURES_DIR/planning/notes/TASK-002.md")
-    assert_contains "$content" "Patterns Discovered" "Skeleton has Patterns section"
-    assert_contains "$content" "Gotchas" "Skeleton has Gotchas section"
-    assert_contains "$content" "Decisions" "Skeleton has Decisions section"
+    rm -f "$FIXTURES_DIR/.task-memory.json"
 }
 
 test_session_start_gcs_stale_state() {
@@ -1203,7 +1257,7 @@ EOF
 }
 
 test_ado_session_start() {
-    log_test "TASK-019: SessionStart shows an ADO work-item id, its own progress, and creates its notes skeleton at the ADO path"
+    log_test "TASK-019: SessionStart shows an ADO work-item id and its own progress"
 
     create_ado_tasks_file
     reset_v33_state
@@ -1216,12 +1270,6 @@ test_ado_session_start() {
     assert_contains "$output" "ADO-12345" "ADO task id shown"
     assert_contains "$output" "ADO task in progress" "Task title shown"
     assert_contains "$output" "1/2" "Progress shown (1 completed, 2 total)"
-
-    if [ -f "$FIXTURES_DIR/planning/notes/ADO-12345.md" ]; then
-        log_pass "notes skeleton created at planning/notes/ADO-12345.md"
-    else
-        log_fail "notes skeleton not created at planning/notes/ADO-12345.md"
-    fi
 }
 
 test_ado_mixed_block_termination() {
@@ -1372,14 +1420,16 @@ test_ado_precompact() {
 
     create_ado_tasks_file
     rm -f "$FIXTURES_DIR/planning/notes/ADO-12345"*.md
+    rm -rf "$FIXTURES_DIR/planning/notes/archive"
 
     local output
     output=$(echo '{"hook_event_name":"PreCompact","trigger":"manual"}' | "$HOOK_SCRIPT" 2>&1) || true
 
     assert_contains "$output" "Pre-compact snapshot:" "Snapshot message shown"
 
+    # v3.7.0: snapshots land under planning/notes/archive/ (precompact_dir).
     local snapshot
-    snapshot=$(ls "$FIXTURES_DIR/planning/notes/ADO-12345-precompact-"*.md 2>/dev/null | head -1)
+    snapshot=$(ls "$FIXTURES_DIR/planning/notes/archive/ADO-12345-precompact-"*.md 2>/dev/null | head -1)
     if [ -n "$snapshot" ] && [ -f "$snapshot" ]; then
         log_pass "precompact snapshot written with the ADO id in its filename"
     else
@@ -1486,13 +1536,17 @@ EOF
 }
 
 test_ado_notes_skeleton() {
-    log_test "TASK-019: SessionStart creates a notes skeleton for an ADO work-item id"
+    log_test "TASK-019: a notes skeleton is created for an ADO work-item id"
 
     create_ado_tasks_file
     reset_v33_state
     rm -f "$FIXTURES_DIR/planning/notes/ADO-12345.md"
+    cat > "$FIXTURES_DIR/.task-memory.json" << 'EOF'
+{ "notes_skeleton": "session-start" }
+EOF
 
     echo '{"hook_event_name":"SessionStart"}' | "$HOOK_SCRIPT" 2>&1 > /dev/null || true
+    rm -f "$FIXTURES_DIR/.task-memory.json"
 
     if [ -f "$FIXTURES_DIR/planning/notes/ADO-12345.md" ]; then
         log_pass "notes skeleton created at planning/notes/ADO-12345.md"
@@ -1592,6 +1646,367 @@ run_js_watcher_tests() {
 }
 
 # =============================================================================
+# v3.7.0: owner resolution, focus-aware selection, dedupe, epics
+# =============================================================================
+
+OWNER_ROOT=""
+
+# A two-developer board behind one glob — the shape that made every pre-3.7
+# session work on the other developer's card.
+create_owner_fixture() {
+    OWNER_ROOT="$FIXTURES_DIR/owner"
+    rm -rf "$OWNER_ROOT"
+    mkdir -p "$OWNER_ROOT/planning"
+
+    cat > "$OWNER_ROOT/.task-memory.json" << 'EOF'
+{
+  "planning_dir": "planning",
+  "task_files_glob": "planning/tasks-*.md",
+  "todowrite_mirror_file": {
+    "GR": "planning/tasks-gr.md",
+    "DG": "planning/tasks-dg.md"
+  }
+}
+EOF
+
+    cat > "$OWNER_ROOT/planning/tasks-gr.md" << 'EOF'
+# Kanban Board
+
+<!-- Config: Task Prefix: GR | Last Task ID: 895 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+
+---
+
+## To Do
+
+---
+
+## In Progress
+
+### TASK-GR-880 | EPIC: Owner-aware hooks
+**Priority**: High | **Status**: 🚀 In Progress
+**Created**: 2026-09-01 | **Started**: 2026-09-01
+
+**Subtasks**:
+- [ ] ship the whole thing
+
+### TASK-GR-890 | Middle card
+**Status**: In Progress | **Epic**: 880
+**Created**: 2026-09-02 | **Started**: 2026-09-02
+
+**Subtasks**:
+- [x] one
+- [ ] two
+
+**Pre-Work Checklist**:
+- [ ] read the files
+
+**Visual Operations Log**:
+
+### TASK-GR-895 | Newest card
+**Status**: in_progress
+**Created**: 2026-09-10 | **Started**: 2026-09-10
+
+**Subtasks**:
+- [ ] alpha
+- [ ] beta
+
+---
+
+## Done
+
+---
+EOF
+
+    cat > "$OWNER_ROOT/planning/tasks-dg.md" << 'EOF'
+# Kanban Board
+
+<!-- Config: Task Prefix: DG | Last Task ID: 775 -->
+
+## ⚙️ Configuration
+
+**Columns**: To Do (todo) | In Progress (in-progress) | Done (done)
+
+---
+
+## In Progress
+
+### TASK-DG-775 | Other developer card
+**Status**: 🚀 In Progress
+**Created**: 2026-08-01 | **Started**: 2026-08-01
+
+**Subtasks**:
+- [ ] not mine
+
+---
+
+## Done
+
+---
+EOF
+}
+
+owner_hook() {
+    # usage: owner_hook '<json payload>'  (env for the call comes from caller)
+    printf '%s' "$1" | CLAUDE_PROJECT_DIR="$OWNER_ROOT" "$HOOK_SCRIPT" 2>&1
+}
+
+pin_focus() {
+    mkdir -p "$OWNER_ROOT/.claude/state/task-memory"
+    printf '%s\n' "$1" > "$OWNER_ROOT/.claude/state/task-memory/focus.txt"
+}
+
+test_owner_from_env() {
+    log_test "v3.7: TASK_MEMORY_OWNER selects whose board this session works on"
+
+    create_owner_fixture
+
+    local output
+    output=$(TASK_MEMORY_OWNER=DG owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-env-dg"}')
+    assert_contains "$output" "owner DG" "Env owner reported in the banner"
+    assert_contains "$output" "focus TASK-DG-775" "Focus lands on DG's own card"
+
+    output=$(TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-env-gr"}')
+    assert_contains "$output" "owner GR" "Env owner switches the scope"
+    if echo "$output" | grep -q "focus TASK-DG-775"; then
+        log_fail "GR's session focused DG's card"
+    else
+        log_pass "GR's session does not focus DG's card"
+    fi
+}
+
+test_owner_from_branch_pattern() {
+    log_test "v3.7: owner_branch_pattern derives the owner from the git branch"
+
+    create_owner_fixture
+    cat > "$OWNER_ROOT/.task-memory.json" << 'EOF'
+{
+  "planning_dir": "planning",
+  "task_files_glob": "planning/tasks-*.md",
+  "owner_branch_pattern": "^v5\\.([a-z]{2})\\d*-dev$"
+}
+EOF
+    git init -q "$OWNER_ROOT" 2>/dev/null || true
+    git -C "$OWNER_ROOT" symbolic-ref HEAD refs/heads/v5.dg1-dev
+
+    local output
+    output=$(owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-branch"}')
+    assert_contains "$output" "owner DG" "Branch v5.dg1-dev resolves owner DG"
+    assert_contains "$output" "focus TASK-DG-775" "Branch owner scopes selection to DG's file"
+
+    git -C "$OWNER_ROOT" symbolic-ref HEAD refs/heads/v5.gr1-dev
+    output=$(owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-branch2"}')
+    assert_contains "$output" "owner GR" "Branch v5.gr1-dev resolves owner GR"
+
+    rm -rf "$OWNER_ROOT/.git"
+}
+
+test_selection_prefers_focus_pin() {
+    log_test "v3.7: a focus pin outranks the most-recently-started task"
+
+    create_owner_fixture
+    pin_focus "TASK-GR-890"
+
+    local output
+    output=$(TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-pin"}')
+    assert_contains "$output" "focus TASK-GR-890 (pinned)" "Pinned task wins and says so"
+}
+
+test_selection_latest_started_excludes_epics() {
+    log_test "v3.7: with no pin, the most recently Started non-epic task wins"
+
+    create_owner_fixture
+
+    local output
+    output=$(TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-latest"}')
+    assert_contains "$output" "focus TASK-GR-895 (latest)" "Newest Started task selected"
+    if echo "$output" | grep -q "focus TASK-GR-880"; then
+        log_fail "epic card was selected as the current task"
+    else
+        log_pass "epic card not selected as the current task"
+    fi
+}
+
+test_selection_scoped_to_my_files() {
+    log_test "v3.7: other developers' in-progress tasks are counted, never selected"
+
+    create_owner_fixture
+
+    local output
+    output=$(TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-scope"}')
+    assert_contains "$output" "Other in-progress (others): 1" "DG's card counted as somebody else's"
+    if echo "$output" | grep -q "TASK-DG-775"; then
+        log_fail "DG's task id leaked into GR's banner"
+    else
+        log_pass "DG's task id does not appear in GR's banner"
+    fi
+}
+
+test_emoji_status_is_in_progress() {
+    log_test "v3.7: '🚀 In Progress' is recognized as in-progress"
+
+    create_owner_fixture
+
+    # DG's only card uses the emoji form; if it were not recognized the banner
+    # would report no task in progress at all.
+    local output
+    output=$(TASK_MEMORY_OWNER=DG owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-emoji"}')
+    assert_contains "$output" "focus TASK-DG-775" "Emoji status parsed as in-progress"
+
+    # And the underscore form on GR's newest card.
+    output=$(TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-emoji2"}')
+    assert_contains "$output" "TASK-GR-895" "in_progress (underscore) parsed as in-progress"
+}
+
+test_prompt_context_creates_no_files() {
+    log_test "v3.7: the UserPromptSubmit path creates nothing on disk"
+
+    create_owner_fixture
+
+    TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-readonly"}' > /dev/null
+
+    if [ -e "$OWNER_ROOT/.claude" ]; then
+        log_fail "UserPromptSubmit created $OWNER_ROOT/.claude"
+    else
+        log_pass "no state directory created"
+    fi
+
+    if [ -e "$OWNER_ROOT/planning/notes" ]; then
+        log_fail "UserPromptSubmit created a notes directory"
+    else
+        log_pass "no notes directory or skeleton created"
+    fi
+}
+
+test_append_log_entry_dedupe() {
+    log_test "v3.7: an identical research entry is not logged twice"
+
+    create_owner_fixture
+    pin_focus "TASK-GR-890"
+
+    local payload='{"hook_event_name":"PostToolUse","tool_name":"WebFetch","session_id":"own-dedupe","tool_input":{"url":"https://example.com/same"},"tool_response":"identical body"}'
+    TASK_MEMORY_OWNER=GR owner_hook "$payload" > /dev/null
+    TASK_MEMORY_OWNER=GR owner_hook "$payload" > /dev/null
+    TASK_MEMORY_OWNER=GR owner_hook "$payload" > /dev/null
+
+    local count
+    count=$(grep -c "WebFetch: https://example.com/same" "$OWNER_ROOT/planning/tasks-gr.md" || true)
+    if [ "$count" = "1" ]; then
+        log_pass "three identical WebFetch ops produced one log entry"
+    else
+        log_fail "expected 1 log entry, found $count"
+    fi
+
+    # A different url still logs.
+    TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"PostToolUse","tool_name":"WebFetch","session_id":"own-dedupe","tool_input":{"url":"https://example.com/other"},"tool_response":"identical body"}' > /dev/null
+    count=$(grep -c "WebFetch: https://example.com/other" "$OWNER_ROOT/planning/tasks-gr.md" || true)
+    if [ "$count" = "1" ]; then
+        log_pass "a distinct entry is still appended"
+    else
+        log_fail "distinct entry not appended (found $count)"
+    fi
+}
+
+test_precompact_dedupe_and_no_unknown() {
+    log_test "v3.7: PreCompact skips identical snapshots and writes nothing without a task"
+
+    create_owner_fixture
+    pin_focus "TASK-GR-895"
+
+    TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"PreCompact","session_id":"own-pc","trigger":"manual"}' > /dev/null
+    local second
+    second=$(TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"PreCompact","session_id":"own-pc","trigger":"manual"}')
+
+    assert_contains "$second" "not writing a duplicate" "Second identical snapshot is skipped"
+
+    local count
+    count=$(ls "$OWNER_ROOT/planning/notes/archive/" 2>/dev/null | grep -c "TASK-GR-895-precompact-" || true)
+    if [ "$count" = "1" ]; then
+        log_pass "exactly one snapshot on disk after two compactions"
+    else
+        log_fail "expected 1 snapshot, found $count"
+    fi
+
+    # No in-progress task anywhere -> no snapshot at all, and no UNKNOWN file.
+    create_owner_fixture
+    sed -i.bak 's/\*\*Status\*\*: .*/**Status**: todo/' "$OWNER_ROOT/planning/tasks-gr.md" "$OWNER_ROOT/planning/tasks-dg.md"
+    rm -f "$OWNER_ROOT/planning/"*.bak
+
+    local output
+    output=$(TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"PreCompact","session_id":"own-pc2","trigger":"manual"}')
+    assert_contains "$output" "nothing to snapshot" "No task means no snapshot"
+
+    if ls "$OWNER_ROOT/planning/notes/"*UNKNOWN* >/dev/null 2>&1 || \
+       ls "$OWNER_ROOT/planning/notes/archive/"*UNKNOWN* >/dev/null 2>&1; then
+        log_fail "an UNKNOWN-precompact file was written"
+    else
+        log_pass "no UNKNOWN-precompact file written"
+    fi
+}
+
+test_epic_skipped_by_stop_gate() {
+    log_test "v3.7: the Stop gate skips an epic but still blocks on a real task"
+
+    create_owner_fixture
+    pin_focus "TASK-GR-880"
+
+    local sid="own-stop-epic"
+    for _ in 1 2 3 4; do
+        TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"grep TASK-GR-880 planning/tasks-gr.md"}}' > /dev/null
+    done
+
+    local output
+    output=$(TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"Stop","session_id":"'"$sid"'"}')
+    if echo "$output" | grep -q '"decision": "block"'; then
+        log_fail "Stop blocked on an epic card"
+    else
+        log_pass "Stop does not block on an epic card"
+    fi
+
+    # Control: the same treatment on a non-epic card does block.
+    create_owner_fixture
+    pin_focus "TASK-GR-895"
+    sid="own-stop-real"
+    for _ in 1 2 3 4; do
+        TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"'"$sid"'","tool_input":{"command":"grep TASK-GR-895 planning/tasks-gr.md"}}' > /dev/null
+    done
+    output=$(TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"Stop","session_id":"'"$sid"'"}')
+    assert_contains "$output" '"decision": "block"' "Stop still blocks on a real in-progress task"
+    assert_contains "$output" "TASK-GR-895" "Block names the real task"
+}
+
+test_per_owner_todowrite_mirror() {
+    log_test "v3.7: todowrite_mirror_file routes each owner's TodoWrite to their own board"
+
+    create_owner_fixture
+
+    local todos='{"hook_event_name":"PostToolUse","tool_name":"TodoWrite","session_id":"own-mirror","tool_input":{"todos":[{"content":"mirror probe item","status":"pending","activeForm":"Probing"}]}}'
+    TASK_MEMORY_OWNER=GR owner_hook "$todos" > /dev/null
+
+    if grep -q "mirror probe item" "$OWNER_ROOT/planning/tasks-gr.md"; then
+        log_pass "GR's TodoWrite mirrored into tasks-gr.md"
+    else
+        log_fail "GR's TodoWrite did not reach tasks-gr.md"
+    fi
+    if grep -q "mirror probe item" "$OWNER_ROOT/planning/tasks-dg.md"; then
+        log_fail "GR's TodoWrite leaked into tasks-dg.md"
+    else
+        log_pass "GR's TodoWrite stayed out of tasks-dg.md"
+    fi
+
+    create_owner_fixture
+    TASK_MEMORY_OWNER=DG owner_hook "$todos" > /dev/null
+    if grep -q "mirror probe item" "$OWNER_ROOT/planning/tasks-dg.md"; then
+        log_pass "DG's TodoWrite mirrored into tasks-dg.md"
+    else
+        log_fail "DG's TodoWrite did not reach tasks-dg.md"
+    fi
+}
+
+# =============================================================================
 # Run Tests
 # =============================================================================
 
@@ -1622,13 +2037,13 @@ test_session_start_with_task
 test_session_start_no_tasks
 test_session_start_no_file
 test_pre_tool_use_write
-test_pre_tool_use_webfetch
-test_pre_tool_use_websearch
+test_post_tool_use_webfetch
+test_post_tool_use_websearch
 test_2_action_rule
 test_post_tool_use_subtask_reminder
 test_post_tool_use_error_logging
 test_stop_incomplete_tasks
-test_session_end_same_as_stop
+test_session_end_never_blocks
 test_checkbox_regex
 test_multifile_session_start
 
@@ -1642,7 +2057,8 @@ test_stamping_stamps_on_task_id_in_bash
 test_engagement_threshold_releases_short_sessions
 test_off_topic_flag_disables_blocking
 test_sticky_release_after_max_blocks
-test_session_start_creates_notes_skeleton
+test_session_start_no_skeleton_under_on_start
+test_session_start_skeleton_under_session_start_policy
 test_session_start_gcs_stale_state
 
 # TASK-017: namespaced (initials-prefixed) task ids
@@ -1666,6 +2082,19 @@ test_ado_malformed_heading_ignored
 test_ado_hyphen_continuation_not_boundary
 test_ado_notes_skeleton
 test_ado_stamping_bash
+
+# v3.7.0: owner resolution, focus-aware selection, dedupe, epics
+test_owner_from_env
+test_owner_from_branch_pattern
+test_selection_prefers_focus_pin
+test_selection_latest_started_excludes_epics
+test_selection_scoped_to_my_files
+test_emoji_status_is_in_progress
+test_prompt_context_creates_no_files
+test_append_log_entry_dedupe
+test_precompact_dedupe_and_no_unknown
+test_epic_skipped_by_stop_gate
+test_per_owner_todowrite_mirror
 
 # JS UI suite (taskId.js / markdown.js / fileSystem.js) — guarded, see below
 run_js_ui_tests

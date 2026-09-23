@@ -18,12 +18,19 @@ As of v3.2.0 the plugin ships in **dual format** — the same artifact installs 
 
 - **Automatic Research Logging** — WebFetch/WebSearch operations logged to your current task
 - **Context Preservation** — Tasks, notes, and errors persist across sessions
-- **Proactive Notes Skeletons** — `planning/notes/TASK-XXX.md` auto-created on SessionStart for every in-progress task, with structural sections (Summary, Patterns, Gotchas, Decisions, Resources, Open Questions)
+- **Proactive Notes Skeletons** — `planning/notes/TASK-XXX.md` auto-created the moment a card is flipped to in-progress, with structural sections (Summary, Patterns, Gotchas, Decisions, Resources, Open Questions). Tunable via `notes_skeleton`
 - **Scoped Session Tracking** — Stop hook only blocks when tool use actually touches the task (tasks.md, notes file, paths in the task block, or task ID in a Task-agent prompt). Off-topic questions don't trap the model in a block loop
 - **Engagement Threshold** — Short sessions (fewer than 3 task-relevant tool uses) never block Stop — prevents "asked one question, can't stop"
 - **Off-topic Escape Hatch** — `touch .claude/state/task-memory/off-topic-<session>.flag` to disable blocking for the rest of the session
 - **Sticky Loop Release** — After 2 consecutive Stop blocks, the hook gives up and won't re-nag for the same session+task
 - **Session-state GC** — Orphaned state files from crashed sessions are swept on SessionStart (configurable via `session_state_max_age_hours`)
+- **Owner-aware boards** — On a shared checkout with per-dev task files, the hook works out whose board this session is on and scopes itself to it (see [Team Mode](#team-mode))
+- **Focus pins** — Which in-progress task is "current" is pinned per session, automatically when you flip a card to in-progress, or by hand with `/task-memory:tm-focus`
+
+> **Add `.claude/state/task-memory/` to your `.gitignore`.** Everything the hook
+> keeps there — session stamps, focus pins, engagement counters, escape-hatch
+> flags — is per-machine scratch state, regenerated as needed and safe to
+> delete at any time.
 - **Kanban Board** — Visual task management in a single HTML file (works offline)
 - **Monorepo Support** — Auto-detects nearest `planning/tasks.md`, or use `task_files_glob` for split kanbans
 
@@ -31,7 +38,20 @@ As of v3.2.0 the plugin ships in **dual format** — the same artifact installs 
 
 ### Team Mode
 
-For teams working on separate branches, use per-dev task files (`planning/tasks-gr.md`, `planning/tasks-dg.md`, etc.) to prevent ID collisions. Each file carries its own `Task Prefix: GR | Last Task ID: 677` header, minting namespaced IDs like `TASK-GR-678`. See [Team mode: Per-dev task files](docs/REFERENCE.md#team-mode-per-dev-task-files) for setup.
+For teams working on separate branches, use per-dev task files (`planning/tasks-gr.md`, `planning/tasks-dg.md`, etc.) to prevent ID collisions. Each file carries its own `Task Prefix: GR | Last Task ID: 677` header, minting namespaced IDs like `TASK-GR-678`.
+
+Since v3.7.0 the hook also resolves **who is driving this checkout** and scopes
+current-task selection, the banners, the Stop gate and the TodoWrite mirror to
+that developer's files — otherwise every session picks up whichever file sorts
+first, which is always the other developer's board. Set an owner from your git
+identity, your branch name, or a gitignored `.task-memory.local.json`:
+
+```json
+{ "task_files_glob": "planning/tasks-*.md",
+  "owner_git_users": { "your-git-username": "GR", "Teammate Name": "DG" } }
+```
+
+See [Team mode: Per-dev task files](docs/REFERENCE.md#team-mode-per-dev-task-files) for the full resolution order and every config key.
 
 **Note:** The `.task-memory.json` config key `task_prefix` is currently unread/reserved and unrelated to per-file `Task Prefix:` headers (dev initials).
 

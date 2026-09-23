@@ -17,9 +17,11 @@ Dependencies: Python 3.11+ stdlib only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import date, datetime, timezone
@@ -38,21 +40,51 @@ PROGRESS_COUNTER = STATE_DIR / "progress-count"
 
 
 def state_path(name: str) -> Path:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    """Path inside STATE_DIR. Read-only — does NOT create the directory.
+
+    v3.7.0: creation moved to the write sites (record_session_task,
+    bump_engagement, mark_released, the stop-block counter, focus pins) so
+    read-only paths — above all the per-prompt banner — have zero filesystem
+    side effects.
+    """
     return STATE_DIR / name
 
 
-def _load_config() -> dict:
-    """Read .task-memory.json from project root (empty dict on any error)."""
-    config_file = PROJECT_DIR / ".task-memory.json"
-    if config_file.is_file():
+def ensure_state_dir() -> bool:
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def _read_json(path: Path) -> dict:
+    """Parse a JSON object from disk (empty dict on any error)."""
+    if path.is_file():
         try:
-            cfg = json.loads(config_file.read_text())
+            cfg = json.loads(path.read_text())
             if isinstance(cfg, dict):
                 return cfg
         except (json.JSONDecodeError, OSError):
             pass
     return {}
+
+
+def _load_config() -> dict:
+    """Read .task-memory.json, shallow-merged under .task-memory.local.json.
+
+    `.task-memory.local.json` (v3.7.0) is an optional, gitignored, machine-local
+    overlay: same schema, keys win over the committed file. Its reason to exist
+    is `owner` — the same checkout is a different developer on a different
+    machine, and that fact does not belong in version control.
+    """
+    base = _read_json(PROJECT_DIR / ".task-memory.json")
+    local = _read_json(PROJECT_DIR / ".task-memory.local.json")
+    if local:
+        merged = dict(base)
+        merged.update(local)
+        return merged
+    return base
 
 
 CONFIG = _load_config()
@@ -86,6 +118,18 @@ PLANNING_DIR = find_planning_dir()
 TASKS_FILE = PLANNING_DIR / "tasks.md"
 NOTES_DIR = PLANNING_DIR / "notes"
 
+
+def _precompact_dir() -> Path:
+    """Where pre-compact snapshots land. Config `precompact_dir`, relative to
+    planning_dir; default notes/archive so timestamped snapshots stop burying
+    the hand-written notes files they sit next to."""
+    raw = str(CONFIG.get("precompact_dir") or "notes/archive").strip()
+    p = Path(raw)
+    return p if p.is_absolute() else (PLANNING_DIR / p)
+
+
+PRECOMPACT_DIR = _precompact_dir()
+
 # Multi-file mode: if task_files_glob is set, discover all matching tasks files
 # relative to PROJECT_DIR. Single-file mode keeps existing behavior.
 TASK_FILES_GLOB: str = (CONFIG.get("task_files_glob") or "").strip()
@@ -108,17 +152,210 @@ def task_files() -> list[Path]:
     return [TASKS_FILE] if TASKS_FILE.is_file() else []
 
 
+
+
+# =============================================================================
+# Owner resolution (v3.7.0)
+# =============================================================================
+# A two-developer repo with `task_files_glob: "docs/planning/*/tasks*.md"` and
+# files tasks-dg.md / tasks-gr.md always resolved "the current task" to the
+# first in-progress card in the alphabetically-first file — i.e. always the
+# OTHER developer's card. Owner resolution scopes every behavioral path to the
+# files that belong to whoever is driving this checkout.
+#
+# Unresolvable owner (the common single-developer case) => None => legacy
+# semantics, unchanged: all files, document order.
+
+OWNER_RE = re.compile(r"^[A-Z]{2,4}$")
+
+_OWNER_SENTINEL = object()
+_OWNER_CACHE: Any = _OWNER_SENTINEL
+
+
+def _git(*args: str) -> str | None:
+    """Run a git command in PROJECT_DIR. None on any failure or timeout."""
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if proc.returncode != 0:
+        return None
+    out = (proc.stdout or "").strip()
+    return out or None
+
+
+def _valid_owner(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    code = value.strip().upper()
+    return code if OWNER_RE.match(code) else None
+
+
+_BRANCH_SENTINEL = object()
+_BRANCH_CACHE: Any = _BRANCH_SENTINEL
+
+
+def current_branch() -> str | None:
+    global _BRANCH_CACHE
+    if _BRANCH_CACHE is _BRANCH_SENTINEL:
+        _BRANCH_CACHE = _git("branch", "--show-current")
+    return _BRANCH_CACHE
+
+
+def resolve_owner() -> str | None:
+    """Who is driving this checkout? A 2-4 uppercase-letter code, or None.
+
+    Resolution order (first valid wins; an invalid value is skipped, not fatal):
+      1. env TASK_MEMORY_OWNER
+      2. `owner` in .task-memory.local.json  (overlaid onto CONFIG at load)
+      3. `owner` in .task-memory.json
+      4. `owner_branch_pattern` — regex with ONE capture group, applied to the
+         current git branch. e.g. "^v5\\.([a-z]{2})\\d*-dev$" on `v5.gr1-dev`
+         yields GR.
+      5. `owner_git_users` — {git user.name or user.email -> owner code},
+         matched case-insensitively and exactly.
+      6. None -> legacy behavior.
+    """
+    global _OWNER_CACHE
+    if _OWNER_CACHE is not _OWNER_SENTINEL:
+        return _OWNER_CACHE
+
+    owner = _valid_owner(os.environ.get("TASK_MEMORY_OWNER"))
+
+    # CONFIG already carries the .task-memory.local.json overlay on top of
+    # .task-memory.json, so one lookup covers precedence steps 2 and 3.
+    if not owner:
+        owner = _valid_owner(CONFIG.get("owner"))
+
+    if not owner:
+        pattern = CONFIG.get("owner_branch_pattern")
+        if isinstance(pattern, str) and pattern.strip():
+            branch = current_branch()
+            if branch:
+                try:
+                    m = re.search(pattern, branch)
+                except re.error:
+                    m = None
+                if m and m.groups():
+                    owner = _valid_owner(m.group(1))
+
+    if not owner:
+        table = CONFIG.get("owner_git_users")
+        if isinstance(table, dict) and table:
+            lookup = {
+                str(k).strip().lower(): v
+                for k, v in table.items()
+                if isinstance(k, str)
+            }
+            for ident in (_git("config", "user.name"), _git("config", "user.email")):
+                if not ident:
+                    continue
+                hit = lookup.get(ident.strip().lower())
+                if hit:
+                    owner = _valid_owner(hit)
+                    if owner:
+                        break
+
+    _OWNER_CACHE = owner
+    return owner
+
+
+_FILE_OWNER_CACHE: dict[str, str | None] = {}
+
+FILE_PREFIX_HEADER_RE = re.compile(r"Task Prefix:\s*([A-Za-z]{2,4})\b")
+FILE_OWNER_NAME_RE = re.compile(r"^tasks?-([A-Za-z]{2,4})\.md$", re.IGNORECASE)
+
+
+def file_owner(path: Path) -> str | None:
+    """Owner code for a task file: its `Task Prefix:` header, else its filename.
+
+    `<!-- Config: Task Prefix: GR | Last Task ID: 894 -->` -> "GR".
+    `tasks-gr.md` -> "GR". Neither -> None (file belongs to nobody in
+    particular and is therefore visible to everybody).
+    """
+    key = str(path)
+    if key in _FILE_OWNER_CACHE:
+        return _FILE_OWNER_CACHE[key]
+
+    owner: str | None = None
+    try:
+        head = path.read_text()[:4096]
+    except OSError:
+        head = ""
+    m = FILE_PREFIX_HEADER_RE.search(head)
+    if m:
+        owner = _valid_owner(m.group(1))
+    if not owner:
+        nm = FILE_OWNER_NAME_RE.match(path.name)
+        if nm:
+            owner = _valid_owner(nm.group(1))
+
+    _FILE_OWNER_CACHE[key] = owner
+    return owner
+
+
+def my_task_files() -> list[Path]:
+    """Task files belonging to the resolved owner.
+
+    Falls back to every task file when the owner is unresolvable, or when the
+    owner resolves but owns none of the discovered files — never returning an
+    empty list for a reason the user can't see.
+    """
+    files = task_files()
+    owner = resolve_owner()
+    if not owner or not files:
+        return files
+    mine = [f for f in files if file_owner(f) == owner]
+    return mine or files
+
+
+def owner_scope_note() -> str | None:
+    """One-line warning when the owner resolved but owns none of the files."""
+    owner = resolve_owner()
+    if not owner:
+        return None
+    files = task_files()
+    if not files:
+        return None
+    if any(file_owner(f) == owner for f in files):
+        return None
+    return (
+        f"owner {owner} resolved but no task file declares it "
+        f"(`Task Prefix: {owner}` header or tasks-{owner.lower()}.md) — "
+        f"falling back to all {len(files)} file(s)."
+    )
+
+
 def primary_task_file() -> Path:
     """The write target for TodoWrite mirror and other single-file operations.
 
-    Config can override with `todowrite_mirror_file` (relative to PROJECT_DIR).
-    Otherwise: first task file in multi-file mode, or TASKS_FILE default.
+    `todowrite_mirror_file` accepts either form:
+      "planning/tasks.md"                    (legacy, applies to everyone)
+      {"GR": "docs/planning/tasks-gr.md",    (v3.7.0, per owner)
+       "DG": "docs/planning/tasks-dg.md"}
+
+    With no override, the target is the first of the owner's own task files —
+    so a shared checkout never mirrors one developer's TodoWrite into another
+    developer's board.
     """
-    override = (CONFIG.get("todowrite_mirror_file") or "").strip()
-    if override:
-        p = Path(override)
+    override = CONFIG.get("todowrite_mirror_file")
+    raw = ""
+    if isinstance(override, dict):
+        owner = resolve_owner()
+        if owner:
+            raw = str(override.get(owner) or "").strip()
+    elif isinstance(override, str):
+        raw = override.strip()
+    if raw:
+        p = Path(raw)
         return p if p.is_absolute() else (PROJECT_DIR / p)
-    files = task_files()
+    files = my_task_files()
     if files:
         return files[0]
     return TASKS_FILE
@@ -142,11 +379,53 @@ def session_task_file(session_id: str) -> Path:
 def record_session_task(session_id: str, task_id: str) -> None:
     if not (session_id and task_id):
         return
+    if not ensure_state_dir():
+        return
     f = session_task_file(session_id)
     existing = f.read_text().splitlines() if f.exists() else []
     if task_id not in existing:
         with f.open("a") as fh:
             fh.write(task_id + "\n")
+
+
+# -----------------------------------------------------------------------------
+# Focus pin (v3.7.0): the explicit answer to "which task am I on?".
+# `focus-<session>.txt` is per-session; `focus.txt` is a checkout-wide fallback
+# for callers (skills) that cannot see a session id — note that it is SHARED by
+# every concurrent session on this checkout.
+# -----------------------------------------------------------------------------
+
+def focus_pin_paths(session_id: str | None) -> list[Path]:
+    paths = []
+    if session_id:
+        paths.append(state_path(f"focus-{session_id}.txt"))
+    paths.append(state_path("focus.txt"))
+    return paths
+
+
+def read_focus_pin(session_id: str | None) -> str | None:
+    for path in focus_pin_paths(session_id):
+        try:
+            if not path.is_file():
+                continue
+            for line in path.read_text().splitlines():
+                tid = line.strip()
+                if tid:
+                    return tid
+        except OSError:
+            continue
+    return None
+
+
+def set_focus_pin(session_id: str | None, task_id: str) -> bool:
+    if not task_id or not ensure_state_dir():
+        return False
+    name = f"focus-{session_id}.txt" if session_id else "focus.txt"
+    try:
+        state_path(name).write_text(task_id + "\n")
+        return True
+    except OSError:
+        return False
 
 
 def was_task_worked_on(session_id: str, task_id: str) -> bool:
@@ -299,6 +578,8 @@ def engagement_counter_path(session_id: str, task_id: str) -> Path:
 def bump_engagement(session_id: str, task_id: str) -> int:
     if not (session_id and task_id):
         return 0
+    if not ensure_state_dir():
+        return 0
     f = engagement_counter_path(session_id, task_id)
     n = 0
     if f.exists():
@@ -343,6 +624,8 @@ def is_released(session_id: str, task_id: str) -> bool:
 
 def mark_released(session_id: str, task_id: str) -> None:
     if not (session_id and task_id):
+        return
+    if not ensure_state_dir():
         return
     try:
         released_flag_path(session_id, task_id).write_text(
@@ -504,6 +787,67 @@ def derive_column_id(name: str) -> str:
     return s or "column"
 
 
+# One status vocabulary for the whole hook. Boards in the wild write
+# `**Status**: 🚀 In Progress`, `📝 To Do`, `Not Started`, `✅ Done`, and
+# `done — evidence in notes/…`. Before v3.7.0 the in-progress and awaiting
+# scanners matched `([a-z-]+)` and compared with `==`, so every one of those
+# boards was invisible to the hook.
+_STATUS_SYNONYMS: dict[str, str] = {
+    "to do": "todo",
+    "todo": "todo",
+    "not started": "todo",
+    "backlog": "todo",
+    "in progress": "in-progress",
+    "doing": "in-progress",
+    "wip": "in-progress",
+    "in review": "in-review",
+    "review": "in-review",
+    "done": "done",
+    "complete": "done",
+    "completed": "done",
+    "closed": "done",
+    "blocked": "blocked",
+    "awaiting": "awaiting",
+    "parked": "awaiting",
+    "waiting": "awaiting",
+}
+
+# Longest phrases first so "in review" wins over "review" and "not started"
+# over "started".
+_STATUS_KEYS = sorted(_STATUS_SYNONYMS, key=len, reverse=True)
+
+# `**Status**: <value>` — captures the whole value up to a `|` column break or
+# end of line, so emoji and trailing prose both survive to canonical_status().
+STATUS_FIELD_RE = re.compile(r"\*\*Status\*\*:\s*([^\n|]+)")
+
+
+def canonical_status(raw: str | None) -> str:
+    """Map any written status to the canonical vocabulary.
+
+    "🚀 In Progress" / "in_progress" / "WIP"        -> "in-progress"
+    "📝 To Do" / "Not Started" / "backlog"          -> "todo"
+    "✅ Done" / "done — evidence in notes/x.md"     -> "done"
+    Anything unrecognized comes back cleaned and hyphenated, unchanged in
+    meaning, so custom columns keep working.
+    """
+    if not raw:
+        return ""
+    cleaned = re.sub(r"[^0-9A-Za-z]+", " ", _strip_emoji(str(raw))).strip().lower()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned:
+        return ""
+    for key in _STATUS_KEYS:
+        if cleaned == key or cleaned.startswith(key + " "):
+            return _STATUS_SYNONYMS[key]
+    return cleaned.replace(" ", "-")
+
+
+def status_of(block: str) -> str:
+    """Canonical status of a task block ("" when the field is absent)."""
+    m = STATUS_FIELD_RE.search(block)
+    return canonical_status(m.group(1)) if m else ""
+
+
 def normalize_status(value: str | None, valid_ids: set[str] | None = None) -> str:
     """Normalize a Status field value to a canonical column ID.
 
@@ -516,14 +860,25 @@ def normalize_status(value: str | None, valid_ids: set[str] | None = None) -> st
     """
     if not value:
         return ""
-    v = derive_column_id(value.strip().lower().replace("_", "-"))
-    if not valid_ids or v in valid_ids:
-        return v
-    stripped = v.replace("-", "")
-    for cid in valid_ids:
-        if cid.replace("-", "") == stripped:
-            return cid
-    return v
+    # Literal column id first: a board with its own `## Backlog` column and
+    # `**Status**: backlog` must keep landing in Backlog, not in To Do.
+    literal = derive_column_id(value.strip().lower().replace("_", "-"))
+    if valid_ids and literal in valid_ids:
+        return literal
+
+    canon = canonical_status(value)
+    if not valid_ids:
+        return canon or literal
+    if canon in valid_ids:
+        return canon
+    for candidate in (canon, literal):
+        stripped = candidate.replace("-", "")
+        if not stripped:
+            continue
+        for cid in valid_ids:
+            if cid.replace("-", "") == stripped:
+                return cid
+    return canon or literal
 
 
 def parse_configured_columns(content: str) -> list[tuple[str, str]]:
@@ -636,7 +991,7 @@ def reorganize_tasks_file(path: Path | None = None) -> bool:
     for src_idx, src_section in column_sections:
         # Iterate snapshot — assigned[src_idx] mutates as we move tasks out
         for blk in list(assigned[src_idx]):
-            status_m = re.search(r"\*\*Status\*\*:\s*([\w-]+)", blk)
+            status_m = STATUS_FIELD_RE.search(blk)
             target_id = normalize_status(
                 status_m.group(1) if status_m else None,
                 column_id_set,
@@ -669,6 +1024,158 @@ def reorganize_tasks_file(path: Path | None = None) -> bool:
     return True
 
 
+# -----------------------------------------------------------------------------
+# Task-block anatomy: sections, subtasks, dates, epics (v3.7.0)
+# -----------------------------------------------------------------------------
+
+# A line opening a named field/section: `**Subtasks**:`, `**Notes**:`,
+# `**Priority**: High | **Status**: todo`.
+SECTION_MARKER_RE = re.compile(r"^\s*\*\*([^*\n]+)\*\*:")
+CHECKBOX_RE = re.compile(r"^\s*- \[([ xX])\]")
+
+
+def _block_sections(block: str) -> list[tuple[str, list[str]]]:
+    """Split a task block into (section_name, lines) runs.
+
+    Text before the first `**Field**:` marker is section "" (the heading and
+    free-form description).
+    """
+    sections: list[tuple[str, list[str]]] = [("", [])]
+    for line in block.splitlines():
+        m = SECTION_MARKER_RE.match(line)
+        if m:
+            sections.append((m.group(1).strip().lower(), [line]))
+        else:
+            sections[-1][1].append(line)
+    return sections
+
+
+def subtask_lines(block: str) -> list[str]:
+    """The lines that may hold real subtasks.
+
+    Only the `**Subtasks**:` section counts. Before v3.7.0 every `- [ ]` in the
+    block counted, so a Pre-Work Checklist inflated the denominator and the
+    Stop gate nagged about "incomplete subtasks" that were process checkboxes.
+    When a block has no `**Subtasks**:` section at all, fall back to the whole
+    block minus the Pre-Work Checklist.
+    """
+    sections = _block_sections(block)
+    chosen: list[str] = []
+    for name, lines in sections:
+        if name == "subtasks":
+            chosen.extend(lines)
+    if chosen:
+        return chosen
+    for name, lines in sections:
+        if name == "pre-work checklist":
+            continue
+        chosen.extend(lines)
+    return chosen
+
+
+def count_subtasks(block: str) -> tuple[int, int]:
+    """(completed, total) checkboxes that actually represent subtasks."""
+    completed = total = 0
+    for line in subtask_lines(block):
+        m = CHECKBOX_RE.match(line)
+        if not m:
+            continue
+        total += 1
+        if m.group(1).lower() == "x":
+            completed += 1
+    return completed, total
+
+
+STARTED_FIELD_RE = re.compile(r"\*\*Started\*\*:\s*(\d{4}-\d{2}-\d{2})")
+
+
+def _extract_started(block: str) -> str:
+    m = STARTED_FIELD_RE.search(block)
+    return m.group(1) if m else ""
+
+
+def days_since(iso_date: str) -> int | None:
+    if not iso_date:
+        return None
+    try:
+        started = date.fromisoformat(iso_date)
+    except ValueError:
+        return None
+    return (date.today() - started).days
+
+
+# Epics: a container card whose children carry `**Epic**: <id>`. The reference
+# may be written `TASK-DG-772`, `DG-772`, or bare `772` (same prefix as the
+# child's own id).
+EPIC_FIELD_RE = re.compile(r"\*\*Epic\*\*:\s*([A-Za-z0-9_-]+)")
+_ID_PREFIX_RE = re.compile(r"^TASK-([A-Z]{2,4})-[0-9]+$")
+_SHORT_REF_RE = re.compile(r"^[A-Z]{2,4}-[0-9]+$")
+
+
+def _id_prefix(task_id: str) -> str | None:
+    m = _ID_PREFIX_RE.match(task_id or "")
+    return m.group(1) if m else None
+
+
+def extract_epic_ref(block: str, task_id: str = "") -> str | None:
+    """Full task id this block declares as its parent epic, or None."""
+    m = EPIC_FIELD_RE.search(block)
+    if not m:
+        return None
+    raw = m.group(1).strip().upper()
+    if not raw:
+        return None
+    if raw.startswith("TASK-") or raw.startswith("ADO-"):
+        return raw
+    if _SHORT_REF_RE.match(raw):
+        return "TASK-" + raw
+    if raw.isdigit():
+        prefix = _id_prefix(task_id)
+        return f"TASK-{prefix}-{raw}" if prefix else f"TASK-{raw}"
+    return None
+
+
+_EPIC_REFS_SENTINEL = object()
+_EPIC_REFS_CACHE: Any = _EPIC_REFS_SENTINEL
+
+
+def epic_referenced_ids() -> set[str]:
+    """Every id named as `**Epic**:` by some card, across all task files."""
+    global _EPIC_REFS_CACHE
+    if _EPIC_REFS_CACHE is not _EPIC_REFS_SENTINEL:
+        return _EPIC_REFS_CACHE
+    refs: set[str] = set()
+    for f in task_files():
+        content = read_tasks(f)
+        if not content:
+            continue
+        for tid, _heading, block in _iter_task_blocks(content):
+            ref = extract_epic_ref(block, tid)
+            if ref and ref != tid:
+                refs.add(ref)
+    _EPIC_REFS_CACHE = refs
+    return refs
+
+
+def _title_of_block(block: str) -> str:
+    first = block.splitlines()[0] if block else ""
+    return first.split("|", 1)[1].strip() if "|" in first else ""
+
+
+def is_epic(block: str, task_id: str = "") -> bool:
+    """True when this card is a container, not a work item.
+
+    Either its title starts with EPIC, or some other card names it as its
+    parent epic.
+    """
+    if re.match(r"\s*EPIC\b", _title_of_block(block), re.IGNORECASE):
+        return True
+    if not task_id:
+        m = TASK_HEADING_RE.search(block)
+        task_id = m.group(1) if m else ""
+    return bool(task_id) and task_id in epic_referenced_ids()
+
+
 def _extract_silence_deadline(block: str) -> str | None:
     """Pull the silence-deadline date out of an Outcome Branches block.
 
@@ -692,8 +1199,7 @@ def _extract_awaiting_overdue(content: str, source: Path) -> list[dict[str, Any]
     today = date.today().isoformat()
     out = []
     for task_id, heading, block in _iter_task_blocks(content):
-        m = re.search(r"\*\*Status\*\*:\s*([a-z-]+)", block)
-        if not m or m.group(1) != "awaiting":
+        if status_of(block) != "awaiting":
             continue
         deadline = _extract_silence_deadline(block)
         if not deadline or deadline > today:
@@ -719,16 +1225,32 @@ def get_awaiting_overdue() -> list[dict[str, Any]]:
     return out
 
 
+# An in-progress card nobody has touched in three weeks is not in progress.
+STALE_IN_PROGRESS_DAYS = int(CONFIG.get("stale_in_progress_days") or 21)
+
+STALE_HINT = "move it to awaiting/todo, or split it into something finishable"
+
+
+def stale_in_progress(tasks: list[dict[str, Any]]) -> list[tuple[dict[str, Any], int]]:
+    """(task, age_in_days) for in-progress tasks Started longer ago than the
+    configured threshold. Tasks with no Started date are not judged."""
+    out = []
+    for t in tasks:
+        age = days_since(t.get("started", ""))
+        if age is not None and age > STALE_IN_PROGRESS_DAYS:
+            out.append((t, age))
+    out.sort(key=lambda pair: pair[1], reverse=True)
+    return out
+
+
 def _extract_in_progress(content: str, source: Path) -> list[dict[str, Any]]:
     """Return all in-progress tasks in a content blob, annotated with source path."""
     out = []
     for task_id, heading, block in _iter_task_blocks(content):
-        m = re.search(r"\*\*Status\*\*:\s*([a-z-]+)", block)
-        if not m or m.group(1) != "in-progress":
+        if status_of(block) != "in-progress":
             continue
         title = heading.split("|", 1)[1].strip() if "|" in heading else ""
-        completed = len(re.findall(r"- \[x\]", block, re.IGNORECASE))
-        total = len(re.findall(r"- \[[x ]\]", block, re.IGNORECASE))
+        completed, total = count_subtasks(block)
         out.append({
             "task_id": task_id,
             "title": title,
@@ -737,35 +1259,89 @@ def _extract_in_progress(content: str, source: Path) -> list[dict[str, Any]]:
             "block": block,
             "source": source,
             "label": _label_for(source),
+            "started": _extract_started(block),
+            "epic": extract_epic_ref(block, task_id),
+            "is_epic": is_epic(block, task_id),
         })
     return out
 
 
-def get_current_task() -> dict[str, Any] | None:
-    """Return the first in-progress task across all task files, or None."""
-    for f in task_files():
-        content = read_tasks(f)
-        if not content:
-            continue
-        found = _extract_in_progress(content, f)
-        if found:
-            return found[0]
-    return None
+def get_all_in_progress_tasks(scope: str = "mine") -> list[dict[str, Any]]:
+    """Every in-progress task, in document order.
 
-
-def get_all_in_progress_tasks() -> list[dict[str, Any]]:
-    """Return every in-progress task across all task files."""
-    out = []
-    for f in task_files():
+    scope="mine" (default) restricts to the owner's task files; scope="all"
+    spans every discovered file. With no resolvable owner the two are the same.
+    """
+    files = task_files() if scope == "all" else my_task_files()
+    out: list[dict[str, Any]] = []
+    for f in files:
         content = read_tasks(f)
         if content:
             out.extend(_extract_in_progress(content, f))
+    for i, t in enumerate(out):
+        t["index"] = i
     return out
+
+
+def _selected(task: dict[str, Any], how: str) -> dict[str, Any]:
+    task["selection"] = how
+    return task
+
+
+def get_current_task(session_id: str | None = None) -> dict[str, Any] | None:
+    """The one task this session is driving, or None.
+
+    Resolution order, all of it scoped to the owner's own task files:
+      1. an explicit focus pin, if that task is still in-progress
+      2. the session stamp (a task this session has already worked on)
+      3. an in-progress task whose id appears in the current branch name
+      4. the most recently **Started** in-progress task
+      5. first in-progress in document order (legacy)
+
+    Epic cards drop out of steps 3-5 whenever a real work item is available —
+    an epic is a container, not something you sit down and do.
+    """
+    tasks = get_all_in_progress_tasks("mine")
+    if not tasks:
+        return None
+    by_id = {t["task_id"]: t for t in tasks}
+
+    pinned = read_focus_pin(session_id)
+    if pinned and pinned in by_id:
+        return _selected(by_id[pinned], "pinned")
+
+    if session_id:
+        f = session_task_file(session_id)
+        try:
+            stamped = f.read_text().splitlines() if f.is_file() else []
+        except OSError:
+            stamped = []
+        for tid in reversed(stamped):
+            tid = tid.strip()
+            if tid in by_id:
+                return _selected(by_id[tid], "stamped")
+
+    candidates = [t for t in tasks if not t.get("is_epic")] or tasks
+
+    branch = current_branch()
+    if branch:
+        for t in candidates:
+            if t["task_id"] in branch:
+                return _selected(t, "branch")
+
+    dated = [t for t in candidates if t.get("started")]
+    if dated:
+        # Stable two-pass: document order, then newest Started wins.
+        dated.sort(key=lambda t: t["index"])
+        dated.sort(key=lambda t: t["started"], reverse=True)
+        return _selected(dated[0], "latest")
+
+    return _selected(candidates[0], "first")
 
 
 def get_incomplete_subtasks(block: str, limit: int = 5) -> list[str]:
     out = []
-    for line in block.splitlines():
+    for line in subtask_lines(block):
         m = re.match(r"\s*- \[ \]\s*(.+)", line)
         if m:
             out.append(m.group(1))
@@ -819,10 +1395,40 @@ def ensure_tasks_structure() -> None:
         print(f"Created {archive}", file=sys.stderr)
 
 
+# `- 2026-07-19 10:00:00 - WebSearch: "x" => …` -> `WebSearch: "x" => …`
+_LOG_TS_RE = re.compile(
+    r"^\s*-\s*\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\s*-\s*"
+)
+
+
+def _log_entry_body(line: str) -> str:
+    return _LOG_TS_RE.sub("", line).strip()
+
+
+def _section_entry_bodies(block: str, section: str) -> set[str]:
+    """Timestamp-stripped bodies of the entries already in a log section."""
+    m = re.search(rf"\*\*{re.escape(section)}\*\*:[^\n]*\n", block)
+    if not m:
+        return set()
+    bodies = set()
+    for line in block[m.end():].splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if SECTION_MARKER_RE.match(line):
+            break
+        if not stripped.startswith("- "):
+            break
+        bodies.add(_log_entry_body(line))
+    return bodies
+
+
 def append_log_entry(task_id: str, log_line: str, section: str = "Visual Operations Log") -> bool:
     """Append a log line to a named section inside a task block.
 
-    Searches all task files, writes to whichever file owns the task.
+    Searches all task files, writes to whichever file owns the task. Returns
+    False when the same entry (ignoring its timestamp) is already there — one
+    repeated WebSearch had landed 21 times across a real board's notes.
     """
     for f in task_files():
         content = read_tasks(f)
@@ -833,6 +1439,9 @@ def append_log_entry(task_id: str, log_line: str, section: str = "Visual Operati
         for tid, heading, block in _iter_task_blocks(content):
             if tid != task_id:
                 continue
+
+            if _log_entry_body(log_line) in _section_entry_bodies(block, section):
+                return False
 
             section_marker = f"**{section}**:"
             if section_marker in block:
@@ -894,6 +1503,109 @@ def _count_research_ops(block: str) -> int:
     return len(re.findall(r"- \d{4}-\d{2}-\d{2}.*(?:WebFetch|WebSearch)", block))
 
 
+def _group_by_epic(
+    tasks: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Split tasks into (epics, {epic_id: children}, everything else)."""
+    present = {t["task_id"] for t in tasks}
+    epics = [t for t in tasks if t.get("is_epic")]
+    children: dict[str, list[dict[str, Any]]] = {}
+    loose: list[dict[str, Any]] = []
+    for t in tasks:
+        if t.get("is_epic"):
+            continue
+        parent = t.get("epic")
+        if parent and parent in present:
+            children.setdefault(parent, []).append(t)
+        else:
+            loose.append(t)
+    return epics, children, loose
+
+
+def _task_line(t: dict[str, Any], width: int = 60, bullet: str = "•") -> str:
+    title = (t.get("title") or "")[:width]
+    progress = f" [{t['completed']}/{t['total']}]" if t.get("total") else ""
+    label = f" ({t['label']})" if t.get("label") else ""
+    return f"{bullet} {t['task_id']} | {title}{progress}{label}"
+
+
+def _render_group(tasks: list[dict[str, Any]], out: list[str], width: int = 60) -> None:
+    """Render a set of tasks with children nested under their epic."""
+    epics, children, loose = _group_by_epic(tasks)
+    for e in epics:
+        out.append("  " + _task_line(e, width))
+        for c in children.get(e["task_id"], []):
+            out.append("    ↳ " + _task_line(c, width, bullet="").lstrip())
+    for t in loose:
+        out.append("  " + _task_line(t, width))
+
+
+def _warning_lines(mine: list[dict[str, Any]]) -> list[str]:
+    """Stale-in-progress and overdue-awaiting warnings, one line per task."""
+    out: list[str] = []
+    for t, age in stale_in_progress(mine):
+        out.append(f"⏳ {t['task_id']} stale {age} days — {STALE_HINT}")
+    for t in get_awaiting_overdue():
+        out.append(
+            f"🔔 {t['task_id']} awaiting past deadline {t['deadline']} — "
+            f"run its Outcome Branches silence path or extend the date"
+        )
+    return out
+
+
+def handle_prompt_context(session_id: str) -> None:
+    """UserPromptSubmit banner. Read-only, cheap, and capped.
+
+    v3.7.0: skill-eval.sh used to synthesize a fake SessionStart on EVERY user
+    prompt, which meant a full GC pass plus a notes skeleton per in-progress
+    task per prompt. This path creates nothing, deletes nothing, and never
+    touches the filesystem beyond reading task files and the focus pin.
+    """
+    owner = resolve_owner()
+    mine = get_all_in_progress_tasks("mine")
+    lines: list[str] = []
+
+    task = get_current_task(session_id)
+    header = "TASK-MEMORY"
+    if owner:
+        header += f" | owner {owner}"
+    if task:
+        header += f" | focus {task['task_id']} ({task.get('selection', 'first')})"
+    else:
+        header += " | no task in progress"
+    lines.append(header)
+
+    note = owner_scope_note()
+    if note:
+        lines.append(f"  ⚠️  {note}")
+
+    if task:
+        progress = f"  [{task['completed']}/{task['total']}]" if task["total"] else ""
+        lines.append(f"  {task['title']}{progress}")
+        for sub in get_incomplete_subtasks(task["block"], limit=5):
+            lines.append(f"    - [ ] {sub}")
+
+    rest = [t for t in mine if not task or t["task_id"] != task["task_id"]]
+    if rest:
+        lines.append(f"Other in-progress (mine): {len(rest)}")
+        for t in rest:
+            lines.append(f"  • {t['task_id']} | {(t.get('title') or '')[:50]}")
+
+    if owner:
+        every = get_all_in_progress_tasks("all")
+        mine_ids = {t["task_id"] for t in mine}
+        others = [t for t in every if t["task_id"] not in mine_ids]
+        if others:
+            lines.append(f"Other in-progress (others): {len(others)}")
+
+    lines.extend(_warning_lines(mine))
+
+    if len(lines) > 40:
+        lines = lines[:39] + [f"… {len(lines) - 39} more line(s) suppressed"]
+    for line in lines:
+        print(line, file=sys.stderr)
+
+
 def handle_session_start() -> None:
     # v3.3.0: sweep orphaned session state from crashed/forced-exit sessions
     # before rendering the banner. SessionEnd doesn't always fire.
@@ -932,7 +1644,27 @@ def handle_session_start() -> None:
         print("=" * 60 + "\n", file=sys.stderr)
         return
 
-    all_tasks = get_all_in_progress_tasks()
+    owner = resolve_owner()
+    if owner:
+        print(f"\nOwner: {owner} (task files scoped to this developer)", file=sys.stderr)
+        note = owner_scope_note()
+        if note:
+            print(f"⚠️  {note}", file=sys.stderr)
+
+    all_tasks = get_all_in_progress_tasks("mine")
+    everyones = get_all_in_progress_tasks("all")
+    mine_ids = {t["task_id"] for t in all_tasks}
+    others = [t for t in everyones if t["task_id"] not in mine_ids]
+
+    stale = stale_in_progress(all_tasks)
+    if stale:
+        print(f"\n⏳ STALE — {len(stale)} in-progress task(s) older than "
+              f"{STALE_IN_PROGRESS_DAYS} days:", file=sys.stderr)
+        for t, age in stale:
+            print(f"  • {t['task_id']} | {t['title'][:60]}  started {t['started']} "
+                  f"({age} days)", file=sys.stderr)
+        print(f"  → {STALE_HINT}.", file=sys.stderr)
+
     overdue = get_awaiting_overdue()
     if overdue:
         print(
@@ -959,7 +1691,7 @@ def handle_session_start() -> None:
     # filled in, and the PreCompact snapshot has a target to append to.
     for t in all_tasks:
         try:
-            _create_notes_skeleton(t["task_id"], t["title"])
+            _create_notes_skeleton(t["task_id"], t["title"], trigger="session-start")
         except Exception as e:
             print(f"[task-memory] skeleton warning ({t['task_id']}): {e}", file=sys.stderr)
 
@@ -974,14 +1706,19 @@ def handle_session_start() -> None:
             print("=" * 60 + "\n", file=sys.stderr)
             return
 
-        print(f"\n📋 In-progress ({len(all_tasks)}):", file=sys.stderr)
-        for t in all_tasks:
-            title = t["title"][:60]
-            suffix = f" ({t['label']})" if t["label"] else ""
-            progress = ""
-            if t["total"] > 0:
-                progress = f" [{t['completed']}/{t['total']}]"
-            print(f"  • {t['task_id']} | {title}…{progress}{suffix}", file=sys.stderr)
+        heading = "📋 In-progress (mine)" if owner else "📋 In-progress"
+        print(f"\n{heading} ({len(all_tasks)}):", file=sys.stderr)
+        group: list[str] = []
+        _render_group(all_tasks, group)
+        for line in group:
+            print(line, file=sys.stderr)
+
+        if others:
+            print(f"\n👥 In-progress (others) ({len(others)}):", file=sys.stderr)
+            group = []
+            _render_group(others, group)
+            for line in group:
+                print(line, file=sys.stderr)
 
         # Show notes status for each task
         for t in all_tasks:
@@ -1079,7 +1816,7 @@ def handle_pre_tool_use(tool_name: str, tool_input: dict, session_id: str) -> in
                 return 2
 
     if tool_name in ("Write", "Edit", "Bash", "Task"):
-        task = get_current_task()
+        task = get_current_task(session_id)
         if not task:
             return None
 
@@ -1119,13 +1856,38 @@ def handle_pre_tool_use(tool_name: str, tool_input: dict, session_id: str) -> in
         print("-" * 60 + "\n", file=sys.stderr)
 
 
-def _create_notes_skeleton(task_id: str, task_title: str) -> bool:
+# When notes skeletons get created. v3.3-3.6 created one for EVERY in-progress
+# task at SessionStart — and because skill-eval.sh synthesized a SessionStart
+# on every single user prompt, skeletons regrew endlessly (one real repo ended
+# up with 170 of 283 notes files as untouched skeletons).
+#   "on-start"      (default) only when a card is flipped to in-progress, or
+#                   when PreCompact / the 2-op research rule needs a target
+#   "session-start" pre-3.7 behavior: one per in-progress task at SessionStart
+#   "never"         never auto-create
+_NOTES_SKELETON_MODES = ("on-start", "session-start", "never")
+NOTES_SKELETON_MODE = str(CONFIG.get("notes_skeleton") or "on-start").strip().lower()
+if NOTES_SKELETON_MODE not in _NOTES_SKELETON_MODES:
+    NOTES_SKELETON_MODE = "on-start"
+
+
+def _skeleton_allowed(trigger: str) -> bool:
+    if NOTES_SKELETON_MODE == "never":
+        return False
+    if trigger == "session-start":
+        return NOTES_SKELETON_MODE == "session-start"
+    return True
+
+
+def _create_notes_skeleton(task_id: str, task_title: str, trigger: str = "on-demand") -> bool:
     """Create a skeleton notes file with required sections.
 
-    Returns True if created, False if it already exists or couldn't be written.
-    Structural enforcement: by pre-creating sections, Claude only has to fill
-    them in rather than remember to build the structure from scratch.
+    Returns True if created, False if it already exists, the `notes_skeleton`
+    policy forbids this trigger, or it couldn't be written. Structural
+    enforcement: by pre-creating sections, Claude only has to fill them in
+    rather than remember to build the structure from scratch.
     """
+    if not _skeleton_allowed(trigger):
+        return False
     notes_path = NOTES_DIR / f"{task_id}.md"
     if notes_path.is_file():
         return False
@@ -1180,12 +1942,70 @@ _Things to verify, confirm, or ask about before finalizing._
         return False
 
 
+def _mentions_in_progress(text: str) -> bool:
+    """True when the text carries a `**Status**:` line meaning in-progress."""
+    for m in STATUS_FIELD_RE.finditer(text or ""):
+        if canonical_status(m.group(1)) == "in-progress":
+            return True
+    return False
+
+
+def _maybe_auto_focus(target: Path, tool_input: dict, session_id: str) -> str | None:
+    """Pin the session's focus to a card that was just flipped to in-progress.
+
+    This is the moment intent is unambiguous: the assistant (or the user) has
+    just written `**Status**: in-progress` into one of the owner's own task
+    files. Pinning here means every later hook in the session agrees on which
+    task is current, instead of re-deriving it from document order.
+    """
+    new_text = tool_input.get("new_string") or tool_input.get("content") or ""
+    old_text = tool_input.get("old_string") or ""
+    if not _mentions_in_progress(new_text):
+        return None
+    if old_text and _mentions_in_progress(old_text):
+        return None  # already in-progress before this edit — not a flip
+
+    try:
+        mine = {f.resolve() for f in my_task_files()}
+        if target.resolve() not in mine:
+            return None
+    except OSError:
+        return None
+
+    content = read_tasks(target)
+    if not content:
+        return None
+    in_progress = {t["task_id"]: t for t in _extract_in_progress(content, target)}
+    if not in_progress:
+        return None
+
+    chosen = None
+    needle = new_text.strip()
+    idx = content.find(needle) if needle else -1
+    if idx >= 0:
+        prior = [m for m in TASK_HEADING_RE.finditer(content) if m.start() <= idx]
+        if prior and prior[-1].group(1) in in_progress:
+            chosen = prior[-1].group(1)
+    if chosen is None and len(in_progress) == 1:
+        chosen = next(iter(in_progress))
+    if chosen is None:
+        return None
+
+    if not set_focus_pin(session_id, chosen):
+        return None
+    try:
+        _create_notes_skeleton(chosen, in_progress[chosen]["title"], trigger="on-start")
+    except Exception:
+        pass
+    return chosen
+
+
 def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, session_id: str) -> None:
     # WebFetch / WebSearch => Visual Operations Log (captures the FINDING, post-execution)
     if tool_name in ("WebFetch", "WebSearch"):
         ensure_tasks_structure()
         count = increment_counter(RESEARCH_COUNTER)
-        task = get_current_task()
+        task = get_current_task(session_id)
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         snippet = ""
@@ -1290,8 +2110,17 @@ def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, s
                             pass
                 except Exception as e:
                     print(f"[task-memory] reorganize failed: {e}", file=sys.stderr)
+                try:
+                    focused = _maybe_auto_focus(target, tool_input, session_id)
+                    if focused:
+                        print(
+                            f"[task-memory] focus → {focused} (flipped to in-progress)",
+                            file=sys.stderr,
+                        )
+                except Exception as e:
+                    print(f"[task-memory] auto-focus failed: {e}", file=sys.stderr)
 
-        task = get_current_task()
+        task = get_current_task(session_id)
         if not task or task["total"] == 0 or task["completed"] == task["total"]:
             return
         count = increment_counter(PROGRESS_COUNTER)
@@ -1320,7 +2149,7 @@ def handle_post_tool_use(tool_name: str, tool_input: dict, tool_response: Any, s
                     text += v + "\n"
         if not re.search(r"error|failed|not found|denied|exception", text, re.IGNORECASE):
             return
-        task = get_current_task()
+        task = get_current_task(session_id)
         if not task:
             return
         m = re.search(r"^.*(?:error|failed|not found|denied|exception).*$", text, re.IGNORECASE | re.MULTILINE)
@@ -1410,41 +2239,73 @@ def mirror_todowrite(todos: list[dict]) -> None:
 # PreCompact (finding #2)
 # =============================================================================
 
-def handle_pre_compact(payload: dict) -> None:
-    """Dump current in-progress task + research + todos to a snapshot file."""
+SNAPSHOT_HASH_MARKER = "<!-- task-memory-snapshot-sha256:"
+
+
+def _snapshot_fingerprint(text: str) -> str:
+    """Hash of a snapshot's substance — timestamp header and marker excluded.
+
+    Compaction fires repeatedly in a long session, and the task block rarely
+    changes between two of them, so byte-identical snapshots used to pile up
+    under different timestamps.
+    """
+    keep = [
+        line for line in text.splitlines()
+        if not line.startswith("_Generated:")
+        and not line.startswith(SNAPSHOT_HASH_MARKER)
+    ]
+    return hashlib.sha256("\n".join(keep).encode("utf-8")).hexdigest()
+
+
+def _existing_ops_log_bodies(notes_text: str) -> list[str]:
+    """Bodies of every `## Pre-Compact Ops Log (...)` section already present."""
+    bodies = []
+    parts = re.split(r"^## Pre-Compact Ops Log[^\n]*$", notes_text, flags=re.MULTILINE)
+    for part in parts[1:]:
+        nxt = re.search(r"^## ", part, re.MULTILINE)
+        bodies.append((part[:nxt.start()] if nxt else part).strip())
+    return bodies
+
+
+def handle_pre_compact(payload: dict, session_id: str = "") -> None:
+    """Dump current in-progress task + research to a snapshot file.
+
+    No current task means no snapshot. Before v3.7.0 this wrote
+    `UNKNOWN-precompact-<ts>.md` instead — a file with no task, no context and
+    nothing to resume from.
+    """
     ensure_tasks_structure()
-    task = get_current_task()
-    task_id = task["task_id"] if task else "UNKNOWN"
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    snapshot = NOTES_DIR / f"{task_id}-precompact-{ts}.md"
+    task = get_current_task(session_id)
+    if not task:
+        print(
+            "[task-memory] Pre-compact: no in-progress task — nothing to snapshot.",
+            file=sys.stderr,
+        )
+        return
+
+    task_id = task["task_id"]
+    now = datetime.now()
 
     parts = [
         f"# Pre-Compact Snapshot — {task_id}",
         "",
-        f"_Generated: {datetime.now().isoformat()}_",
+        f"_Generated: {now.isoformat()}_",
+        "",
+        "## Current Task",
+        "",
+        f"**{task['task_id']}**: {task['title']}",
+        f"Progress: {task['completed']}/{task['total']}",
+        "",
+        "### Task Block",
+        "",
+        "```markdown",
+        task["block"].rstrip(),
+        "```",
         "",
     ]
 
-    if task:
-        parts += [
-            "## Current Task",
-            "",
-            f"**{task['task_id']}**: {task['title']}",
-            f"Progress: {task['completed']}/{task['total']}",
-            "",
-            "### Task Block",
-            "",
-            "```markdown",
-            task["block"].rstrip(),
-            "```",
-            "",
-        ]
-    else:
-        parts += ["## Current Task", "", "_No in-progress task._", ""]
-
-    # Recent research log (last 20 entries) — pull from the file that owns
-    # the active task, falling back to the primary file.
-    source = (task.get("source") if task else None) or primary_task_file()
+    # Recent research log (last 20 entries) from the file that owns the task.
+    source = task.get("source") or primary_task_file()
     content = read_tasks(source)
     for section in ("Visual Operations Log", "Errors Log"):
         m = re.search(rf"\*\*{re.escape(section)}\*\*:\s*\n((?:- .+\n)+)", content)
@@ -1458,44 +2319,85 @@ def handle_pre_compact(payload: dict) -> None:
     if payload.get("custom_instructions"):
         parts += ["## Custom Instructions\n", str(payload["custom_instructions"]), ""]
 
+    body = "\n".join(parts)
+    fingerprint = _snapshot_fingerprint(body)
+
+    target_dir = PRECOMPACT_DIR
     try:
-        snapshot.write_text("\n".join(parts))
-        print(f"\n[task-memory] Pre-compact snapshot: {snapshot}\n", file=sys.stderr)
-    except OSError as e:
-        print(f"[task-memory] Failed to write snapshot: {e}", file=sys.stderr)
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        target_dir = NOTES_DIR
+
+    duplicate = None
+    try:
+        for existing in sorted(target_dir.glob(f"{task_id}-precompact-*.md")):
+            try:
+                if _snapshot_fingerprint(existing.read_text()) == fingerprint:
+                    duplicate = existing
+                    break
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+    if duplicate is not None:
+        print(
+            f"[task-memory] Pre-compact snapshot unchanged since {duplicate.name} "
+            f"— not writing a duplicate.",
+            file=sys.stderr,
+        )
+    else:
+        snapshot = target_dir / f"{task_id}-precompact-{now.strftime('%Y%m%d-%H%M%S')}.md"
+        try:
+            snapshot.write_text(f"{SNAPSHOT_HASH_MARKER} {fingerprint} -->\n" + body)
+            print(f"\n[task-memory] Pre-compact snapshot: {snapshot}\n", file=sys.stderr)
+        except OSError as e:
+            print(f"[task-memory] Failed to write snapshot: {e}", file=sys.stderr)
 
     # Also append the operations log into the main notes file so insights
     # survive compaction in a discoverable place (not just a timestamped
     # snapshot). The snapshot is a safety net; the notes file is canonical.
-    if task and task_id != "UNKNOWN":
-        notes_path = NOTES_DIR / f"{task_id}.md"
-        if not notes_path.is_file():
-            _create_notes_skeleton(task_id, task.get("title", ""))
+    notes_path = NOTES_DIR / f"{task_id}.md"
+    if not notes_path.is_file():
+        _create_notes_skeleton(task_id, task.get("title", ""), trigger="precompact")
 
-        if notes_path.is_file():
-            try:
-                existing_notes = notes_path.read_text()
-            except OSError:
-                existing_notes = ""
+    if not notes_path.is_file():
+        return
+    try:
+        existing_notes = notes_path.read_text()
+    except OSError:
+        existing_notes = ""
 
-            ops_heading = f"## Pre-Compact Ops Log ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
-            appendix_parts = ["", ops_heading, ""]
-            for section in ("Visual Operations Log", "Errors Log"):
-                m = re.search(rf"\*\*{re.escape(section)}\*\*:\s*\n((?:- .+\n)+)", content)
-                if m:
-                    entries = m.group(1).strip().splitlines()[-20:]
-                    appendix_parts += [f"### {section}", "", *entries, ""]
+    appendix_parts = []
+    for section in ("Visual Operations Log", "Errors Log"):
+        m = re.search(rf"\*\*{re.escape(section)}\*\*:\s*\n((?:- .+\n)+)", content)
+        if m:
+            entries = m.group(1).strip().splitlines()[-20:]
+            appendix_parts += [f"### {section}", "", *entries, ""]
 
-            if len(appendix_parts) > 3:  # more than just the heading
-                appendix_parts += [
-                    "_Synthesize these into Patterns/Gotchas/Decisions above before they age out._",
-                    "",
-                ]
-                try:
-                    notes_path.write_text(existing_notes.rstrip() + "\n" + "\n".join(appendix_parts))
-                    print(f"[task-memory] Appended ops log to {notes_path}", file=sys.stderr)
-                except OSError as e:
-                    print(f"[task-memory] Failed to append to notes: {e}", file=sys.stderr)
+    if not appendix_parts:
+        return
+
+    appendix_parts += [
+        "_Synthesize these into Patterns/Gotchas/Decisions above before they age out._",
+        "",
+    ]
+    new_body = "\n".join(appendix_parts).strip()
+    if new_body in _existing_ops_log_bodies(existing_notes):
+        print(
+            f"[task-memory] Ops log already appended to {notes_path} — skipping.",
+            file=sys.stderr,
+        )
+        return
+
+    ops_heading = f"## Pre-Compact Ops Log ({now.strftime('%Y-%m-%d %H:%M')})"
+    try:
+        notes_path.write_text(
+            existing_notes.rstrip() + "\n\n" + ops_heading + "\n\n" + new_body + "\n"
+        )
+        print(f"[task-memory] Appended ops log to {notes_path}", file=sys.stderr)
+    except OSError as e:
+        print(f"[task-memory] Failed to append to notes: {e}", file=sys.stderr)
 
 
 # =============================================================================
@@ -1531,11 +2433,15 @@ def _notes_has_content(task_id: str) -> bool:
 
 
 def _detect_complexity(block: str) -> str:
-    """Extract Complexity field from a task block. Defaults to 'Standard'."""
+    """The task's declared **Complexity**, or "" when the field is absent.
+
+    Before v3.7.0 this defaulted to "Standard", which made the Stop gate demand
+    a filled notes file from every card that simply never declared a
+    complexity — the overwhelming majority of them. An absent field now says
+    nothing, and only research activity can raise the notes requirement.
+    """
     m = re.search(r"\*\*Complexity\*\*:\s*([A-Za-z]+)", block)
-    if m:
-        return m.group(1).strip()
-    return "Standard"
+    return m.group(1).strip() if m else ""
 
 
 def _actionable_pause_hint(task: dict) -> str:
@@ -1565,12 +2471,17 @@ def _actionable_off_topic_hint(session_id: str) -> str:
 
 
 def handle_stop(session_id: str) -> None:
-    task = get_current_task()
+    task = get_current_task(session_id)
     if not task:
         return
 
     # Explicit opt-out wins over everything.
     if is_off_topic(session_id):
+        return
+
+    # An epic is a container for other cards, not a thing you finish in a
+    # sitting. Only gate on one when it is the only in-progress task there is.
+    if task.get("is_epic") and len(get_all_in_progress_tasks("mine")) > 1:
         return
 
     if not was_task_worked_on(session_id, task["task_id"]):
@@ -1665,6 +2576,7 @@ def handle_stop(session_id: str) -> None:
 
     if counter:
         try:
+            ensure_state_dir()
             counter.write_text(str(block_count + 1))
         except OSError:
             pass
@@ -1719,10 +2631,12 @@ def main() -> int:
         tool_input = {}
 
     try:
-        if hook_event in ("SessionStart", "PostCompact"):
+        if hook_event == "UserPromptSubmit":
+            handle_prompt_context(session_id)
+        elif hook_event in ("SessionStart", "PostCompact"):
             handle_session_start()
         elif hook_event == "PreCompact":
-            handle_pre_compact(payload)
+            handle_pre_compact(payload, session_id)
         elif hook_event == "PreToolUse":
             rc = handle_pre_tool_use(tool_name, tool_input, session_id)
             if isinstance(rc, int) and rc != 0:
