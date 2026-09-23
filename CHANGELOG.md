@@ -307,7 +307,8 @@ Existing projects keep working as-is (records with no `taskFilePath` default to 
 - [Manus Context Engineering](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus) principles
 - [MarkdownTaskManager](https://github.com/ioniks/MarkdownTaskManager) by @ioniks
 
-[Unreleased]: https://github.com/kepptic/task-memory/compare/v3.4.1...HEAD
+[Unreleased]: https://github.com/kepptic/task-memory/compare/v3.7.0...HEAD
+[3.7.0]: https://github.com/kepptic/task-memory/compare/v3.6.7...v3.7.0
 [3.4.1]: https://github.com/kepptic/task-memory/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/kepptic/task-memory/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/kepptic/task-memory/compare/v2.0.0...v3.3.0
