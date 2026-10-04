@@ -5,7 +5,7 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 3.8.0
+## [3.8.0] - 2026-10-04
 
 ### Changed
 
@@ -323,7 +323,8 @@ Existing projects keep working as-is (records with no `taskFilePath` default to 
 - [Manus Context Engineering](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus) principles
 - [MarkdownTaskManager](https://github.com/ioniks/MarkdownTaskManager) by @ioniks
 
-[Unreleased]: https://github.com/kepptic/task-memory/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/kepptic/task-memory/compare/v3.8.0...HEAD
+[3.8.0]: https://github.com/kepptic/task-memory/compare/v3.7.0...v3.8.0
 [3.7.0]: https://github.com/kepptic/task-memory/compare/v3.6.7...v3.7.0
 [3.4.1]: https://github.com/kepptic/task-memory/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/kepptic/task-memory/compare/v3.3.0...v3.4.0
