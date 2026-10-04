@@ -1553,8 +1553,8 @@ def _warning_lines(mine: list[dict[str, Any]]) -> list[str]:
     return out
 
 
-def handle_prompt_context(session_id: str) -> None:
-    """UserPromptSubmit banner. Read-only, cheap, and capped.
+def _full_prompt_lines(session_id: str) -> list[str]:
+    """The full (legacy, uncapped) per-prompt banner lines.
 
     v3.7.0: skill-eval.sh used to synthesize a fake SessionStart on EVERY user
     prompt, which meant a full GC pass plus a notes skeleton per in-progress
@@ -1602,8 +1602,242 @@ def handle_prompt_context(session_id: str) -> None:
 
     if len(lines) > 40:
         lines = lines[:39] + [f"… {len(lines) - 39} more line(s) suppressed"]
-    for line in lines:
-        print(line, file=sys.stderr)
+    return lines
+
+
+# -----------------------------------------------------------------------------
+# Lean prompt context (v3.8.0).
+#
+# The banner used to be injected on EVERY prompt (~1.4k tokens each) and stays
+# in context until compaction. Now it is injected only on the first prompt of
+# a session and when the focus task changes; every other prompt emits nothing.
+# We chose "nothing" over a one-line "TASK-MEMORY | TASK-NNN (unchanged)": the
+# line is ~12 tokens, but it is added to context on every prompt and
+# accumulates linearly, while the first injection (and the SessionStart summary
+# after compact/clear/resume) already carries the focus. Silence is cheapest.
+#
+# TASK_MEMORY_PROMPT_MODE=always restores the old every-prompt, uncapped banner.
+# -----------------------------------------------------------------------------
+
+INJECT_CHAR_CAP = 2000  # ~500 tokens at ~4 chars/token
+_SAFE_SID_RE = re.compile(r"[^A-Za-z0-9_.-]")
+_TICKET_RE = re.compile(r"\*\*(?:Ticket|Autotask|ADO)\*\*:\s*([^\n|]+)")
+
+
+def estimate_tokens(text: str) -> int:
+    return (len(text) + 3) // 4
+
+
+def _always_mode() -> bool:
+    return os.environ.get("TASK_MEMORY_PROMPT_MODE", "").strip().lower() == "always"
+
+
+def _safe_sid(session_id: str) -> str:
+    return _SAFE_SID_RE.sub("_", str(session_id))[:64].strip(".")
+
+
+def prompt_state_path(session_id: str) -> Path | None:
+    sid = _safe_sid(session_id)
+    return state_path(f"session-prompt-{sid}.json") if sid else None
+
+
+def read_prompt_state(session_id: str) -> dict:
+    path = prompt_state_path(session_id)
+    if path is None:
+        return {}
+    try:
+        data = json.loads(path.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_prompt_state(session_id: str, focus: str) -> None:
+    """Atomically record the last-injected focus. Fails open."""
+    path = prompt_state_path(session_id)
+    if path is None or not ensure_state_dir():
+        return
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps({"focus": focus, "at": int(time.time())}))
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(PROJECT_DIR))
+    except ValueError:
+        return str(path)
+
+
+def _plain(text: str) -> str:
+    """Strip ** and ~~ emphasis so truncation never leaves an unclosed marker."""
+    return text.replace("**", "").replace("~~", "").strip()
+
+
+def _is_struck(text: str) -> bool:
+    t = text.strip()
+    return len(t) >= 4 and t.startswith("~~") and t.endswith("~~")
+
+
+def focus_summary(session_id: str, cap: int = INJECT_CHAR_CAP) -> tuple[str, str]:
+    """(text, focus_id): a focus summary of at most `cap` characters.
+
+    Keeps the header, title/progress, status and ticket, then as many next
+    unchecked subtasks as fit, with a "(+N more - see <file>)" pointer.
+    """
+    owner = resolve_owner()
+    mine = get_all_in_progress_tasks("mine")
+    task = get_current_task(session_id)
+    header = "TASK-MEMORY"
+    if owner:
+        header += f" | owner {owner}"
+    if task:
+        header += f" | focus {task['task_id']} ({task.get('selection', 'first')})"
+    else:
+        header += " | no task in progress"
+    lines = [header]
+    tail: list[str] = []
+
+    note = owner_scope_note()
+    if note:
+        lines.append(f"  ⚠️  {note[:160]}")
+
+    if task:
+        progress = f" [{task['completed']}/{task['total']}]" if task["total"] else ""
+        lines.append(f"  {_plain(task['title'])[:120]}{progress}")
+        meta = "  Status: in-progress"
+        tm = _TICKET_RE.search(task["block"])
+        if tm:
+            meta += f" | Ticket: {tm.group(1).strip()[:60]}"
+        lines.append(meta)
+        src = _display_path(task["source"])
+        budget = cap - len("\n".join(lines)) - 300  # reserve for pointer/tail
+        all_open = [
+            m.group(1)
+            for ln in subtask_lines(task["block"])
+            for m in [re.match(r"\s*- \[ \]\s*(.+)", ln)]
+            if m and not _is_struck(m.group(1))
+        ]
+        shown = 0
+        for sub in all_open[:5]:
+            item = f"    - [ ] {_plain(sub)[:100]}"
+            if len(item) + 1 > budget:
+                break
+            lines.append(item)
+            budget -= len(item) + 1
+            shown += 1
+        if len(all_open) > shown:
+            lines.append(f"    (+{len(all_open) - shown} more — see {src})")
+
+    rest = [t for t in mine if not task or t["task_id"] != task["task_id"]]
+    if rest:
+        tail.append(f"Other in-progress (mine): {len(rest)}")
+    if owner:
+        mine_ids = {t["task_id"] for t in mine}
+        others = [t for t in get_all_in_progress_tasks("all") if t["task_id"] not in mine_ids]
+        if others:
+            tail.append(f"Other in-progress (others): {len(others)}")
+    for w in _warning_lines(mine)[:2]:
+        tail.append(w[:160])
+
+    text = "\n".join(lines + tail)
+    if len(text) > cap:
+        text = text[: cap - 1].rstrip() + "…"
+    return text, (task["task_id"] if task else "none")
+
+
+def cap_text(text: str, cap: int = INJECT_CHAR_CAP) -> str:
+    """Truncate multi-line text to `cap` chars on a line boundary, with a pointer."""
+    if len(text) <= cap:
+        return text
+    pointer_room = 120
+    out: list[str] = []
+    used = 0
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if used + len(line) + 1 > cap - pointer_room:
+            out.append(f"… (+{len(lines) - i} more line(s) — see {_display_path(TASKS_FILE)})")
+            break
+        out.append(line)
+        used += len(line) + 1
+    return "\n".join(out)[:cap]
+
+
+def handle_prompt_context(session_id: str) -> None:
+    """UserPromptSubmit banner. Cheap, capped, and only when focus changed.
+
+    Writes one tiny state file per session (atomic, fail-open); everything
+    else is read-only.
+    """
+    if _always_mode():
+        for line in _full_prompt_lines(session_id):
+            print(line, file=sys.stderr)
+        return
+
+    text, focus = focus_summary(session_id)
+    if session_id:
+        prev = read_prompt_state(session_id).get("focus")
+        if prev == focus:
+            return  # unchanged: stay silent
+        write_prompt_state(session_id, focus)
+    print(text, file=sys.stderr)
+
+
+def handle_session_start_short(session_id: str) -> None:
+    """resume / compact / clear: GC, then the capped focus summary on stdout.
+
+    Prompt state IS recorded here (choice (a) over unlinking it): this summary
+    reaches the model via SessionStart stdout, so the session-prompt state is
+    set to the focus just shown. Compaction fires no SessionEnd, so without
+    this a stale state from before the compaction would survive; recording it
+    keeps the state consistent and the next prompt injects again only if the
+    focus changes. PostCompact is side-effects-only (its stdout is never
+    injected), so SessionStart is the sole injection point after compaction.
+    """
+    try:
+        gc_stale_session_state()
+    except Exception as e:
+        # real stderr, outside the capture: must not leak into injected context
+        print(f"[task-memory] GC warning: {e}", file=sys.__stderr__)
+    text, focus = focus_summary(session_id)
+    if session_id:
+        write_prompt_state(session_id, focus)
+    print(text, file=sys.stderr)
+
+
+def handle_session_start_capped() -> None:
+    """startup: the unchanged bundle, truncated to the injection cap."""
+    import io
+    real = sys.stderr
+    buf = io.StringIO()
+    sys.stderr = buf
+    try:
+        handle_session_start()
+    finally:
+        sys.stderr = real
+        print(cap_text(buf.getvalue()), file=sys.stderr)
+
+
+def _stderr_to_stdout(fn, *args) -> None:
+    """Claude Code injects only SessionStart stdout, so run a handler that
+    writes to stderr and re-emit what it wrote on stdout (always, even if it raised)."""
+    import io
+    real = sys.stderr
+    buf = io.StringIO()
+    sys.stderr = buf
+    try:
+        fn(*args)
+    finally:
+        sys.stderr = real
+        out = buf.getvalue()
+        if out:
+            sys.stdout.write(out if out.endswith("\n") else out + "\n")
 
 
 def handle_session_start() -> None:
@@ -1612,7 +1846,7 @@ def handle_session_start() -> None:
     try:
         gc_stale_session_state()
     except Exception as e:
-        print(f"[task-memory] GC warning: {e}", file=sys.stderr)
+        print(f"[task-memory] GC warning: {e}", file=sys.__stderr__)
 
     print("", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
@@ -2594,6 +2828,9 @@ def handle_session_end(session_id: str) -> None:
         _stop_block_count_path(session_id),
         off_topic_flag_path(session_id),
     ]
+    pp = prompt_state_path(session_id)
+    if pp is not None:
+        to_remove.append(pp)
     for f in to_remove:
         if f.exists():
             try:
@@ -2633,8 +2870,16 @@ def main() -> int:
     try:
         if hook_event == "UserPromptSubmit":
             handle_prompt_context(session_id)
-        elif hook_event in ("SessionStart", "PostCompact"):
-            handle_session_start()
+        elif hook_event == "PostCompact":
+            pass  # side-effects-only event: stdout is never injected; SessionStart(compact) injects
+        elif hook_event == "SessionStart":
+            source = str(payload.get("source", "")).lower()
+            if _always_mode():
+                _stderr_to_stdout(handle_session_start)
+            elif source in ("resume", "compact", "clear"):
+                _stderr_to_stdout(handle_session_start_short, session_id)
+            else:
+                _stderr_to_stdout(handle_session_start_capped)
         elif hook_event == "PreCompact":
             handle_pre_compact(payload, session_id)
         elif hook_event == "PreToolUse":

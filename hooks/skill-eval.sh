@@ -31,5 +31,5 @@ session_id="$(parse session_id)"
 # so the focus pin and session stamp resolve.
 HOOK="$(dirname "$0")/task-memory-hook.py"
 [ -x "$HOOK" ] || chmod +x "$HOOK" 2>/dev/null
-printf '{"hook_event_name":"UserPromptSubmit","session_id":"%s"}' "$session_id" | "$HOOK" 2>&1
+SID="$session_id" python3 -c 'import json,os; print(json.dumps({"hook_event_name":"UserPromptSubmit","session_id":os.environ["SID"]}))' | "$HOOK" 2>&1
 exit 0

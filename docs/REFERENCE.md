@@ -392,6 +392,7 @@ When `task_files_glob` is absent, behavior is the single-file default
 | `CLAUDE_PROJECT_DIR` | set by Claude Code | Project root; falls back to `cwd`. |
 | `PWD` | shell | Used for nearest-`planning/` detection (monorepo). |
 | `TASK_MEMORY_OWNER` | hook | Highest-priority owner code (2–4 uppercase letters). Overrides every config source. Useful in CI, or to drive another developer's board for one command. |
+| `TASK_MEMORY_PROMPT_MODE` | hook | `always` restores the pre-3.8 behavior: the full, uncapped banner on every prompt and the full SessionStart bundle on resume/compact/clear. Default: banner only on the first prompt and on focus change. |
 | `TASK_MEMORY_FORCE_STAMP` | hook | `1`/`true`/`yes` restores pre-v3.3 blanket stamping (every Write/Edit/Task call marks the session task-relevant). Default off — only genuinely task-touching tool uses stamp. |
 
 ---

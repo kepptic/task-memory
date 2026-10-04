@@ -222,8 +222,8 @@ your-project/
 
 | Event | Action |
 |-------|--------|
-| **SessionStart** / **PostCompact** | Display current task and progress; create notes skeletons; surface overdue `awaiting` tasks |
-| **UserPromptSubmit** | Show task context |
+| **SessionStart** / **PostCompact** | `startup`: current task, progress, notes skeletons, overdue `awaiting` tasks (capped at ~500 tokens). `resume`/`compact`/`clear` and PostCompact: a short (≤ ~500-token) focus summary only |
+| **UserPromptSubmit** | Focus banner (≤ ~500 tokens) on the first prompt of a session and when the focus task changes; silent otherwise. `TASK_MEMORY_PROMPT_MODE=always` restores the old every-prompt banner |
 | **PreToolUse** (Write/Edit/Task) | Refresh task context, bind work to current task |
 | **PostToolUse** (WebFetch/WebSearch) | Log URL + response snippet to Visual Operations Log (creates notes skeleton every 2 ops) |
 | **PostToolUse** (TodoWrite) | Mirror native todos into `planning/tasks.md` under `## From TodoWrite` |
@@ -231,6 +231,8 @@ your-project/
 | **PreCompact** | Dump current task + research log + todos to `planning/notes/{TASK}-precompact-{ts}.md` |
 | **Stop** / **SubagentStop** | Block if `in-progress` session tasks have incomplete subtasks or empty notes |
 | **SessionEnd** | Flush session state (never blocks) |
+
+> Focus and last-injected state are keyed by `session_id`: two windows that share the same `session_id` (for example the same resumed session open twice) share focus state.
 
 > **As of v3.4.0** `Bash` is no longer matched by `PreToolUse`/`PostToolUse`, so the hook no longer auto-logs Bash errors — record errors manually in the `**Errors Log**:` section. See the [Reference](docs/REFERENCE.md#hook-events).
 

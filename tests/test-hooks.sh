@@ -1862,16 +1862,18 @@ test_emoji_status_is_in_progress() {
 }
 
 test_prompt_context_creates_no_files() {
-    log_test "v3.7: the UserPromptSubmit path creates nothing on disk"
+    log_test "v3.7: the UserPromptSubmit path creates nothing on disk (v3.8: bar one prompt-state file)"
 
     create_owner_fixture
 
     TASK_MEMORY_OWNER=GR owner_hook '{"hook_event_name":"UserPromptSubmit","session_id":"own-readonly"}' > /dev/null
 
-    if [ -e "$OWNER_ROOT/.claude" ]; then
-        log_fail "UserPromptSubmit created $OWNER_ROOT/.claude"
+    local stray
+    stray=$(find "$OWNER_ROOT/.claude" -type f ! -name 'session-prompt-*.json' 2>/dev/null)
+    if [ -n "$stray" ]; then
+        log_fail "UserPromptSubmit created unexpected state: $stray"
     else
-        log_pass "no state directory created"
+        log_pass "only the per-session prompt-state file is written"
     fi
 
     if [ -e "$OWNER_ROOT/planning/notes" ]; then
@@ -2030,6 +2032,219 @@ if [ ! -x "$HOOK_SCRIPT" ]; then
 fi
 
 # Setup
+# =============================================================================
+# v3.8.0: lean prompt context
+# =============================================================================
+
+create_lean_fixture() {
+    LEAN_ROOT="$FIXTURES_DIR/lean"
+    rm -rf "$LEAN_ROOT"
+    mkdir -p "$LEAN_ROOT/planning"
+    {
+        cat << 'EOF'
+# Kanban Board
+
+## In Progress
+
+### TASK-500 | Lean task with a very long checklist
+**Status**: in-progress
+**Created**: 2026-09-05 | **Started**: 2026-09-05
+**Ticket**: T20260901.0042
+
+**Subtasks**:
+EOF
+        for i in $(seq 1 60); do
+            echo "- [ ] Subtask number $i with a reasonably long description to bulk up the banner text"
+        done
+        cat << 'EOF'
+
+### TASK-501 | Second task
+**Status**: in-progress
+**Created**: 2026-09-02 | **Started**: 2026-09-02
+
+**Subtasks**:
+- [ ] other work
+
+---
+
+## Done
+
+---
+EOF
+    } > "$LEAN_ROOT/planning/tasks.md"
+}
+
+lean_hook() {
+    printf '%s' "$1" | CLAUDE_PROJECT_DIR="$LEAN_ROOT" "$HOOK_SCRIPT" 2>&1
+}
+
+lean_pin() {
+    mkdir -p "$LEAN_ROOT/.claude/state/task-memory"
+    printf '%s\n' "$2" > "$LEAN_ROOT/.claude/state/task-memory/focus-$1.txt"
+}
+
+test_lean_prompt_first_then_silent() {
+    log_test "v3.8: first prompt injects, an unchanged focus emits nothing"
+    create_lean_fixture
+    local payload='{"hook_event_name":"UserPromptSubmit","session_id":"lean-1"}'
+    local out
+    out=$(lean_hook "$payload")
+    assert_contains "$out" "TASK-MEMORY | focus TASK-500" "first prompt injects the focus banner"
+    assert_contains "$out" "Ticket: T20260901.0042" "banner carries the ticket"
+    out=$(lean_hook "$payload")
+    if [ "${#out}" -le 80 ]; then
+        log_pass "same focus: no or one-line output (${#out} chars)"
+    else
+        log_fail "same focus still injected ${#out} chars"
+    fi
+    out=$(lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"lean-2"}')
+    assert_contains "$out" "focus TASK-500" "a different session gets its own first injection"
+}
+
+test_lean_prompt_focus_change_injects() {
+    log_test "v3.8: a focus change re-injects"
+    create_lean_fixture
+    local payload='{"hook_event_name":"UserPromptSubmit","session_id":"lean-3"}'
+    lean_hook "$payload" > /dev/null
+    lean_pin "lean-3" "TASK-501"
+    local out
+    out=$(lean_hook "$payload")
+    assert_contains "$out" "focus TASK-501" "changed focus is injected"
+    out=$(lean_hook "$payload")
+    if [ "${#out}" -le 80 ]; then
+        log_pass "silent again once the new focus was injected"
+    else
+        log_fail "re-injected without a focus change (${#out} chars)"
+    fi
+}
+
+test_lean_prompt_cap() {
+    log_test "v3.8: injection is capped at ~2000 chars with a pointer"
+    create_lean_fixture
+    local out
+    out=$(lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"lean-4"}')
+    if [ "${#out}" -le 2000 ]; then
+        log_pass "capped output is ${#out} chars (<= 2000)"
+    else
+        log_fail "output is ${#out} chars, over the 2000 cap"
+    fi
+    assert_contains "$out" "more — see planning/tasks.md" "truncation pointer present"
+    assert_contains "$out" "Subtask number 1 " "first unchecked item kept"
+}
+
+test_lean_prompt_always_mode() {
+    log_test "v3.8: TASK_MEMORY_PROMPT_MODE=always restores per-prompt injection"
+    create_lean_fixture
+    local payload='{"hook_event_name":"UserPromptSubmit","session_id":"lean-5"}'
+    local out
+    printf '%s' "$payload" | TASK_MEMORY_PROMPT_MODE=always CLAUDE_PROJECT_DIR="$LEAN_ROOT" "$HOOK_SCRIPT" > /dev/null 2>&1
+    out=$(printf '%s' "$payload" | TASK_MEMORY_PROMPT_MODE=always CLAUDE_PROJECT_DIR="$LEAN_ROOT" "$HOOK_SCRIPT" 2>&1)
+    assert_contains "$out" "focus TASK-500" "repeat prompt still injects in always mode"
+}
+
+test_lean_session_id_sanitized() {
+    log_test "v3.8: hostile session_id cannot escape the state dir"
+    create_lean_fixture
+    lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"../../evil/x"}' > /dev/null
+    if [ -e "$LEAN_ROOT/evil" ] || [ -e "$LEAN_ROOT/.claude/evil" ] || \
+       [ -n "$(find "$LEAN_ROOT" -name '*evil*' -not -path '*/state/task-memory/*' 2>/dev/null)" ]; then
+        log_fail "state escaped the state dir"
+    else
+        log_pass "state stays inside .claude/state/task-memory"
+    fi
+}
+
+test_lean_session_start_sources() {
+    log_test "v3.8: resume/compact/clear emit a short summary; startup is capped"
+    create_lean_fixture
+    local src out
+    for src in resume compact clear; do
+        out=$(lean_hook "{\"hook_event_name\":\"SessionStart\",\"source\":\"$src\",\"session_id\":\"lean-6$src\"}")
+        if [ "${#out}" -le 2000 ] && echo "$out" | grep -q "focus TASK-500" && ! echo "$out" | grep -q "SESSION START"; then
+            log_pass "$src: short focus summary (${#out} chars)"
+        else
+            log_fail "$src: expected short summary, got ${#out} chars"
+        fi
+    done
+    out=$(lean_hook '{"hook_event_name":"PostCompact","session_id":"lean-6pc"}')
+    if [ -z "$out" ]; then
+        log_pass "PostCompact: no stdout"
+    else
+        log_fail "PostCompact wrote stdout (${#out} chars)"
+    fi
+    out=$(lean_hook '{"hook_event_name":"SessionStart","source":"startup","session_id":"lean-6s"}')
+    assert_contains "$out" "SESSION START" "startup keeps the full bundle header"
+    if [ "${#out}" -le 2000 ]; then
+        log_pass "startup bundle capped (${#out} chars)"
+    else
+        log_fail "startup bundle ${#out} chars over cap"
+    fi
+    out=$(lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"lean-6resume"}')
+    if [ -z "$out" ]; then
+        log_pass "first prompt after resume is silent (SessionStart already injected this focus)"
+    else
+        log_fail "prompt after resume re-injected an unchanged focus (${#out} chars)"
+    fi
+}
+
+test_lean_session_start_stdout_and_inject() {
+    log_test "v3.8: SessionStart output is on stdout; first prompt after resume is silent; compact injects"
+    create_lean_fixture
+    local out err
+    for src in resume startup; do
+        out=$(printf '%s' "{\"hook_event_name\":\"SessionStart\",\"source\":\"$src\",\"session_id\":\"lean-7$src\"}" | CLAUDE_PROJECT_DIR="$LEAN_ROOT" "$HOOK_SCRIPT" 2>/dev/null)
+        assert_contains "$out" "TASK-500" "$src: context is on stdout"
+    done
+    out=$(lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"lean-7resume"}')
+    if [ -z "$out" ]; then
+        log_pass "first prompt after resume is silent (focus unchanged since SessionStart)"
+    else
+        log_fail "unchanged focus re-injected after resume (${#out} chars)"
+    fi
+    out=$(printf '%s' '{"hook_event_name":"PostCompact","session_id":"lean-7c"}' | CLAUDE_PROJECT_DIR="$LEAN_ROOT" "$HOOK_SCRIPT" 2>/dev/null)
+    if [ -z "$out" ]; then
+        log_pass "PostCompact has no stdout (side-effects-only event)"
+    else
+        log_fail "PostCompact wrote stdout (${#out} chars)"
+    fi
+    out=$(lean_hook '{"hook_event_name":"SessionStart","source":"compact","session_id":"lean-7c"}')
+    assert_contains "$out" "TASK-500" "SessionStart(compact) after PostCompact injects"
+}
+
+test_lean_truncation_strips_emphasis() {
+    log_test "v3.8: truncation strips ** / ~~ and skips struck-through subtasks"
+    create_lean_fixture
+    {
+        echo "### TASK-502 | **$(printf 'B%.0s' $(seq 1 130))** bold"
+        echo '**Status**: in-progress'
+        echo '**Started**: 2026-09-06'
+        echo
+        echo '**Subtasks**:'
+        echo '- [ ] ~~Dropped item~~'
+        echo "- [ ] **$(printf 'x%.0s' $(seq 1 120))** tail"
+        echo
+    } > "$LEAN_ROOT/planning/extra.md"
+    python3 - "$LEAN_ROOT/planning/tasks.md" "$LEAN_ROOT/planning/extra.md" <<'PY'
+import sys
+t=open(sys.argv[1]).read(); e=open(sys.argv[2]).read()
+open(sys.argv[1],'w').write(t.replace("## Done", e+"\n## Done",1))
+PY
+    lean_pin "lean-8" "TASK-502"
+    local out
+    out=$(lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"lean-8"}')
+    if echo "$out" | grep -q '\*\*\|~~'; then
+        log_fail "emphasis markers leaked: $(echo "$out" | grep '\*\*\|~~' | head -2)"
+    else
+        log_pass "no ** or ~~ markers in the summary"
+    fi
+    if echo "$out" | grep -q "Dropped item"; then
+        log_fail "struck-through subtask shown"
+    else
+        log_pass "struck-through subtask skipped"
+    fi
+    assert_contains "$out" "xxxx" "the real open subtask is shown"
+}
+
 setup_test_env
 
 # Run all tests
@@ -2095,6 +2310,14 @@ test_append_log_entry_dedupe
 test_precompact_dedupe_and_no_unknown
 test_epic_skipped_by_stop_gate
 test_per_owner_todowrite_mirror
+test_lean_prompt_first_then_silent
+test_lean_prompt_focus_change_injects
+test_lean_prompt_cap
+test_lean_prompt_always_mode
+test_lean_session_id_sanitized
+test_lean_session_start_sources
+test_lean_session_start_stdout_and_inject
+test_lean_truncation_strips_emphasis
 
 # JS UI suite (taskId.js / markdown.js / fileSystem.js) — guarded, see below
 run_js_ui_tests
