@@ -5,6 +5,19 @@ All notable changes to task-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 3.8.0
+
+### Changed
+
+- **Lean prompt context.** `UserPromptSubmit` used to inject ~1.4k tokens on every prompt, all of it sitting in context until compaction (5% of main-thread context, 8% in service-desk sessions). It now injects only on the first prompt of a session and when the focus task changes (last-injected focus tracked per session in `.claude/state/task-memory/session-prompt-<id>.json`, session id sanitized, atomic write, fail-open); unchanged-focus prompts emit nothing. Nothing was chosen over a `TASK-MEMORY | TASK-NNN (unchanged)` line because that line (~12 tokens) would be added to context on every prompt and accumulate, while the first injection already carries the focus.
+- **500-token cap.** Every injection is capped at ~2000 characters: title, status, ticket and the next unchecked subtasks are kept, the rest becomes `(+N more — see <file>)`, and other in-progress tasks collapse to a count.
+- **SessionStart / PostCompact.** `source` of `resume`, `compact` or `clear`, and PostCompact, emit only the capped focus summary instead of the full bundle. `startup` is unchanged apart from the same cap.
+- Sample (13 in-progress tasks, 12 open subtasks): 622 tokens per prompt before, 202 on the first prompt and 0 afterwards.
+
+### Added
+
+- `TASK_MEMORY_PROMPT_MODE=always` restores the previous behavior (uncapped, every prompt, full bundles).
+
 ## [3.7.0] - 2026-09-21
 
 ### Added

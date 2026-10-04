@@ -222,8 +222,8 @@ your-project/
 
 | Event | Action |
 |-------|--------|
-| **SessionStart** / **PostCompact** | Display current task and progress; create notes skeletons; surface overdue `awaiting` tasks |
-| **UserPromptSubmit** | Show task context |
+| **SessionStart** / **PostCompact** | `startup`: current task, progress, notes skeletons, overdue `awaiting` tasks (capped at ~500 tokens). `resume`/`compact`/`clear` and PostCompact: a short (≤ ~500-token) focus summary only |
+| **UserPromptSubmit** | Focus banner (≤ ~500 tokens) on the first prompt of a session and when the focus task changes; silent otherwise. `TASK_MEMORY_PROMPT_MODE=always` restores the old every-prompt banner |
 | **PreToolUse** (Write/Edit/Task) | Refresh task context, bind work to current task |
 | **PostToolUse** (WebFetch/WebSearch) | Log URL + response snippet to Visual Operations Log (creates notes skeleton every 2 ops) |
 | **PostToolUse** (TodoWrite) | Mirror native todos into `planning/tasks.md` under `## From TodoWrite` |
