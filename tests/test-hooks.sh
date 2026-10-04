@@ -2180,11 +2180,65 @@ test_lean_session_start_sources() {
         log_fail "startup bundle ${#out} chars over cap"
     fi
     out=$(lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"lean-6resume"}')
-    if [ "${#out}" -le 80 ]; then
-        log_pass "first prompt after resume does not repeat the summary"
+    if [ "${#out}" -le 2000 ] && echo "$out" | grep -q "focus TASK-500"; then
+        log_pass "first prompt after resume re-injects the capped summary"
     else
-        log_fail "prompt after resume re-injected (${#out} chars)"
+        log_fail "prompt after resume did not inject (${#out} chars)"
     fi
+}
+
+test_lean_session_start_stdout_and_inject() {
+    log_test "v3.8: SessionStart output is on stdout; first prompt after resume injects; compact dedupes"
+    create_lean_fixture
+    local out err
+    for src in resume startup; do
+        out=$(printf '%s' "{\"hook_event_name\":\"SessionStart\",\"source\":\"$src\",\"session_id\":\"lean-7$src\"}" | CLAUDE_PROJECT_DIR="$LEAN_ROOT" "$HOOK_SCRIPT" 2>/dev/null)
+        assert_contains "$out" "TASK-500" "$src: context is on stdout"
+    done
+    out=$(lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"lean-7resume"}')
+    assert_contains "$out" "focus TASK-500" "first prompt after resume injects the summary"
+    out=$(printf '%s' '{"hook_event_name":"PostCompact","session_id":"lean-7c"}' | CLAUDE_PROJECT_DIR="$LEAN_ROOT" "$HOOK_SCRIPT" 2>/dev/null)
+    assert_contains "$out" "TASK-500" "PostCompact: context is on stdout"
+    out=$(lean_hook '{"hook_event_name":"SessionStart","source":"compact","session_id":"lean-7c"}')
+    if [ -z "$out" ]; then
+        log_pass "SessionStart(compact) after PostCompact is a no-op"
+    else
+        log_fail "duplicate compact injection (${#out} chars)"
+    fi
+}
+
+test_lean_truncation_strips_emphasis() {
+    log_test "v3.8: truncation strips ** / ~~ and skips struck-through subtasks"
+    create_lean_fixture
+    {
+        echo "### TASK-502 | **$(printf 'B%.0s' $(seq 1 130))** bold"
+        echo '**Status**: in-progress'
+        echo '**Started**: 2026-09-06'
+        echo
+        echo '**Subtasks**:'
+        echo '- [ ] ~~Dropped item~~'
+        echo "- [ ] **$(printf 'x%.0s' $(seq 1 120))** tail"
+        echo
+    } > "$LEAN_ROOT/planning/extra.md"
+    python3 - "$LEAN_ROOT/planning/tasks.md" "$LEAN_ROOT/planning/extra.md" <<'PY'
+import sys
+t=open(sys.argv[1]).read(); e=open(sys.argv[2]).read()
+open(sys.argv[1],'w').write(t.replace("## Done", e+"\n## Done",1))
+PY
+    lean_pin "lean-8" "TASK-502"
+    local out
+    out=$(lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"lean-8"}')
+    if echo "$out" | grep -q '\*\*\|~~'; then
+        log_fail "emphasis markers leaked: $(echo "$out" | grep '\*\*\|~~' | head -2)"
+    else
+        log_pass "no ** or ~~ markers in the summary"
+    fi
+    if echo "$out" | grep -q "Dropped item"; then
+        log_fail "struck-through subtask shown"
+    else
+        log_pass "struck-through subtask skipped"
+    fi
+    assert_contains "$out" "xxxx" "the real open subtask is shown"
 }
 
 setup_test_env
@@ -2258,6 +2312,8 @@ test_lean_prompt_cap
 test_lean_prompt_always_mode
 test_lean_session_id_sanitized
 test_lean_session_start_sources
+test_lean_session_start_stdout_and_inject
+test_lean_truncation_strips_emphasis
 
 # JS UI suite (taskId.js / markdown.js / fileSystem.js) — guarded, see below
 run_js_ui_tests

@@ -232,6 +232,8 @@ your-project/
 | **Stop** / **SubagentStop** | Block if `in-progress` session tasks have incomplete subtasks or empty notes |
 | **SessionEnd** | Flush session state (never blocks) |
 
+> Focus and last-injected state are keyed by `session_id`: two windows that share the same `session_id` (for example the same resumed session open twice) share focus state.
+
 > **As of v3.4.0** `Bash` is no longer matched by `PreToolUse`/`PostToolUse`, so the hook no longer auto-logs Bash errors — record errors manually in the `**Errors Log**:` section. See the [Reference](docs/REFERENCE.md#hook-events).
 
 ## Configuration

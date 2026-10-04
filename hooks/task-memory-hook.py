@@ -1675,6 +1675,16 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
+def _plain(text: str) -> str:
+    """Strip ** and ~~ emphasis so truncation never leaves an unclosed marker."""
+    return text.replace("**", "").replace("~~", "").strip()
+
+
+def _is_struck(text: str) -> bool:
+    t = text.strip()
+    return len(t) >= 4 and t.startswith("~~") and t.endswith("~~")
+
+
 def focus_summary(session_id: str, cap: int = INJECT_CHAR_CAP) -> tuple[str, str]:
     """(text, focus_id): a focus summary of at most `cap` characters.
 
@@ -1700,7 +1710,7 @@ def focus_summary(session_id: str, cap: int = INJECT_CHAR_CAP) -> tuple[str, str
 
     if task:
         progress = f" [{task['completed']}/{task['total']}]" if task["total"] else ""
-        lines.append(f"  {task['title'][:120]}{progress}")
+        lines.append(f"  {_plain(task['title'])[:120]}{progress}")
         meta = "  Status: in-progress"
         tm = _TICKET_RE.search(task["block"])
         if tm:
@@ -1712,11 +1722,11 @@ def focus_summary(session_id: str, cap: int = INJECT_CHAR_CAP) -> tuple[str, str
             m.group(1)
             for ln in subtask_lines(task["block"])
             for m in [re.match(r"\s*- \[ \]\s*(.+)", ln)]
-            if m
+            if m and not _is_struck(m.group(1))
         ]
         shown = 0
         for sub in all_open[:5]:
-            item = f"    - [ ] {sub[:100]}"
+            item = f"    - [ ] {_plain(sub)[:100]}"
             if len(item) + 1 > budget:
                 break
             lines.append(item)
@@ -1779,18 +1789,37 @@ def handle_prompt_context(session_id: str) -> None:
     print(text, file=sys.stderr)
 
 
+def _compact_already_handled(session_id: str) -> bool:
+    """PostCompact and SessionStart(compact) both fire after a compaction.
+    The first records a marker; a second within 60s is a no-op."""
+    path = state_path(f"compact-{_safe_sid(session_id)}.mark") if _safe_sid(session_id) else None
+    if path is None or not ensure_state_dir():
+        return False
+    try:
+        if time.time() - path.stat().st_mtime < 60:
+            return True
+    except OSError:
+        pass
+    try:
+        path.write_text(str(int(time.time())))
+    except OSError:
+        pass
+    return False
+
+
 def handle_session_start_short(session_id: str) -> None:
-    """resume / compact / clear: GC, then at most the capped focus summary."""
+    """resume / compact / clear: GC, then at most the capped focus summary.
+
+    Prompt state is deliberately NOT written: the first prompt after
+    resume/compact/clear re-injects the capped summary, a safety net in case
+    the SessionStart output never reached the model.
+    """
     try:
         gc_stale_session_state()
     except Exception as e:
         print(f"[task-memory] GC warning: {e}", file=sys.stderr)
-    text, focus = focus_summary(session_id)
+    text, _focus = focus_summary(session_id)
     print(text, file=sys.stderr)
-    if session_id:
-        # The summary just injected counts as the last injection, so the first
-        # prompt after resume/compact/clear does not repeat it.
-        write_prompt_state(session_id, focus)
 
 
 def handle_session_start_capped() -> None:
@@ -1803,7 +1832,23 @@ def handle_session_start_capped() -> None:
         handle_session_start()
     finally:
         sys.stderr = real
-    print(cap_text(buf.getvalue()), file=sys.stderr)
+        print(cap_text(buf.getvalue()), file=sys.stderr)
+
+
+def _stderr_to_stdout(fn, *args) -> None:
+    """Claude Code injects only SessionStart stdout, so run a handler that
+    writes to stderr and re-emit what it wrote on stdout (always, even if it raised)."""
+    import io
+    real = sys.stderr
+    buf = io.StringIO()
+    sys.stderr = buf
+    try:
+        fn(*args)
+    finally:
+        sys.stderr = real
+        out = buf.getvalue()
+        if out:
+            sys.stdout.write(out if out.endswith("\n") else out + "\n")
 
 
 def handle_session_start() -> None:
@@ -2839,12 +2884,14 @@ def main() -> int:
         elif hook_event in ("SessionStart", "PostCompact"):
             source = str(payload.get("source", "")).lower()
             short = hook_event == "PostCompact" or source in ("resume", "compact", "clear")
-            if _always_mode():
-                handle_session_start()
+            if short and source in ("compact", "") and _compact_already_handled(session_id):
+                pass  # PostCompact + SessionStart(compact): second is a no-op
+            elif _always_mode():
+                _stderr_to_stdout(handle_session_start)
             elif short:
-                handle_session_start_short(session_id)
+                _stderr_to_stdout(handle_session_start_short, session_id)
             else:
-                handle_session_start_capped()
+                _stderr_to_stdout(handle_session_start_capped)
         elif hook_event == "PreCompact":
             handle_pre_compact(payload, session_id)
         elif hook_event == "PreToolUse":

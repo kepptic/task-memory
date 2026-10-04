@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SessionStart / PostCompact.** `source` of `resume`, `compact` or `clear`, and PostCompact, emit only the capped focus summary instead of the full bundle. `startup` is unchanged apart from the same cap.
 - Sample (13 in-progress tasks, 12 open subtasks): 622 tokens per prompt before, 202 on the first prompt and 0 afterwards.
 
+- **Fixes after review.** SessionStart/PostCompact context is now emitted on stdout (Claude Code injects only stdout; it was on stderr). The first prompt after resume/compact/clear re-injects the capped summary. When PostCompact and SessionStart(compact) both fire, the second is a no-op. Titles and subtasks are stripped of `**`/`~~` before truncation, fully struck-through subtasks are skipped, and `skill-eval.sh` builds its JSON safely.
+- **Shared focus state.** Two windows using the same `session_id` share focus and prompt state (state is keyed by session id).
+
 ### Added
 
 - `TASK_MEMORY_PROMPT_MODE=always` restores the previous behavior (uncapped, every prompt, full bundles).
