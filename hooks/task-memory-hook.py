@@ -1789,36 +1789,25 @@ def handle_prompt_context(session_id: str) -> None:
     print(text, file=sys.stderr)
 
 
-def _compact_already_handled(session_id: str) -> bool:
-    """PostCompact and SessionStart(compact) both fire after a compaction.
-    The first records a marker; a second within 60s is a no-op."""
-    path = state_path(f"compact-{_safe_sid(session_id)}.mark") if _safe_sid(session_id) else None
-    if path is None or not ensure_state_dir():
-        return False
-    try:
-        if time.time() - path.stat().st_mtime < 60:
-            return True
-    except OSError:
-        pass
-    try:
-        path.write_text(str(int(time.time())))
-    except OSError:
-        pass
-    return False
-
-
 def handle_session_start_short(session_id: str) -> None:
-    """resume / compact / clear: GC, then at most the capped focus summary.
+    """resume / compact / clear: GC, then the capped focus summary on stdout.
 
-    Prompt state is deliberately NOT written: the first prompt after
-    resume/compact/clear re-injects the capped summary, a safety net in case
-    the SessionStart output never reached the model.
+    Prompt state IS recorded here (choice (a) over unlinking it): this summary
+    reaches the model via SessionStart stdout, so the session-prompt state is
+    set to the focus just shown. Compaction fires no SessionEnd, so without
+    this a stale state from before the compaction would survive; recording it
+    keeps the state consistent and the next prompt injects again only if the
+    focus changes. PostCompact is side-effects-only (its stdout is never
+    injected), so SessionStart is the sole injection point after compaction.
     """
     try:
         gc_stale_session_state()
     except Exception as e:
-        print(f"[task-memory] GC warning: {e}", file=sys.stderr)
-    text, _focus = focus_summary(session_id)
+        # real stderr, outside the capture: must not leak into injected context
+        print(f"[task-memory] GC warning: {e}", file=sys.__stderr__)
+    text, focus = focus_summary(session_id)
+    if session_id:
+        write_prompt_state(session_id, focus)
     print(text, file=sys.stderr)
 
 
@@ -1857,7 +1846,7 @@ def handle_session_start() -> None:
     try:
         gc_stale_session_state()
     except Exception as e:
-        print(f"[task-memory] GC warning: {e}", file=sys.stderr)
+        print(f"[task-memory] GC warning: {e}", file=sys.__stderr__)
 
     print("", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
@@ -2881,14 +2870,13 @@ def main() -> int:
     try:
         if hook_event == "UserPromptSubmit":
             handle_prompt_context(session_id)
-        elif hook_event in ("SessionStart", "PostCompact"):
+        elif hook_event == "PostCompact":
+            pass  # side-effects-only event: stdout is never injected; SessionStart(compact) injects
+        elif hook_event == "SessionStart":
             source = str(payload.get("source", "")).lower()
-            short = hook_event == "PostCompact" or source in ("resume", "compact", "clear")
-            if short and source in ("compact", "") and _compact_already_handled(session_id):
-                pass  # PostCompact + SessionStart(compact): second is a no-op
-            elif _always_mode():
+            if _always_mode():
                 _stderr_to_stdout(handle_session_start)
-            elif short:
+            elif source in ("resume", "compact", "clear"):
                 _stderr_to_stdout(handle_session_start_short, session_id)
             else:
                 _stderr_to_stdout(handle_session_start_capped)

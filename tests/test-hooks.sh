@@ -2167,10 +2167,10 @@ test_lean_session_start_sources() {
         fi
     done
     out=$(lean_hook '{"hook_event_name":"PostCompact","session_id":"lean-6pc"}')
-    if [ "${#out}" -le 2000 ] && ! echo "$out" | grep -q "SESSION START"; then
-        log_pass "PostCompact: short summary (${#out} chars)"
+    if [ -z "$out" ]; then
+        log_pass "PostCompact: no stdout"
     else
-        log_fail "PostCompact not short (${#out} chars)"
+        log_fail "PostCompact wrote stdout (${#out} chars)"
     fi
     out=$(lean_hook '{"hook_event_name":"SessionStart","source":"startup","session_id":"lean-6s"}')
     assert_contains "$out" "SESSION START" "startup keeps the full bundle header"
@@ -2180,15 +2180,15 @@ test_lean_session_start_sources() {
         log_fail "startup bundle ${#out} chars over cap"
     fi
     out=$(lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"lean-6resume"}')
-    if [ "${#out}" -le 2000 ] && echo "$out" | grep -q "focus TASK-500"; then
-        log_pass "first prompt after resume re-injects the capped summary"
+    if [ -z "$out" ]; then
+        log_pass "first prompt after resume is silent (SessionStart already injected this focus)"
     else
-        log_fail "prompt after resume did not inject (${#out} chars)"
+        log_fail "prompt after resume re-injected an unchanged focus (${#out} chars)"
     fi
 }
 
 test_lean_session_start_stdout_and_inject() {
-    log_test "v3.8: SessionStart output is on stdout; first prompt after resume injects; compact dedupes"
+    log_test "v3.8: SessionStart output is on stdout; first prompt after resume is silent; compact injects"
     create_lean_fixture
     local out err
     for src in resume startup; do
@@ -2196,15 +2196,19 @@ test_lean_session_start_stdout_and_inject() {
         assert_contains "$out" "TASK-500" "$src: context is on stdout"
     done
     out=$(lean_hook '{"hook_event_name":"UserPromptSubmit","session_id":"lean-7resume"}')
-    assert_contains "$out" "focus TASK-500" "first prompt after resume injects the summary"
-    out=$(printf '%s' '{"hook_event_name":"PostCompact","session_id":"lean-7c"}' | CLAUDE_PROJECT_DIR="$LEAN_ROOT" "$HOOK_SCRIPT" 2>/dev/null)
-    assert_contains "$out" "TASK-500" "PostCompact: context is on stdout"
-    out=$(lean_hook '{"hook_event_name":"SessionStart","source":"compact","session_id":"lean-7c"}')
     if [ -z "$out" ]; then
-        log_pass "SessionStart(compact) after PostCompact is a no-op"
+        log_pass "first prompt after resume is silent (focus unchanged since SessionStart)"
     else
-        log_fail "duplicate compact injection (${#out} chars)"
+        log_fail "unchanged focus re-injected after resume (${#out} chars)"
     fi
+    out=$(printf '%s' '{"hook_event_name":"PostCompact","session_id":"lean-7c"}' | CLAUDE_PROJECT_DIR="$LEAN_ROOT" "$HOOK_SCRIPT" 2>/dev/null)
+    if [ -z "$out" ]; then
+        log_pass "PostCompact has no stdout (side-effects-only event)"
+    else
+        log_fail "PostCompact wrote stdout (${#out} chars)"
+    fi
+    out=$(lean_hook '{"hook_event_name":"SessionStart","source":"compact","session_id":"lean-7c"}')
+    assert_contains "$out" "TASK-500" "SessionStart(compact) after PostCompact injects"
 }
 
 test_lean_truncation_strips_emphasis() {
